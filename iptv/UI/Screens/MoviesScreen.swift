@@ -16,12 +16,18 @@ enum LoadState {
 }
 
 struct MoviesScreen: View {
+    let contentType: XtreamContentType
+
     @Environment(Catalog.self) private var catalog
     @Environment(ProviderStore.self) private var providerStore
 
     @State private var state: LoadState = .idle
     @State private var isPresentingSettings = false
-    
+
+    init(contentType: XtreamContentType = .vod) {
+        self.contentType = contentType
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -31,7 +37,7 @@ struct MoviesScreen: View {
                     contentForState
                 }
             }
-            .navigationTitle("Movies")
+            .navigationTitle(screenTitle)
             .sheet(isPresented: $isPresentingSettings) {
                 NavigationStack {
                     SettingsScreen()
@@ -62,10 +68,10 @@ struct MoviesScreen: View {
         switch state {
             case .idle, .fetching:
                 ProgressView()
-                    
+
             case .error(let error):
                 VStack(spacing: 12) {
-                Text(error.localizedDescription)
+                    Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
                         Task { await loadCategories(force: true) }
@@ -73,11 +79,11 @@ struct MoviesScreen: View {
                     .buttonStyle(.borderedProminent)
                 }
                 .padding()
-                    
+
             case .done:
-                if catalog.vodCategories.isEmpty {
+                if categories.isEmpty {
                     VStack(spacing: 12) {
-                        Text("No movies were returned by the provider.")
+                        Text(emptyCatalogMessage)
                         Button("Refresh") {
                             Task { await loadCategories(force: true) }
                         }
@@ -87,8 +93,8 @@ struct MoviesScreen: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading) {
-                            ForEach(catalog.vodCategories) { category in
-                                VideoTileRow(category: category)
+                            ForEach(categories) { category in
+                                VideoTileRow(category: category, contentType: contentType)
                             }
                         }
                         .padding(.bottom, 20)
@@ -104,7 +110,7 @@ struct MoviesScreen: View {
                 .font(.largeTitle)
             Text("Configure Provider")
                 .font(.title3.weight(.semibold))
-            Text("Add your provider credentials in Settings before browsing movies.")
+            Text("Add your provider credentials in Settings before browsing \(screenTitle.lowercased()).")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
@@ -120,11 +126,51 @@ struct MoviesScreen: View {
     private func loadCategories(force: Bool = false) async {
         do {
             state = .fetching
-            try await catalog.getVodCategories(force: force)
+            switch contentType {
+            case .vod:
+                try await catalog.getVodCategories(force: force)
+            case .series:
+                try await catalog.getSeriesCategories(force: force)
+            case .live:
+                break
+            }
             state = .done
         } catch {
-            logger.error("Failed to load movie categories: \(error.localizedDescription, privacy: .public)")
+            logger.error("Failed to load \(contentType.rawValue, privacy: .public) categories: \(error.localizedDescription, privacy: .public)")
             state = .error(error)
+        }
+    }
+
+    private var categories: [Category] {
+        switch contentType {
+        case .vod:
+            catalog.vodCategories
+        case .series:
+            catalog.seriesCategories
+        case .live:
+            []
+        }
+    }
+
+    private var screenTitle: String {
+        switch contentType {
+        case .vod:
+            "Movies"
+        case .series:
+            "Series"
+        case .live:
+            "Live"
+        }
+    }
+
+    private var emptyCatalogMessage: String {
+        switch contentType {
+        case .vod:
+            "No movies were returned by the provider."
+        case .series:
+            "No series were returned by the provider."
+        case .live:
+            "No channels were returned by the provider."
         }
     }
 }

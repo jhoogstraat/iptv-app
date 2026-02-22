@@ -128,6 +128,69 @@ struct XtreamStream: Decodable, Identifiable {
     }
 }
 
+struct XtreamSeriesStream: Decodable, Identifiable {
+    let id: Int
+    let name: String
+    let cover: String?
+    let rating: Double?
+    let plot: String?
+    let categoryId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id = "series_id"
+        case legacyId = "id"
+        case name
+        case title
+        case cover
+        case rating
+        case plot
+        case categoryId = "category_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        if let numericId = try? container.decode(Int.self, forKey: .id) {
+            id = numericId
+        } else if let stringId = try? container.decode(String.self, forKey: .id),
+                  let numericId = Int(stringId) {
+            id = numericId
+        } else if let numericId = try? container.decode(Int.self, forKey: .legacyId) {
+            id = numericId
+        } else if let stringId = try? container.decode(String.self, forKey: .legacyId),
+                  let numericId = Int(stringId) {
+            id = numericId
+        } else {
+            throw DecodingError.dataCorruptedError(forKey: .id, in: container, debugDescription: "Unable to decode series_id")
+        }
+
+        if let decodedName = try container.decodeIfPresent(String.self, forKey: .name), !decodedName.isEmpty {
+            name = decodedName
+        } else {
+            name = (try? container.decode(String.self, forKey: .title)) ?? "Untitled Series"
+        }
+
+        cover = try? container.decodeIfPresent(String.self, forKey: .cover)
+        plot = try? container.decodeIfPresent(String.self, forKey: .plot)
+        if let decodedCategory = try? container.decode(String.self, forKey: .categoryId) {
+            categoryId = decodedCategory
+        } else if let decodedCategory = try? container.decode(Int.self, forKey: .categoryId) {
+            categoryId = String(decodedCategory)
+        } else {
+            categoryId = nil
+        }
+
+        if let numericRating = try? container.decode(Double.self, forKey: .rating) {
+            rating = numericRating
+        } else if let stringRating = try? container.decode(String.self, forKey: .rating),
+                  let numericRating = Double(stringRating) {
+            rating = numericRating
+        } else {
+            rating = nil
+        }
+    }
+}
+
 // - MARK: Vod
 struct XtreamVod: Decodable, Identifiable {
     let info: XtreamVodInfo

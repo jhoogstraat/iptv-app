@@ -45,10 +45,7 @@ struct ContentView: View {
                 .customizationID(Tabs.movies.customizationID)
                 
                 Tab(Tabs.series.name, systemImage: Tabs.series.symbol, value: Tabs.series) {
-                    ScopedPlaceholderView(
-                        title: "Series Is Out of Scope",
-                        message: "Series browsing is not included in the current MVP release."
-                    )
+                    MoviesScreen(contentType: .series)
                 }
                 .customizationID(Tabs.series.customizationID)
                 

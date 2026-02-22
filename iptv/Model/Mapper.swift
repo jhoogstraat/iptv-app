@@ -25,6 +25,18 @@ extension Video {
             rating: xtream.rating
         )
     }
+
+    convenience init(from xtream: XtreamSeriesStream) {
+        self.init(
+            id: xtream.id,
+            name: xtream.name,
+            containerExtension: "mp4",
+            contentType: XtreamContentType.series.rawValue,
+            coverImageURL: xtream.cover,
+            tmdbId: nil,
+            rating: xtream.rating
+        )
+    }
 }
 
 extension VideoInfo {

@@ -11,7 +11,8 @@ Remove hardcoded provider credentials and introduce user configuration.
 2. Implemented: protocol-based player backends (`VLC` primary, `AV` secondary), backend factory selection, async event stream, runtime fallback guardrails, and timeline/seek support.
 3. Implemented: stable player shell with swappable renderer container, Movie detail bound to Xtream metadata, scoped non-MVP placeholders, and logging for provider/network/playback paths.
 4. Implemented: unit tests for backend selection/fallback, player delegation/progress, provider persistence split, mapper edge cases; UI tests for missing-config CTA and Settings entry.
-5. Remaining risk: full build/test verification is blocked in this environment by offline SwiftPM dependency fetch and CoreSimulator service mismatch.
+5. Implemented: VLCKit v4 migration (`VLCKit` module/imports and project framework references), plus compatibility fixes required by updated VLCKit APIs and current Swift actor-isolation checks.
+6. Current risk: macOS app build now succeeds, but iOS/tvOS build+runtime verification was not re-executed in this pass.
 
 ## Architecture Decisions (Locked)
 1. `PlaybackBackend` is UI-agnostic and must not return SwiftUI views (`AnyView` is disallowed).
@@ -72,9 +73,28 @@ Remove hardcoded provider credentials and introduce user configuration.
 7. [x] Add logging for backend selection/fallback and provider/network failures.
 
 ## Verification Notes (Updated February 22, 2026)
-1. Attempted local macOS build via `xcodebuild -project iptv.xcodeproj -scheme iptv -destination 'platform=macOS' -derivedDataPath /tmp/iptv-derived build`.
-2. Build could not complete in sandbox due to network restriction fetching `swift-collections` (`Could not resolve host: github.com`).
-3. Environment also reports CoreSimulator framework mismatch (`1051.9.4` vs required `1051.17.7`), limiting simulator-based verification.
+1. Ran local macOS build: `xcodebuild -project iptv.xcodeproj -scheme iptv -destination 'platform=macOS' -derivedDataPath /tmp/iptv-derived build`.
+2. Result: `BUILD SUCCEEDED` after VLCKit v4 migration and follow-up compatibility fixes.
+3. Fixes applied during verification included:
+   - `PlaybackBackendFactory`/initializer actor-isolation adjustments.
+   - VLCKit v4 delegate/state/time API updates in `PlaybackBackends.swift`.
+   - `OSLog` imports in logger-using files under current toolchain defaults.
+   - macOS-specific SwiftUI fixes in `MovieDetailScreen`.
+4. Remaining non-blocking warnings exist (mainly actor-isolation warnings in backend closure callbacks and a redundant VLC downcast warning).
+5. iOS/tvOS build+runtime verification remains pending.
+6. Series browsing state:
+   - Dedicated `XtreamSeriesStream` decoding is in place for series items.
+   - `XtreamService.getSeries(...)` and `Catalog.getSeriesStreams(...)` are the active series data path.
+   - Shared Movies/Series UI remains in place, with series categories loading through the series mapping flow.
+
+## Next Actions Checklist
+1. [ ] Run iOS build verification on simulator: `xcodebuild -project iptv.xcodeproj -scheme iptv -destination 'platform=iOS Simulator,name=iPhone 16' build`.
+2. [ ] Run tvOS build verification with linked VLCKit tvOS framework and confirm playback screen compiles/renders.
+3. [ ] Run macOS tests: `xcodebuild -project iptv.xcodeproj -scheme iptv -destination 'platform=macOS' test`.
+4. [ ] Run iOS tests on simulator after iOS build is green.
+5. [ ] Address remaining non-blocking warnings in `PlaybackBackends.swift` and `VLCKitContentView.swift`.
+6. [ ] Confirm runtime fallback behavior (VLC -> AV) manually on macOS and iOS.
+7. [ ] Document final local VLCKit binary locations (iOS/macOS/tvOS) in PR notes.
 
 ## Tests and Acceptance Criteria
 1. Unit: backend factory chooses VLC first, AV fallback when unavailable/unsupported.

@@ -22,6 +22,7 @@ enum CatalogError: LocalizedError {
 @Observable
 class Catalog {
     var vodCategories: [Category] = []
+    var seriesCategories: [Category] = []
     
     var vodCatalog: [Category: [Video]] = [:]
     var seriesCatalog: [Category: [Video]] = [:]
@@ -45,6 +46,7 @@ class Catalog {
 
     func reset() {
         vodCategories = []
+        seriesCategories = []
         vodCatalog = [:]
         seriesCatalog = [:]
         liveCatalog = [:]
@@ -74,12 +76,26 @@ class Catalog {
         let dto = try await self.service().getCategories(of: .vod)
         self.vodCategories = dto.map(Category.init)
     }
+
+    func getSeriesCategories(force: Bool = false) async throws {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        guard force || seriesCategories.isEmpty else { return }
+        let dto = try await self.service().getCategories(of: .series)
+        self.seriesCategories = dto.map(Category.init)
+    }
     
     func getVodStreams(in category: Category, force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         guard force || vodCatalog[category] == nil else { return }
         let dto = try await self.service().getStreams(of: .vod, in: category.id)
         self.vodCatalog[category] = dto.map(Video.init)
+    }
+
+    func getSeriesStreams(in category: Category, force: Bool = false) async throws {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        guard force || seriesCatalog[category] == nil else { return }
+        let dto = try await self.service().getSeries(in: category.id)
+        self.seriesCatalog[category] = dto.map(Video.init)
     }
     
     func getVodInfo(_ video: Video, force: Bool = false) async throws {

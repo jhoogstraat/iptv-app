@@ -38,6 +38,13 @@ struct XtreamService {
         let data = try await client.load(resource)
         return data
     }
+
+    func getSeries(in category: String? = nil) async throws -> [XtreamSeriesStream] {
+        let query = [URLQueryItem(name: "action", value: "get_series"), URLQueryItem(name: "category_id", value: category)]
+        let resource = Resource<[XtreamSeriesStream]>(url: baseURL, method: .get(auth + query))
+        let data = try await client.load(resource)
+        return data
+    }
     
     func getVodInfo(of id: String) async throws -> XtreamVod {
         let query = [URLQueryItem(name: "action", value: "get_vod_info"), URLQueryItem(name: "vod_id", value: id)]
