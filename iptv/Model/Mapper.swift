@@ -22,7 +22,8 @@ extension Video {
             contentType: xtream.type,
             coverImageURL: xtream.streamIcon,
             tmdbId: nil,
-            rating: xtream.rating
+            rating: xtream.rating,
+            addedAtRaw: xtream.added
         )
     }
 
@@ -34,7 +35,8 @@ extension Video {
             contentType: XtreamContentType.series.rawValue,
             coverImageURL: xtream.cover,
             tmdbId: nil,
-            rating: xtream.rating
+            rating: xtream.rating,
+            addedAtRaw: nil
         )
     }
 
@@ -46,7 +48,8 @@ extension Video {
             contentType: cached.contentType,
             coverImageURL: cached.coverImageURL,
             tmdbId: cached.tmdbId,
-            rating: cached.rating
+            rating: cached.rating,
+            addedAtRaw: cached.added
         )
     }
 }
@@ -60,7 +63,8 @@ extension CachedVideoDTO {
             contentType: xtream.type,
             coverImageURL: xtream.streamIcon,
             tmdbId: nil,
-            rating: xtream.rating
+            rating: xtream.rating,
+            added: xtream.added
         )
     }
 
@@ -72,7 +76,8 @@ extension CachedVideoDTO {
             contentType: XtreamContentType.series.rawValue,
             coverImageURL: xtream.cover,
             tmdbId: nil,
-            rating: xtream.rating
+            rating: xtream.rating,
+            added: nil
         )
     }
 }

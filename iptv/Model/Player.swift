@@ -49,12 +49,21 @@ final class Player {
     }
 
     private let backendFactory: PlaybackBackendFactory
+    private let watchActivityStore: any WatchActivityStoring
+    private let providerFingerprintProvider: @MainActor () -> String?
     private var backend: (any PlaybackBackend)?
     private var eventTask: Task<Void, Never>?
     private var didFallbackForCurrentItem = false
+    private var lastPersistedProgressByVideoKey: [String: (time: Double, fraction: Double)] = [:]
 
-    init(backendFactory: PlaybackBackendFactory? = nil) {
+    init(
+        backendFactory: PlaybackBackendFactory? = nil,
+        watchActivityStore: any WatchActivityStoring = DiskWatchActivityStore.shared,
+        providerFingerprintProvider: @escaping @MainActor () -> String? = { nil }
+    ) {
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()
+        self.watchActivityStore = watchActivityStore
+        self.providerFingerprintProvider = providerFingerprintProvider
     }
 
     var vlcRenderer: VLCPlayerReference? {
@@ -77,6 +86,8 @@ final class Player {
         duration = nil
         playbackState = .loading
         self.presentation = presentation
+        let key = makePersistenceKey(for: video)
+        lastPersistedProgressByVideoKey[key] = nil
 
         do {
             try activateBackend(for: video, url: url)
@@ -108,6 +119,7 @@ final class Player {
         errorMessage = nil
         playbackState = .idle
         presentation = .inline
+        lastPersistedProgressByVideoKey.removeAll()
     }
 
     func close() {
@@ -196,12 +208,14 @@ final class Player {
             if let duration, duration > 0 {
                 self.duration = duration
             }
+            persistProgressIfNeeded()
 
         case .ended:
             isPlaying = false
             isBuffering = false
             isPlaybackComplete = true
             playbackState = .paused
+            markCurrentItemCompleted()
 
         case .failed(let error):
             processFailure(error, from: backendID)
@@ -240,6 +254,64 @@ final class Player {
         errorMessage = message
         playbackState = .failed(message)
         logger.error("Terminal playback failure: \(message, privacy: .public)")
+    }
+
+    private func persistProgressIfNeeded() {
+        guard let currentItem else { return }
+        guard let providerFingerprint = providerFingerprintProvider() else { return }
+
+        let key = makePersistenceKey(for: currentItem)
+        let fraction = progressFraction
+
+        if let persisted = lastPersistedProgressByVideoKey[key],
+           abs(currentTime - persisted.time) < 10,
+           abs(fraction - persisted.fraction) < 0.05 {
+            return
+        }
+
+        lastPersistedProgressByVideoKey[key] = (currentTime, fraction)
+
+        let input = WatchActivityInput(
+            videoID: currentItem.id,
+            contentType: currentItem.contentType,
+            title: currentItem.name,
+            coverImageURL: currentItem.coverImageURL,
+            containerExtension: currentItem.containerExtension,
+            rating: currentItem.rating
+        )
+
+        let currentTime = self.currentTime
+        let duration = self.duration
+        Task(priority: .utility) {
+            await watchActivityStore.recordProgress(
+                input: input,
+                providerFingerprint: providerFingerprint,
+                currentTime: currentTime,
+                duration: duration
+            )
+        }
+    }
+
+    private func markCurrentItemCompleted() {
+        guard let currentItem else { return }
+        guard let providerFingerprint = providerFingerprintProvider() else { return }
+
+        let input = WatchActivityInput(
+            videoID: currentItem.id,
+            contentType: currentItem.contentType,
+            title: currentItem.name,
+            coverImageURL: currentItem.coverImageURL,
+            containerExtension: currentItem.containerExtension,
+            rating: currentItem.rating
+        )
+
+        Task(priority: .utility) {
+            await watchActivityStore.markCompleted(input: input, providerFingerprint: providerFingerprint)
+        }
+    }
+
+    private func makePersistenceKey(for video: Video) -> String {
+        "\(video.contentType):\(video.id)"
     }
 
     private static func formatTime(_ rawSeconds: Double) -> String {

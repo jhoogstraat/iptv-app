@@ -57,9 +57,16 @@ struct IPTVApp: App {
             let modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
 //            try Importer.importVideoMetadata(into: modelContainer.mainContext)
             let providerStore = ProviderStore()
+            let watchActivityStore = DiskWatchActivityStore.shared
             self._providerStore = State(initialValue: providerStore)
             self._catalog = State(initialValue: Catalog(providerStore: providerStore, modelContainer: modelContainer))
-            self._player = State(initialValue: Player())
+            self._player = State(initialValue: Player(
+                watchActivityStore: watchActivityStore,
+                providerFingerprintProvider: {
+                    guard let config = try? providerStore.configuration() else { return nil }
+                    return ProviderCacheFingerprint.make(from: config)
+                }
+            ))
             self.modelContainer = modelContainer
         } catch {
             fatalError(error.localizedDescription)

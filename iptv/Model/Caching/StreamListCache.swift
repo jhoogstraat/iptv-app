@@ -31,6 +31,27 @@ struct CachedVideoDTO: Codable, Hashable, Sendable {
     let coverImageURL: String?
     let tmdbId: String?
     let rating: Double?
+    let added: String?
+
+    init(
+        id: Int,
+        name: String,
+        containerExtension: String,
+        contentType: String,
+        coverImageURL: String?,
+        tmdbId: String?,
+        rating: Double?,
+        added: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.containerExtension = containerExtension
+        self.contentType = contentType
+        self.coverImageURL = coverImageURL
+        self.tmdbId = tmdbId
+        self.rating = rating
+        self.added = added
+    }
 }
 
 struct StreamListCacheEntry: Codable, Sendable {

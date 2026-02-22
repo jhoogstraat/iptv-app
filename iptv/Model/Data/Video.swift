@@ -22,6 +22,7 @@ final class Video: Identifiable {
     var coverImageURL: String?
     var tmdbId: String?
     var rating: Double?
+    var addedAtRaw: String?
     var startTime: CMTimeValue
     var isHero: Bool
     var isFeatured: Bool
@@ -36,6 +37,7 @@ final class Video: Identifiable {
         startTime: CMTimeValue = 0,
         tmdbId: String?,
         rating: Double?,
+        addedAtRaw: String? = nil,
         isHero: Bool = false,
         isFeatured: Bool = false
     ) {
@@ -48,6 +50,7 @@ final class Video: Identifiable {
         self.startTime = startTime
         self.tmdbId = tmdbId
         self.rating = rating
+        self.addedAtRaw = addedAtRaw
         self.isHero = isHero
         self.isFeatured = isFeatured
     }
@@ -69,5 +72,16 @@ extension Video {
         }
 
         return nil
+    }
+
+    var xtreamContentType: XtreamContentType {
+        switch contentType {
+        case XtreamContentType.series.rawValue:
+            .series
+        case XtreamContentType.live.rawValue:
+            .live
+        default:
+            .vod
+        }
     }
 }
