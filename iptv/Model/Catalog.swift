@@ -19,23 +19,33 @@ enum CatalogError: LocalizedError {
     }
 }
 
+@MainActor
 @Observable
-class Catalog {
+final class Catalog {
     var vodCategories: [Category] = []
     var seriesCategories: [Category] = []
-    
+
     var vodCatalog: [Category: [Video]] = [:]
     var seriesCatalog: [Category: [Video]] = [:]
     var liveCatalog: [Category: [Video]] = [:]
-    
+
     var vodInfo: [Video: VideoInfo] = [:]
-    
+
     private let providerStore: ProviderStore
+    private let cacheManager: CatalogCacheManager
+    private let imagePrefetcher: ImagePrefetching
 
     private var providerRevision: Int
 
-    init(providerStore: ProviderStore, modelContainer: ModelContainer) {
+    init(
+        providerStore: ProviderStore,
+        modelContainer: ModelContainer,
+        cacheManager: CatalogCacheManager = CatalogCacheManager(),
+        imagePrefetcher: ImagePrefetching = NoopImagePrefetcher()
+    ) {
         self.providerStore = providerStore
+        self.cacheManager = cacheManager
+        self.imagePrefetcher = imagePrefetcher
         _ = modelContainer
         self.providerRevision = providerStore.revision
     }
@@ -51,6 +61,13 @@ class Catalog {
         seriesCatalog = [:]
         liveCatalog = [:]
         vodInfo = [:]
+        Task(priority: .utility) {
+            await cacheManager.clearMemoryCache()
+        }
+    }
+
+    func prefetchImages(urls: [URL]) async {
+        await imagePrefetcher.prefetch(urls: urls)
     }
 
     private func ensureCurrentProvider() {
@@ -69,7 +86,17 @@ class Catalog {
             password: config.password
         )
     }
-    
+
+    private func cacheKey(for category: Category, contentType: XtreamContentType) throws -> StreamListCacheKey {
+        let config = try providerStore.requiredConfiguration()
+        return StreamListCacheKey(
+            providerFingerprint: ProviderCacheFingerprint.make(from: config),
+            contentType: contentType,
+            categoryID: category.id,
+            pageToken: nil
+        )
+    }
+
     func getVodCategories(force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         guard force || vodCategories.isEmpty else { return }
@@ -83,34 +110,49 @@ class Catalog {
         let dto = try await self.service().getCategories(of: .series)
         self.seriesCategories = dto.map(Category.init)
     }
-    
+
     func getVodStreams(in category: Category, force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
-        guard force || vodCatalog[category] == nil else { return }
-        let dto = try await self.service().getStreams(of: .vod, in: category.id)
-        self.vodCatalog[category] = dto.map(Video.init)
+
+        let service = try self.service()
+        let key = try cacheKey(for: category, contentType: .vod)
+        let categoryID = category.id
+
+        let cachedVideos = try await cacheManager.loadStreamList(for: key, force: force) {
+            let streams = try await service.getStreams(of: .vod, in: categoryID)
+            return streams.map(CachedVideoDTO.init)
+        }
+
+        self.vodCatalog[category] = cachedVideos.map(Video.init)
     }
 
     func getSeriesStreams(in category: Category, force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
-        guard force || seriesCatalog[category] == nil else { return }
+
         let service = try self.service()
-        var dto = try await service.getSeries(in: category.id)
-        if dto.isEmpty {
-            let allSeries = try await service.getSeries()
-            let filtered = allSeries.filter { $0.belongs(to: category.id) }
-            dto = filtered.isEmpty ? allSeries : filtered
+        let key = try cacheKey(for: category, contentType: .series)
+        let categoryID = category.id
+
+        let cachedVideos = try await cacheManager.loadStreamList(for: key, force: force) {
+            var series = try await service.getSeries(in: categoryID)
+            if series.isEmpty {
+                let allSeries = try await service.getSeries()
+                let filtered = allSeries.filter { $0.belongs(to: categoryID) }
+                series = filtered.isEmpty ? allSeries : filtered
+            }
+            return series.map(CachedVideoDTO.init)
         }
-        self.seriesCatalog[category] = dto.map(Video.init)
+
+        self.seriesCatalog[category] = cachedVideos.map(Video.init)
     }
-    
+
     func getVodInfo(_ video: Video, force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         guard force || vodInfo[video] == nil else { return }
         let dto = try await self.service().getVodInfo(of: String(video.id))
         self.vodInfo[video] = VideoInfo(from: dto)
     }
-    
+
     func resolveURL(for video: Video) throws -> URL {
         let service = try self.service()
         return service.getPlayURL(for: video.id, type: video.contentType, containerExtension: video.containerExtension)

@@ -23,6 +23,7 @@ struct MoviesScreen: View {
 
     @State private var state: LoadState = .idle
     @State private var isPresentingSettings = false
+    @State private var prefetchCoordinator = StreamPrefetchCoordinator()
 
     init(contentType: XtreamContentType = .vod) {
         self.contentType = contentType
@@ -55,11 +56,15 @@ struct MoviesScreen: View {
         .task(id: providerStore.revision) {
             guard providerStore.hasConfiguration else {
                 state = .idle
+                prefetchCoordinator.stop()
                 catalog.reset()
                 return
             }
 
             await loadCategories(force: true)
+        }
+        .onDisappear {
+            prefetchCoordinator.stop()
         }
     }
 
@@ -135,6 +140,7 @@ struct MoviesScreen: View {
                 break
             }
             state = .done
+            prefetchCoordinator.start(categories: categories, contentType: contentType, catalog: catalog)
         } catch {
             logger.error("Failed to load \(contentType.rawValue, privacy: .public) categories: \(error.localizedDescription, privacy: .public)")
             state = .error(error)

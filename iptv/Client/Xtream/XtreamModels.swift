@@ -78,7 +78,7 @@ struct OptionalStringConvertibleDecode<T: LosslessStringConvertible & Decodable>
     }
 }
 
-enum XtreamContentType: String {
+enum XtreamContentType: String, Codable, Sendable {
     case live
     case vod
     case series

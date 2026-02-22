@@ -59,7 +59,7 @@ struct Resource<T: Decodable> {
     var method: HTTPMethod = .get([])
 }
 
-struct HTTPClient {
+struct HTTPClient: Sendable {
     static let shared = HTTPClient()
     private let session: URLSession
     
@@ -85,7 +85,15 @@ struct HTTPClient {
                 break
         }
         
-        let (data, response) = try await session.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
                 throw NetworkError.invalidResponse
@@ -104,4 +112,3 @@ struct HTTPClient {
     }
     
 }
-

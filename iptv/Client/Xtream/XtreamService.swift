@@ -8,7 +8,7 @@
 import Foundation
 import os
 
-struct XtreamService {
+struct XtreamService: Sendable {
     let client: HTTPClient
     
     let baseURL: URL

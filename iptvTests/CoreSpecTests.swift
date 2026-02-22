@@ -112,7 +112,7 @@ struct CoreSpecTests {
         #expect(keychain.values["provider.username"] == "demo-user")
         #expect(keychain.values["provider.password"] == "demo-pass")
 
-        let config = try #require(store.configuration())
+        let config = try #require(try store.configuration())
         #expect(config.apiURL.absoluteString == "https://example.com/player_api.php")
         #expect(config.username == "demo-user")
     }
@@ -146,11 +146,107 @@ struct CoreSpecTests {
         #expect(video.containerExtension == "mp4")
     }
 
+    @Test
+    func cacheManagerDeduplicatesInFlightLoads() async throws {
+        let store = InMemoryStreamListCacheStore()
+        let manager = CatalogCacheManager(diskStore: store, ttl: 600)
+        let key = makeCacheKey()
+        let invocationCounter = InvocationCounter()
+
+        async let first: [CachedVideoDTO] = try manager.loadStreamList(for: key) {
+            await invocationCounter.increment()
+            try await Task.sleep(for: .milliseconds(150))
+            return [makeCachedVideo(id: 1)]
+        }
+        async let second: [CachedVideoDTO] = try manager.loadStreamList(for: key) {
+            await invocationCounter.increment()
+            return [makeCachedVideo(id: 2)]
+        }
+
+        let firstResult = try await first
+        let secondResult = try await second
+
+        #expect(firstResult == secondResult)
+        #expect(await invocationCounter.value == 1)
+    }
+
+    @Test
+    func cacheManagerCompletesBackgroundLoadAfterCallerCancellation() async throws {
+        let store = InMemoryStreamListCacheStore()
+        let manager = CatalogCacheManager(diskStore: store, ttl: 600)
+        let key = makeCacheKey()
+
+        let firstLoad = Task {
+            try await manager.loadStreamList(for: key) {
+                try await Task.sleep(for: .milliseconds(200))
+                return [makeCachedVideo(id: 42)]
+            }
+        }
+
+        try? await Task.sleep(for: .milliseconds(30))
+        firstLoad.cancel()
+        _ = try? await firstLoad.value
+
+        try? await Task.sleep(for: .milliseconds(260))
+
+        let invocationCounter = InvocationCounter()
+        let result = try await manager.loadStreamList(for: key) {
+            await invocationCounter.increment()
+            throw MockError.failed
+        }
+
+        #expect(result.count == 1)
+        #expect(result.first?.id == 42)
+        #expect(await invocationCounter.value == 0)
+    }
+
+    @Test
+    func cacheManagerCachesEmptyCategoryResult() async throws {
+        let store = InMemoryStreamListCacheStore()
+        let manager = CatalogCacheManager(diskStore: store, ttl: 600)
+        let key = makeCacheKey()
+
+        let firstResult = try await manager.loadStreamList(for: key) {
+            []
+        }
+
+        let invocationCounter = InvocationCounter()
+        let secondResult = try await manager.loadStreamList(for: key) {
+            await invocationCounter.increment()
+            throw MockError.failed
+        }
+
+        #expect(firstResult.isEmpty)
+        #expect(secondResult.isEmpty)
+        #expect(await invocationCounter.value == 0)
+    }
+
     private func makeVideo(containerExtension: String) -> Video {
         Video(
             id: 1,
             name: "Test Video",
             containerExtension: containerExtension,
+            contentType: "movie",
+            coverImageURL: nil,
+            tmdbId: nil,
+            rating: nil
+        )
+    }
+
+    private func makeCacheKey() -> StreamListCacheKey {
+        StreamListCacheKey(
+            providerFingerprint: "provider-fingerprint",
+            contentType: .vod,
+            categoryID: "1",
+            pageToken: nil
+        )
+    }
+
+    nonisolated private func makeCachedVideo(id: Int) -> CachedVideoDTO {
+        CachedVideoDTO(
+            id: id,
+            name: "Cached \(id)",
+            containerExtension: "mp4",
             contentType: "movie",
             coverImageURL: nil,
             tmdbId: nil,
@@ -243,6 +339,32 @@ private final class InMemoryKeychainStore: KeychainStoring {
 
     func delete(_ key: String) throws {
         values.removeValue(forKey: key)
+    }
+}
+
+private actor InMemoryStreamListCacheStore: StreamListCacheStore {
+    private var storage: [String: StreamListCacheEntry] = [:]
+
+    func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry? {
+        let rawKey = await key.rawKey
+        return storage[rawKey]
+    }
+
+    func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws {
+        let rawKey = await key.rawKey
+        storage[rawKey] = entry
+    }
+
+    func pruneCacheIfNeeded() async throws { }
+
+    func removeAll(for providerFingerprint: String) async throws { storage.removeAll() }
+}
+
+private actor InvocationCounter {
+    private(set) var value = 0
+
+    func increment() {
+        value += 1
     }
 }
 

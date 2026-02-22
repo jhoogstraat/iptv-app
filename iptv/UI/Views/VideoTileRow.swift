@@ -62,10 +62,11 @@ struct VideoTileRow: View {
             }
             .frame(height: 9/6 * 170 + 20)
         } header: {
-            Button {
-                Task { await fetchVideos(force: true) }
-            } label: {
-                Text(category.name)
+            HStack {
+                Text(category.name.uppercased())
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
             }
         }
         .task(id: providerStore.revision) {
@@ -112,6 +113,10 @@ struct VideoTileRow: View {
             case .live:
                 break
             }
+        } catch is CancellationError {
+            return
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            return
         } catch {
             logger.error("Failed to load \(contentType.rawValue, privacy: .public) category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
             self.error = error

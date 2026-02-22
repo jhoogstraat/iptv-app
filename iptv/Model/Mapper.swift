@@ -37,6 +37,44 @@ extension Video {
             rating: xtream.rating
         )
     }
+
+    convenience init(from cached: CachedVideoDTO) {
+        self.init(
+            id: cached.id,
+            name: cached.name,
+            containerExtension: cached.containerExtension,
+            contentType: cached.contentType,
+            coverImageURL: cached.coverImageURL,
+            tmdbId: cached.tmdbId,
+            rating: cached.rating
+        )
+    }
+}
+
+extension CachedVideoDTO {
+    init(from xtream: XtreamStream) {
+        self.init(
+            id: xtream.id,
+            name: xtream.name,
+            containerExtension: xtream.containerExtension ?? "mp4",
+            contentType: xtream.type,
+            coverImageURL: xtream.streamIcon,
+            tmdbId: nil,
+            rating: xtream.rating
+        )
+    }
+
+    init(from xtream: XtreamSeriesStream) {
+        self.init(
+            id: xtream.id,
+            name: xtream.name,
+            containerExtension: "mp4",
+            contentType: XtreamContentType.series.rawValue,
+            coverImageURL: xtream.cover,
+            tmdbId: nil,
+            rating: xtream.rating
+        )
+    }
 }
 
 extension VideoInfo {

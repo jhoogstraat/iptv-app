@@ -12,7 +12,8 @@ Remove hardcoded provider credentials and introduce user configuration.
 3. Implemented: stable player shell with swappable renderer container, Movie detail bound to Xtream metadata, scoped non-MVP placeholders, and logging for provider/network/playback paths.
 4. Implemented: unit tests for backend selection/fallback, player delegation/progress, provider persistence split, mapper edge cases; UI tests for missing-config CTA and Settings entry.
 5. Implemented: VLCKit v4 migration (`VLCKit` module/imports and project framework references), plus compatibility fixes required by updated VLCKit APIs and current Swift actor-isolation checks.
-6. Current risk: macOS app build now succeeds, but iOS/tvOS build+runtime verification was not re-executed in this pass.
+6. Implemented: Movies and Series continue to use the shared browsing surface (`MoviesScreen` + `VideoTileRow`) with section-style category headers and borderless poster rendering.
+7. Implemented: category stream caching with actor-isolated in-flight deduplication, cancellation-tolerant background fetch handoff, disk persistence with size-bounded LRU pruning, and category-window prefetching.
 
 ## Architecture Decisions (Locked)
 1. `PlaybackBackend` is UI-agnostic and must not return SwiftUI views (`AnyView` is disallowed).
@@ -74,14 +75,13 @@ Remove hardcoded provider credentials and introduce user configuration.
 
 ## Verification Notes (Updated February 22, 2026)
 1. Ran local macOS build: `xcodebuild -project iptv.xcodeproj -scheme iptv -destination 'platform=macOS' -derivedDataPath /tmp/iptv-derived build`.
-2. Result: `BUILD SUCCEEDED` after VLCKit v4 migration and follow-up compatibility fixes.
-3. Fixes applied during verification included:
-   - `PlaybackBackendFactory`/initializer actor-isolation adjustments.
-   - VLCKit v4 delegate/state/time API updates in `PlaybackBackends.swift`.
-   - `OSLog` imports in logger-using files under current toolchain defaults.
-   - macOS-specific SwiftUI fixes in `MovieDetailScreen`.
-4. Remaining non-blocking warnings exist (mainly actor-isolation warnings in backend closure callbacks and a redundant VLC downcast warning).
-5. iOS/tvOS build+runtime verification remains pending.
+2. Result: `BUILD SUCCEEDED`.
+3. Ran local macOS unit tests for core coverage: `xcodebuild -project iptv.xcodeproj -scheme iptv -destination 'platform=macOS' -only-testing:iptvTests test`.
+4. Result: `TEST SUCCEEDED`.
+5. Added and validated cache-focused unit coverage for:
+   - in-flight stream request deduplication,
+   - cancellation-safe background cache population,
+   - empty-category result caching.
 6. Series browsing state:
    - Dedicated `XtreamSeriesStream` decoding is in place for series items.
    - `XtreamService.getSeries(...)` and `Catalog.getSeriesStreams(...)` are the active series data path.
