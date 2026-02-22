@@ -15,6 +15,21 @@ Remove hardcoded provider credentials and introduce user configuration.
 6. Implemented: Movies and Series continue to use the shared browsing surface (`MoviesScreen` + `VideoTileRow`) with section-style category headers and borderless poster rendering.
 7. Implemented: category stream caching with actor-isolated in-flight deduplication, cancellation-tolerant background fetch handoff, disk persistence with size-bounded LRU pruning, and category-window prefetching.
 
+## Session Handoff (Updated February 22, 2026)
+1. Latest integration commit: `b39d336` (`feat(catalog): add cached stream loading and prefetch pipeline`).
+2. Movies and Series are intentionally unified on the same screen/view composition path:
+   - `MoviesScreen(contentType: .vod/.series)` for both tabs,
+   - `VideoTileRow` for category title + horizontal item list rendering.
+3. Stream list loading now routes through shared cache orchestration in `CatalogCacheManager`:
+   - actor-isolated memory cache,
+   - in-flight request deduplication,
+   - stale-cache fallback,
+   - caller-cancellation-safe background fetch completion.
+4. Persistent stream cache is active in `DiskStreamListCacheStore` with size-bounded pruning and LRU-style eviction by file modification date.
+5. Background warmup is active via `StreamPrefetchCoordinator` (windowed + bounded concurrency) and is started from `MoviesScreen` after categories load.
+6. Category load cancellation is treated as non-failure at UI level (`HTTPClient` cancellation normalization + `VideoTileRow` cancellation filtering).
+7. Cache-focused tests are in `CoreSpecTests` and currently cover in-flight dedupe, cancellation handoff, and empty category caching.
+
 ## Architecture Decisions (Locked)
 1. `PlaybackBackend` is UI-agnostic and must not return SwiftUI views (`AnyView` is disallowed).
 2. The player UI is a single stable shell (`PlayerView`) shared across all backends.
