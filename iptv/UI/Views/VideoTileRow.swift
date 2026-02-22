@@ -48,6 +48,7 @@ struct VideoTileRow: View {
                                             VideoTile(video: video)
                                                 .frame(width: 170, height: 9/6 * 170)
                                         }
+                                        .buttonStyle(.plain)
                                     }
                                 } else {
                                     Text("No streams in this category")

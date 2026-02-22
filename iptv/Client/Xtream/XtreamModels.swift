@@ -135,6 +135,7 @@ struct XtreamSeriesStream: Decodable, Identifiable {
     let rating: Double?
     let plot: String?
     let categoryId: String?
+    let categoryIds: [String]
 
     enum CodingKeys: String, CodingKey {
         case id = "series_id"
@@ -145,6 +146,7 @@ struct XtreamSeriesStream: Decodable, Identifiable {
         case rating
         case plot
         case categoryId = "category_id"
+        case categoryIds = "category_ids"
     }
 
     init(from decoder: Decoder) throws {
@@ -180,6 +182,25 @@ struct XtreamSeriesStream: Decodable, Identifiable {
             categoryId = nil
         }
 
+        var decodedCategoryIds = Set<String>()
+        if let categoryId {
+            decodedCategoryIds.insert(categoryId)
+        }
+        if let ids = try? container.decode([Int].self, forKey: .categoryIds) {
+            ids.map(String.init).forEach { decodedCategoryIds.insert($0) }
+        } else if let ids = try? container.decode([String].self, forKey: .categoryIds) {
+            ids
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .forEach { decodedCategoryIds.insert($0) }
+        } else if let ids = try? container.decode(Int.self, forKey: .categoryIds) {
+            decodedCategoryIds.insert(String(ids))
+        } else if let idsString = try? container.decode(String.self, forKey: .categoryIds) {
+            let ids = idsString.split(whereSeparator: { !$0.isNumber })
+            ids.map(String.init).forEach { decodedCategoryIds.insert($0) }
+        }
+        categoryIds = Array(decodedCategoryIds)
+
         if let numericRating = try? container.decode(Double.self, forKey: .rating) {
             rating = numericRating
         } else if let stringRating = try? container.decode(String.self, forKey: .rating),
@@ -188,6 +209,10 @@ struct XtreamSeriesStream: Decodable, Identifiable {
         } else {
             rating = nil
         }
+    }
+
+    func belongs(to categoryID: String) -> Bool {
+        categoryIds.contains(categoryID)
     }
 }
 

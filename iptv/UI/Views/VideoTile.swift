@@ -14,8 +14,6 @@ struct VideoTile: View {
         AsyncImage(url: URL(string: video.coverImageURL ?? "")) { phase in
             if let image = phase.image {
                 ZStack(alignment: .top) {
-//                    RoundedRectangle(cornerRadius: 12)
-//                        .fill()
                     image.resizable().scaledToFill()
                         .clipShape(.rect(cornerRadius: 8))
                     HStack {
@@ -42,8 +40,6 @@ struct VideoTile: View {
                                 .clipShape(.rect(cornerRadius: 8))
                         }
                     }.padding(6)
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(.gray.opacity(0.1), lineWidth: 1.3, antialiased: true)
                 }
             } else if phase.error != nil {
                 VStack {
@@ -76,9 +72,12 @@ struct VideoTile: View {
                     Spacer()
                 }
                 .padding(6)
-                .background(Color.gray.brightness(-0.4).clipShape(.rect(cornerRadius: 8)))
+                .background(.clear)
             } else {
-                Color.gray.brightness(-0.4)
+                ZStack {
+                    Color.clear
+                    ProgressView()
+                }
             }
         }
     }
@@ -93,4 +92,3 @@ struct VideoTile: View {
     VideoTile(video: .init(id: 0, name: "EN - Title of the movie", containerExtension: "mkv", contentType: "movie", coverImageURL: "error_url", tmdbId: nil, rating: 7.7))
         .frame(width: 200, height: 300)
 }
-

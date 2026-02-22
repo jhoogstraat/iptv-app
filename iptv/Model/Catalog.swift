@@ -94,7 +94,13 @@ class Catalog {
     func getSeriesStreams(in category: Category, force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         guard force || seriesCatalog[category] == nil else { return }
-        let dto = try await self.service().getSeries(in: category.id)
+        let service = try self.service()
+        var dto = try await service.getSeries(in: category.id)
+        if dto.isEmpty {
+            let allSeries = try await service.getSeries()
+            let filtered = allSeries.filter { $0.belongs(to: category.id) }
+            dto = filtered.isEmpty ? allSeries : filtered
+        }
         self.seriesCatalog[category] = dto.map(Video.init)
     }
     
