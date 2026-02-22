@@ -8,8 +8,11 @@
 
 /* Begin PBXBuildFile section */
 		1A1352562E6B8D40002345D7 /* Collections in Frameworks */ = {isa = PBXBuildFile; productRef = 1A1352552E6B8D40002345D7 /* Collections */; };
-		1A1352592E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A1352582E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework */; platformFilter = ios; };
-		1A13525A2E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A1352582E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		1A89EEDE2F4A9B9500332D6A /* VLCKit-iOS.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */; platformFilter = ios; };
+		1A89EEDF2F4A9B9500332D6A /* VLCKit-iOS.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */; platformFilter = ios; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		1A89EEE22F4A9BAE00332D6A /* VLCKit-tvOS.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A89EEE12F4A9BAE00332D6A /* VLCKit-tvOS.xcframework */; platformFilters = (tvos, ); };
+		1A89EEE52F4A9BB800332D6A /* VLCKit-macOS.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */; platformFilters = (macos, ); };
+		1A89EEE62F4A9BB800332D6A /* VLCKit-macOS.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */; platformFilters = (macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -30,13 +33,14 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		1A13525B2E6B8DD3002345D7 /* Embed Frameworks */ = {
+		1A89EEE02F4A9B9500332D6A /* Embed Frameworks */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 10;
 			files = (
-				1A13525A2E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework in Embed Frameworks */,
+				1A89EEE62F4A9BB800332D6A /* VLCKit-macOS.xcframework in Embed Frameworks */,
+				1A89EEDF2F4A9B9500332D6A /* VLCKit-iOS.xcframework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -47,14 +51,19 @@
 		1A0D265E2E6728660091AF6A /* iptv.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iptv.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0D266F2E6728670091AF6A /* iptvTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iptvTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0D26792E6728670091AF6A /* iptvUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iptvUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A1352582E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = iptv/Frameworks/MobileVLCKit.xcframework; sourceTree = "<group>"; };
+		1A1352582E6B8DD3002345D7 /* iptv/Frameworks/VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = iptv/Frameworks/VLCKit.xcframework; sourceTree = "<group>"; };
+		1A89EED62F4A9AA100332D6A /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VLCKit.xcframework; path = "../../Downloads/VLCKit-iOS-binary/VLCKit.xcframework"; sourceTree = "<group>"; };
+		1A89EEDA2F4A9B1F00332D6A /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VLCKit.xcframework; path = "../../Downloads/VLCKit-macOS-binary/VLCKit.xcframework"; sourceTree = "<group>"; };
+		1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-iOS.xcframework"; path = "../../Downloads/VLCKit-iOS-binary/VLCKit-iOS.xcframework"; sourceTree = "<group>"; };
+		1A89EEE12F4A9BAE00332D6A /* VLCKit-tvOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-tvOS.xcframework"; path = "../../Downloads/VLCKit-tvOS-binary/VLCKit-tvOS.xcframework"; sourceTree = "<group>"; };
+		1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-macOS.xcframework"; path = "../../Downloads/VLCKit-macOS-binary/VLCKit-macOS.xcframework"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		1A0D26812E6728670091AF6A /* Exceptions for "iptv" folder in "iptv" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Frameworks/MobileVLCKit.xcframework,
+				Frameworks/VLCKit.xcframework,
 				Info.plist,
 			);
 			target = 1A0D265D2E6728660091AF6A /* iptv */;
@@ -87,7 +96,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1A1352592E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework in Frameworks */,
+				1A89EEE52F4A9BB800332D6A /* VLCKit-macOS.xcframework in Frameworks */,
+				1A89EEDE2F4A9B9500332D6A /* VLCKit-iOS.xcframework in Frameworks */,
+				1A89EEE22F4A9BAE00332D6A /* VLCKit-tvOS.xcframework in Frameworks */,
 				1A1352562E6B8D40002345D7 /* Collections in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -133,7 +144,12 @@
 		1A1352572E6B8DD2002345D7 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				1A1352582E6B8DD3002345D7 /* iptv/Frameworks/MobileVLCKit.xcframework */,
+				1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */,
+				1A89EEE12F4A9BAE00332D6A /* VLCKit-tvOS.xcframework */,
+				1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */,
+				1A89EED62F4A9AA100332D6A /* VLCKit.xcframework */,
+				1A89EEDA2F4A9B1F00332D6A /* VLCKit.xcframework */,
+				1A1352582E6B8DD3002345D7 /* iptv/Frameworks/VLCKit.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -148,7 +164,7 @@
 				1A0D265A2E6728660091AF6A /* Sources */,
 				1A0D265B2E6728660091AF6A /* Frameworks */,
 				1A0D265C2E6728660091AF6A /* Resources */,
-				1A13525B2E6B8DD3002345D7 /* Embed Frameworks */,
+				1A89EEE02F4A9B9500332D6A /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -364,13 +380,14 @@
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2,3,7";
 				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
@@ -419,13 +436,14 @@
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTED_PLATFORMS = "appletvos appletvsimulator iphoneos iphonesimulator macosx xros xrsimulator";
+				SUPPORTS_MACCATALYST = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				TARGETED_DEVICE_FAMILY = "1,2,3,7";
 				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Release;

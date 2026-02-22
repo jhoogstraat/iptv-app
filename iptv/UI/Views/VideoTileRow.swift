@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 struct VideoTileRow: View {
     let category: Category

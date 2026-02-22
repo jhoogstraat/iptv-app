@@ -8,8 +8,8 @@
 import AVFoundation
 import Foundation
 
-#if canImport(MobileVLCKit)
-import MobileVLCKit
+#if canImport(VLCKit)
+import VLCKit
 #endif
 
 enum PlaybackRuntimeError: LocalizedError {
@@ -27,7 +27,7 @@ enum PlaybackRuntimeError: LocalizedError {
 }
 
 
-#if canImport(MobileVLCKit)
+#if canImport(VLCKit)
 @MainActor
 final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     let id: PlaybackBackendID = .vlc
@@ -88,12 +88,12 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     private func mediaDuration() -> Double? {
-        let value = Double(player.media?.length?.intValue ?? 0) / 1000.0
+        let value = Double(player.media?.length.intValue ?? 0) / 1000.0
         return value > 0 ? value : nil
     }
 
     private func currentTime() -> Double {
-        Double(player.time?.intValue ?? 0) / 1000.0
+        Double(player.time.intValue) / 1000.0
     }
 
     private func startProgressTimer() {
@@ -112,8 +112,8 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
 
 @MainActor
 extension VLCPlaybackBackend: VLCMediaPlayerDelegate {
-    func mediaPlayerStateChanged(_ aNotification: Notification!) {
-        switch player.state {
+    func mediaPlayerStateChanged(_ newState: VLCMediaPlayerState) {
+        switch newState {
         case .opening:
             continuation.yield(.buffering(true))
         case .buffering:
@@ -124,9 +124,13 @@ extension VLCPlaybackBackend: VLCMediaPlayerDelegate {
         case .paused:
             continuation.yield(.paused)
         case .stopped:
-            continuation.yield(.paused)
-        case .ended:
-            continuation.yield(.ended)
+            if let duration = mediaDuration(), duration > 0, currentTime() >= duration - 0.5 {
+                continuation.yield(.ended)
+            } else {
+                continuation.yield(.paused)
+            }
+        case .stopping:
+            continuation.yield(.buffering(true))
         case .error:
             continuation.yield(.failed(PlaybackRuntimeError.backendFailure("VLC failed to play this stream.")))
         default:
@@ -184,10 +188,6 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         self.continuation = continuation!
         super.init()
         observePlayerState()
-    }
-
-    deinit {
-        cleanupObservers()
     }
 
     func canPlay(url: URL, contentType: String, containerExtension: String?) -> Bool {

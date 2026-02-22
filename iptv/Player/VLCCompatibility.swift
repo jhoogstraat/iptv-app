@@ -7,8 +7,8 @@
 
 import Foundation
 
-#if canImport(MobileVLCKit)
-import MobileVLCKit
+#if canImport(VLCKit)
+import VLCKit
 typealias VLCPlayerReference = VLCMediaPlayer
 #else
 typealias VLCPlayerReference = NSObject

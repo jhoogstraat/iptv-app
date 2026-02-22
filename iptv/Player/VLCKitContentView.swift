@@ -7,8 +7,8 @@
 
 import SwiftUI
 
-#if canImport(MobileVLCKit)
-import MobileVLCKit
+#if canImport(VLCKit)
+import VLCKit
 
 #if os(macOS)
 struct VLCKitContentView: NSViewRepresentable {

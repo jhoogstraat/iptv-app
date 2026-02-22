@@ -8,6 +8,7 @@ A model object that manages stream playback and backend fallback.
 import AVFoundation
 import Foundation
 import Observation
+import OSLog
 
 /// The presentation modes the player supports.
 enum Presentation {
@@ -52,8 +53,8 @@ final class Player {
     private var eventTask: Task<Void, Never>?
     private var didFallbackForCurrentItem = false
 
-    init(backendFactory: PlaybackBackendFactory = .init()) {
-        self.backendFactory = backendFactory
+    init(backendFactory: PlaybackBackendFactory? = nil) {
+        self.backendFactory = backendFactory ?? PlaybackBackendFactory()
     }
 
     var vlcRenderer: VLCPlayerReference? {

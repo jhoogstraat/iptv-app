@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 struct SettingsScreen: View {
     @Environment(ProviderStore.self) private var providerStore

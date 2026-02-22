@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 private enum MovieDetailState {
     case fetching
@@ -48,7 +49,9 @@ struct MovieDetailScreen: View {
             }
         }
         .navigationTitle(video.name)
+        #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
+        #endif
         .task {
             await loadInfo()
         }
@@ -139,13 +142,17 @@ struct MovieDetailScreen: View {
     }
 
     private var aboutText: String {
-        [
-            info?.country.map { "Country: \($0)" },
-            info?.runtimeMinutes.map { "Runtime: \($0) min" },
-            info?.rating.map { "Rating: \($0.formatted(.number.precision(.fractionLength(1))))" }
-        ]
-        .compactMap { $0 }
-        .joined(separator: "\n")
+        var lines: [String] = []
+        if let country = info?.country, !country.isEmpty {
+            lines.append("Country: \(country)")
+        }
+        if let runtimeMinutes = info?.runtimeMinutes {
+            lines.append("Runtime: \(runtimeMinutes) min")
+        }
+        if let rating = info?.rating {
+            lines.append("Rating: \(rating.formatted(.number.precision(.fractionLength(1))))")
+        }
+        return lines.joined(separator: "\n")
     }
 
     @ViewBuilder

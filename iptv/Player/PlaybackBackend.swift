@@ -46,13 +46,18 @@ protocol PlaybackBackend: AnyObject {
     func events() -> AsyncStream<PlaybackEvent>
 }
 
+@MainActor
 struct PlaybackBackendFactory {
     typealias BackendBuilder = () -> any PlaybackBackend
 
     private let builders: [BackendBuilder]
 
-    init(builders: [BackendBuilder] = [{ VLCPlaybackBackend() }, { AVPlaybackBackend() }]) {
+    init(builders: [BackendBuilder]) {
         self.builders = builders
+    }
+
+    init() {
+        self.builders = [{ VLCPlaybackBackend() }, { AVPlaybackBackend() }]
     }
 
     func selectBackend(

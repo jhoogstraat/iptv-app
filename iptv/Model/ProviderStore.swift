@@ -122,9 +122,9 @@ final class ProviderStore {
     private(set) var revision = 0
     private(set) var lastValidationError: String?
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainStoring = KeychainStore()) {
+    init(defaults: UserDefaults = .standard, keychain: KeychainStoring? = nil) {
         self.defaults = defaults
-        self.keychain = keychain
+        self.keychain = keychain ?? KeychainStore()
         self.baseURLInput = defaults.string(forKey: Keys.baseURL) ?? ""
         refresh()
     }

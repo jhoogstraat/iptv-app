@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import OSLog
 
 enum LoadState {
     case idle
