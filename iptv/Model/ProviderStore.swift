@@ -8,6 +8,7 @@
 import Foundation
 import Observation
 import Security
+import LocalAuthentication
 
 struct ProviderConfig: Equatable {
     let apiURL: URL
@@ -46,6 +47,11 @@ protocol KeychainStoring {
 
 struct KeychainStore: KeychainStoring {
     private let service = "com.jhoogstraat.iptv.provider"
+    private let disallowAuthenticationUI: Bool
+
+    init(disallowAuthenticationUI: Bool = KeychainStore.shouldDisallowAuthenticationUIInCurrentProcess()) {
+        self.disallowAuthenticationUI = disallowAuthenticationUI
+    }
 
     func set(_ value: String, for key: String) throws {
         let data = Data(value.utf8)
@@ -74,10 +80,18 @@ struct KeychainStore: KeychainStoring {
         var query = baseQuery(for: key)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if disallowAuthenticationUI {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext as String] = context
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound {
+            return nil
+        }
+        if status == errSecInteractionNotAllowed, disallowAuthenticationUI {
             return nil
         }
         guard status == errSecSuccess else {
@@ -102,6 +116,14 @@ struct KeychainStore: KeychainStoring {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key
         ]
+    }
+
+    private static func shouldDisallowAuthenticationUIInCurrentProcess() -> Bool {
+        let processInfo = ProcessInfo.processInfo
+        if processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return true
+        }
+        return processInfo.arguments.contains("--disable-keychain-auth-ui")
     }
 }
 

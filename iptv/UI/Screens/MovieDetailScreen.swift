@@ -19,9 +19,12 @@ struct MovieDetailScreen: View {
 
     @Environment(Catalog.self) private var catalog
     @Environment(Player.self) private var player
+    @Environment(ProviderStore.self) private var providerStore
+    @Environment(FavoritesStore.self) private var favoritesStore
 
     @State private var state: MovieDetailState = .fetching
     @State private var playError: String?
+    @State private var isFavorite = false
 
     private var info: VideoInfo? {
         catalog.vodInfo[video]
@@ -54,6 +57,7 @@ struct MovieDetailScreen: View {
         #endif
         .task {
             await loadInfo()
+            await loadFavoriteState()
         }
     }
 
@@ -83,6 +87,14 @@ struct MovieDetailScreen: View {
                             Task { await loadInfo(force: true) }
                         } label: {
                             Label("Refresh", systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button {
+                            Task { await toggleFavorite() }
+                        } label: {
+                            Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "heart.slash" : "heart")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -190,6 +202,23 @@ struct MovieDetailScreen: View {
             playError = error.localizedDescription
             logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    private func loadFavoriteState() async {
+        guard let config = try? providerStore.requiredConfiguration() else {
+            isFavorite = false
+            return
+        }
+        let fingerprint = ProviderCacheFingerprint.make(from: config)
+        isFavorite = await favoritesStore.contains(video: video, providerFingerprint: fingerprint)
+    }
+
+    private func toggleFavorite() async {
+        guard let config = try? providerStore.requiredConfiguration() else { return }
+        let fingerprint = ProviderCacheFingerprint.make(from: config)
+        let targetState = !isFavorite
+        await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: targetState)
+        isFavorite = targetState
     }
 }
 

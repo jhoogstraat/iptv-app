@@ -19,6 +19,9 @@ struct RemoteRecommendationProvider: RecommendationProviding {
 
 struct LocalRecommendationProvider: RecommendationProviding {
     private let ranker: LocalRecommendationRanker
+    private let minimumRailSourceCount = 8
+    private let minimumBingeRailSourceCount = 4
+    private let minimumCatalogSizeForRecommendationRails = 24
 
     init(ranker: LocalRecommendationRanker = LocalRecommendationRanker()) {
         self.ranker = ranker
@@ -47,11 +50,12 @@ struct LocalRecommendationProvider: RecommendationProviding {
         }
 
         let continueWatchingUnique = ranker.deduplicated(continueWatching, excluding: &seenIDs)
+        var seenForBingeRail = seenIDs
         let becauseUnique = ranker.deduplicated(becauseYouWatched, excluding: &seenIDs)
         let trendingUnique = ranker.deduplicated(trending, excluding: &seenIDs)
         let acclaimedUnique = ranker.deduplicated(criticallyAcclaimed, excluding: &seenIDs)
         let additionsUnique = ranker.deduplicated(newAdditions, excluding: &seenIDs)
-        let bingeUnique = ranker.deduplicated(bingeWorthySeries, excluding: &seenIDs)
+        let bingeUnique = ranker.deduplicated(bingeWorthySeries, excluding: &seenForBingeRail)
 
         var sections: [ForYouSection] = []
 
@@ -67,7 +71,11 @@ struct LocalRecommendationProvider: RecommendationProviding {
             )
         }
 
-        if becauseUnique.count >= 8 {
+        guard index.videosByKey.count >= minimumCatalogSizeForRecommendationRails else {
+            return (hero, sections)
+        }
+
+        if becauseYouWatched.count >= minimumRailSourceCount, !becauseUnique.isEmpty {
             sections.append(
                 ForYouSection(
                     id: "because-you-watched",
@@ -79,7 +87,7 @@ struct LocalRecommendationProvider: RecommendationProviding {
             )
         }
 
-        if trendingUnique.count >= 8 {
+        if trending.count >= minimumRailSourceCount, !trendingUnique.isEmpty {
             sections.append(
                 ForYouSection(
                     id: "trending",
@@ -91,7 +99,7 @@ struct LocalRecommendationProvider: RecommendationProviding {
             )
         }
 
-        if acclaimedUnique.count >= 8 {
+        if criticallyAcclaimed.count >= minimumRailSourceCount, !acclaimedUnique.isEmpty {
             sections.append(
                 ForYouSection(
                     id: "critically-acclaimed",
@@ -103,7 +111,7 @@ struct LocalRecommendationProvider: RecommendationProviding {
             )
         }
 
-        if additionsUnique.count >= 8 {
+        if newAdditions.count >= minimumRailSourceCount, !additionsUnique.isEmpty {
             sections.append(
                 ForYouSection(
                     id: "new-additions",
@@ -115,7 +123,7 @@ struct LocalRecommendationProvider: RecommendationProviding {
             )
         }
 
-        if bingeUnique.count >= 8 {
+        if bingeWorthySeries.count >= minimumBingeRailSourceCount, !bingeUnique.isEmpty {
             sections.append(
                 ForYouSection(
                     id: "binge-worthy-series",

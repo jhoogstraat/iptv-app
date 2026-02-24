@@ -24,7 +24,7 @@ final class iptvUITests: XCTestCase {
 
     @MainActor
     func testShowsConfigureProviderCTAWhenMissingConfig() throws {
-        let app = XCUIApplication()
+        let app = makeApp()
         app.launchArguments.append("--uitest-open-movies")
         app.launch()
 
@@ -34,7 +34,7 @@ final class iptvUITests: XCTestCase {
 
     @MainActor
     func testOpenAndCloseSettingsFromConfigureProviderCTA() throws {
-        let app = XCUIApplication()
+        let app = makeApp()
         app.launchArguments.append("--uitest-open-movies")
         app.launch()
 
@@ -52,7 +52,13 @@ final class iptvUITests: XCTestCase {
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
+            makeApp().launch()
         }
+    }
+
+    private func makeApp() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments.append("--disable-keychain-auth-ui")
+        return app
     }
 }

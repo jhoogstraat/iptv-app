@@ -28,10 +28,7 @@ struct ContentView: View {
             #endif
             
             Tab(value: Tabs.search, role: .search) {
-                ScopedPlaceholderView(
-                    title: "Search Is Out of Scope",
-                    message: "Search is not included in the current MVP release."
-                )
+                SearchScreen()
             }
             .customizationID(Tabs.search.customizationID)
             #if !os(macOS) && !os(tvOS)
@@ -60,10 +57,7 @@ struct ContentView: View {
             
             TabSection("Library") {
                 Tab(Tabs.favorites.name, systemImage: Tabs.favorites.symbol, value: Tabs.favorites) {
-                    ScopedPlaceholderView(
-                        title: "Favorites Is Out of Scope",
-                        message: "Library favorites are not included in the current MVP release."
-                    )
+                    LibraryScreen()
                 }
                 .customizationID(Tabs.favorites.customizationID)
                 

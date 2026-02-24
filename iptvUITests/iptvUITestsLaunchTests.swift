@@ -20,6 +20,7 @@ final class iptvUITestsLaunchTests: XCTestCase {
     @MainActor
     func testLaunch() throws {
         let app = XCUIApplication()
+        app.launchArguments.append("--disable-keychain-auth-ui")
         app.launch()
 
         // Insert steps here to perform after app launch but before taking a screenshot,

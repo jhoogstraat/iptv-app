@@ -18,6 +18,7 @@ struct IPTVApp: App {
     @State private var player: Player
     @State private var providerStore: ProviderStore
     @State private var catalog: Catalog
+    @State private var favoritesStore: FavoritesStore
     
     var body: some Scene {
         WindowGroup {
@@ -25,6 +26,7 @@ struct IPTVApp: App {
                 .environment(player)
                 .environment(providerStore)
                 .environment(catalog)
+                .environment(favoritesStore)
                 .modelContainer(modelContainer)
                 #if os(macOS)
                 .toolbar(removing: .title)
@@ -52,14 +54,23 @@ struct IPTVApp: App {
     /// Load video metadata and initialize the model container and video player model.
     init() {
         do {
+            SharedImageURLCache.configureIfNeeded()
+
             let schema = Schema([])
             let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             let modelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
 //            try Importer.importVideoMetadata(into: modelContainer.mainContext)
             let providerStore = ProviderStore()
+            let favoritesStore = FavoritesStore()
             let watchActivityStore = DiskWatchActivityStore.shared
+            let imagePrefetcher = URLSessionImagePrefetcher()
             self._providerStore = State(initialValue: providerStore)
-            self._catalog = State(initialValue: Catalog(providerStore: providerStore, modelContainer: modelContainer))
+            self._favoritesStore = State(initialValue: favoritesStore)
+            self._catalog = State(initialValue: Catalog(
+                providerStore: providerStore,
+                modelContainer: modelContainer,
+                imagePrefetcher: imagePrefetcher
+            ))
             self._player = State(initialValue: Player(
                 watchActivityStore: watchActivityStore,
                 providerFingerprintProvider: {

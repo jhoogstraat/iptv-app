@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftData
+import OSLog
 
 enum CatalogError: LocalizedError {
     case missingProviderConfiguration
@@ -34,6 +35,8 @@ final class Catalog {
     private let providerStore: ProviderStore
     private let cacheManager: CatalogCacheManager
     private let imagePrefetcher: ImagePrefetching
+    private let searchIndexStore: SearchIndexStore
+    private let searchOrchestrator: SearchOrchestrator
 
     private var providerRevision: Int
 
@@ -41,11 +44,15 @@ final class Catalog {
         providerStore: ProviderStore,
         modelContainer: ModelContainer,
         cacheManager: CatalogCacheManager = CatalogCacheManager(),
-        imagePrefetcher: ImagePrefetching = NoopImagePrefetcher()
+        imagePrefetcher: ImagePrefetching = NoopImagePrefetcher(),
+        searchIndexStore: SearchIndexStore = SearchIndexStore(),
+        searchOrchestrator: SearchOrchestrator? = nil
     ) {
         self.providerStore = providerStore
         self.cacheManager = cacheManager
         self.imagePrefetcher = imagePrefetcher
+        self.searchIndexStore = searchIndexStore
+        self.searchOrchestrator = searchOrchestrator ?? SearchOrchestrator()
         _ = modelContainer
         self.providerRevision = providerStore.revision
     }
@@ -63,6 +70,8 @@ final class Catalog {
         vodInfo = [:]
         Task(priority: .utility) {
             await cacheManager.clearMemoryCache()
+            await searchIndexStore.clearAll()
+            await searchOrchestrator.cancelAll()
         }
     }
 
@@ -74,6 +83,11 @@ final class Catalog {
         guard providerRevision != providerStore.revision else { return }
         providerRevision = providerStore.revision
         reset()
+    }
+
+    private func currentProviderFingerprint() throws -> String {
+        let config = try providerStore.requiredConfiguration()
+        return ProviderCacheFingerprint.make(from: config)
     }
 
     private func service() throws -> XtreamService {
@@ -124,6 +138,14 @@ final class Catalog {
         }
 
         self.vodCatalog[category] = cachedVideos.map(Video.init)
+        let snapshots = cachedVideos.map(SearchVideoSnapshot.init(cachedVideo:))
+        await searchIndexStore.upsert(
+            videos: snapshots,
+            contentType: .vod,
+            categoryID: category.id,
+            categoryName: category.name,
+            providerFingerprint: key.providerFingerprint
+        )
     }
 
     func getSeriesStreams(in category: Category, force: Bool = false) async throws {
@@ -144,6 +166,14 @@ final class Catalog {
         }
 
         self.seriesCatalog[category] = cachedVideos.map(Video.init)
+        let snapshots = cachedVideos.map(SearchVideoSnapshot.init(cachedVideo:))
+        await searchIndexStore.upsert(
+            videos: snapshots,
+            contentType: .series,
+            categoryID: category.id,
+            categoryName: category.name,
+            providerFingerprint: key.providerFingerprint
+        )
     }
 
     func getVodInfo(_ video: Video, force: Bool = false) async throws {
@@ -156,5 +186,118 @@ final class Catalog {
     func resolveURL(for video: Video) throws -> URL {
         let service = try self.service()
         return service.getPlayURL(for: video.id, type: video.contentType, containerExtension: video.containerExtension)
+    }
+
+    func search(_ query: SearchQuery) async throws -> [SearchResultItem] {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        let providerFingerprint = try currentProviderFingerprint()
+        return await searchIndexStore.query(query, providerFingerprint: providerFingerprint)
+    }
+
+    func searchFacetValues(scope: SearchMediaScope) async throws -> SearchFacetValues {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        let providerFingerprint = try currentProviderFingerprint()
+        return await searchIndexStore.facetValues(scope: scope, providerFingerprint: providerFingerprint)
+    }
+
+    func searchIndexProgress(scope: SearchMediaScope) async throws -> SearchIndexProgress {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        let providerFingerprint = try currentProviderFingerprint()
+        return await searchIndexStore.progress(
+            scope: scope,
+            providerFingerprint: providerFingerprint,
+            totalCategories: totalCategoryCount(for: scope)
+        )
+    }
+
+    func ensureSearchCoverage(scope: SearchMediaScope) -> AsyncStream<SearchIndexProgress> {
+        AsyncStream { continuation in
+            Task { @MainActor in
+                guard hasProviderConfiguration else {
+                    continuation.yield(SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: scope))
+                    continuation.finish()
+                    return
+                }
+
+                do {
+                    let providerFingerprint = try currentProviderFingerprint()
+                    if scope == .all || scope == .movies {
+                        try await getVodCategories(force: false)
+                    }
+                    if scope == .all || scope == .series {
+                        try await getSeriesCategories(force: false)
+                    }
+
+                    let targets = searchCoverageTargets(for: scope)
+                    let progressStream = searchOrchestrator.ensureCoverage(
+                        scope: scope,
+                        providerFingerprint: providerFingerprint,
+                        targets: targets,
+                        progressProvider: { [searchIndexStore] in
+                            await searchIndexStore.progress(
+                                scope: scope,
+                                providerFingerprint: providerFingerprint,
+                                totalCategories: self.totalCategoryCount(for: scope)
+                            )
+                        },
+                        fetch: { [weak self] target in
+                            guard let self else { return }
+                            do {
+                                switch target.contentType {
+                                case .vod:
+                                    try await self.getVodStreams(in: target.category)
+                                case .series:
+                                    try await self.getSeriesStreams(in: target.category)
+                                case .live:
+                                    break
+                                }
+                            } catch {
+                                logger.debug("Search coverage fetch failed for category \(target.category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                            }
+                        }
+                    )
+
+                    for await progress in progressStream {
+                        continuation.yield(progress)
+                    }
+                } catch {
+                    logger.debug("Search coverage stream failed: \(error.localizedDescription, privacy: .public)")
+                }
+
+                continuation.finish()
+            }
+        }
+    }
+
+    func clearSearchIndex() async {
+        if let fingerprint = try? currentProviderFingerprint() {
+            await searchIndexStore.clear(providerFingerprint: fingerprint)
+            await searchOrchestrator.cancelAll(providerFingerprint: fingerprint)
+        } else {
+            await searchIndexStore.clearAll()
+            await searchOrchestrator.cancelAll()
+        }
+    }
+
+    private func totalCategoryCount(for scope: SearchMediaScope) -> Int {
+        switch scope {
+        case .all:
+            vodCategories.count + seriesCategories.count
+        case .movies:
+            vodCategories.count
+        case .series:
+            seriesCategories.count
+        }
+    }
+
+    private func searchCoverageTargets(for scope: SearchMediaScope) -> [SearchCoverageTarget] {
+        var targets: [SearchCoverageTarget] = []
+        if scope == .all || scope == .movies {
+            targets.append(contentsOf: vodCategories.map { SearchCoverageTarget(contentType: .vod, category: $0) })
+        }
+        if scope == .all || scope == .series {
+            targets.append(contentsOf: seriesCategories.map { SearchCoverageTarget(contentType: .series, category: $0) })
+        }
+        return targets
     }
 }

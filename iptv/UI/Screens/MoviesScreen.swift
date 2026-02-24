@@ -24,6 +24,11 @@ struct MoviesScreen: View {
     @State private var state: LoadState = .idle
     @State private var isPresentingSettings = false
     @State private var prefetchCoordinator = StreamPrefetchCoordinator()
+    @State private var queryText = ""
+    @State private var scopedResults: [SearchResultItem] = []
+    @State private var scopedSearchTask: Task<Void, Never>?
+    @State private var coverageTask: Task<Void, Never>?
+    @State private var searchProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: .all)
 
     init(contentType: XtreamContentType = .vod) {
         self.contentType = contentType
@@ -39,6 +44,10 @@ struct MoviesScreen: View {
                 }
             }
             .navigationTitle(screenTitle)
+            .searchable(text: $queryText, prompt: "Search \(screenTitle)")
+            .onChange(of: queryText) { _, _ in
+                scheduleScopedSearch()
+            }
             .sheet(isPresented: $isPresentingSettings) {
                 NavigationStack {
                     SettingsScreen()
@@ -58,6 +67,9 @@ struct MoviesScreen: View {
                 state = .idle
                 prefetchCoordinator.stop()
                 catalog.reset()
+                coverageTask?.cancel()
+                scopedSearchTask?.cancel()
+                scopedResults = []
                 return
             }
 
@@ -65,6 +77,8 @@ struct MoviesScreen: View {
         }
         .onDisappear {
             prefetchCoordinator.stop()
+            coverageTask?.cancel()
+            scopedSearchTask?.cancel()
         }
     }
 
@@ -98,6 +112,9 @@ struct MoviesScreen: View {
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading) {
+                            if !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                scopedResultsSection
+                            }
                             ForEach(categories) { category in
                                 VideoTileRow(category: category, contentType: contentType)
                             }
@@ -106,6 +123,52 @@ struct MoviesScreen: View {
                     }
                     .toolbar(.hidden)
                 }
+        }
+    }
+
+    @ViewBuilder
+    private var scopedResultsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Search Results")
+                    .font(.headline)
+                Spacer()
+                if searchProgress.totalCategories > 0, !searchProgress.isComplete {
+                    Text("Indexing \(searchProgress.indexedCategories)/\(searchProgress.totalCategories)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
+
+            if scopedResults.isEmpty {
+                Text("No matches for \"\(queryText)\"")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+            } else {
+                ForEach(scopedResults.prefix(20)) { item in
+                    NavigationLink {
+                        destination(for: item.video)
+                    } label: {
+                        SearchResultRowView(item: item, isFavorite: false)
+                            .padding(.horizontal)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private func destination(for video: Video) -> some View {
+        switch contentType {
+        case .vod:
+            MovieDetailScreen(video: video)
+        case .series, .live:
+            EpisodeDetailTile()
+                .navigationTitle(video.name)
         }
     }
 
@@ -141,9 +204,52 @@ struct MoviesScreen: View {
             }
             state = .done
             prefetchCoordinator.start(categories: categories, contentType: contentType, catalog: catalog)
+            startCoverageIfNeeded()
+            scheduleScopedSearch(debounced: false)
         } catch {
             logger.error("Failed to load \(contentType.rawValue, privacy: .public) categories: \(error.localizedDescription, privacy: .public)")
             state = .error(error)
+        }
+    }
+
+    private func startCoverageIfNeeded() {
+        guard contentType == .vod || contentType == .series else { return }
+        coverageTask?.cancel()
+        let scope: SearchMediaScope = contentType == .series ? .series : .movies
+        searchProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: scope)
+
+        coverageTask = Task {
+            for await progress in catalog.ensureSearchCoverage(scope: scope) {
+                if Task.isCancelled { return }
+                searchProgress = progress
+            }
+        }
+    }
+
+    private func scheduleScopedSearch(debounced: Bool = true) {
+        scopedSearchTask?.cancel()
+        scopedSearchTask = Task {
+            if debounced {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
+            }
+            await performScopedSearch()
+        }
+    }
+
+    @MainActor
+    private func performScopedSearch() async {
+        let text = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            scopedResults = []
+            return
+        }
+        do {
+            let scope: SearchMediaScope = contentType == .series ? .series : .movies
+            let query = SearchQuery(text: text, scope: scope, filters: .default, sort: .relevance)
+            scopedResults = try await catalog.search(query)
+        } catch {
+            scopedResults = []
         }
     }
 

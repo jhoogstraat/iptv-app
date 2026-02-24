@@ -221,6 +221,68 @@ struct CoreSpecTests {
         #expect(await invocationCounter.value == 0)
     }
 
+    @Test
+    func imagePrefetcherStoresFetchedDataInCache() async throws {
+        let cache = URLCache(memoryCapacity: 5 * 1024 * 1024, diskCapacity: 5 * 1024 * 1024)
+        let counter = InvocationCounter()
+        let data = Data("poster-data".utf8)
+        let url = URL(string: "https://img.example.com/poster-\(UUID().uuidString).jpg")!
+
+        let prefetcher = URLSessionImagePrefetcher(
+            cache: cache,
+            maxAge: 600
+        ) { requestedURL in
+            await counter.increment()
+            return (data, try makeResponse(url: requestedURL))
+        }
+
+        await prefetcher.prefetch(urls: [url])
+
+        let cached = cache.cachedResponse(for: URLRequest(url: url))
+        #expect(cached?.data == data)
+        #expect(await counter.value == 1)
+    }
+
+    @Test
+    func imagePrefetcherSkipsFetchWhenImageAlreadyCached() async throws {
+        let cache = URLCache(memoryCapacity: 5 * 1024 * 1024, diskCapacity: 5 * 1024 * 1024)
+        let counter = InvocationCounter()
+        let data = Data("cached-poster".utf8)
+        let url = URL(string: "https://img.example.com/already-cached-\(UUID().uuidString).jpg")!
+
+        let response = try makeResponse(url: url)
+        let cached = CachedURLResponse(response: response, data: data)
+        cache.storeCachedResponse(cached, for: URLRequest(url: url))
+
+        let prefetcher = URLSessionImagePrefetcher(cache: cache) { requestedURL in
+            await counter.increment()
+            return (Data(), try makeResponse(url: requestedURL))
+        }
+
+        await prefetcher.prefetch(urls: [url])
+
+        #expect(await counter.value == 0)
+        #expect(cache.cachedResponse(for: URLRequest(url: url))?.data == data)
+    }
+
+    @Test
+    func imagePrefetcherDeduplicatesRepeatedURLsInSingleRequest() async throws {
+        let cache = URLCache(memoryCapacity: 5 * 1024 * 1024, diskCapacity: 5 * 1024 * 1024)
+        let counter = InvocationCounter()
+        let url = URL(string: "https://img.example.com/repeated-\(UUID().uuidString).jpg")!
+
+        let prefetcher = URLSessionImagePrefetcher(cache: cache) { requestedURL in
+            await counter.increment()
+            try await Task.sleep(for: .milliseconds(75))
+            return (Data("image".utf8), try makeResponse(url: requestedURL))
+        }
+
+        await prefetcher.prefetch(urls: [url, url, url])
+
+        #expect(await counter.value == 1)
+        #expect(cache.cachedResponse(for: URLRequest(url: url)) != nil)
+    }
+
     private func makeVideo(containerExtension: String) -> Video {
         Video(
             id: 1,
@@ -381,4 +443,11 @@ private func waitUntil(
         try? await Task.sleep(for: interval)
     }
     return await condition()
+}
+
+private func makeResponse(url: URL) throws -> HTTPURLResponse {
+    guard let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil) else {
+        throw URLError(.badServerResponse)
+    }
+    return response
 }
