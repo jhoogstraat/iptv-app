@@ -166,8 +166,14 @@ struct MoviesScreen: View {
         switch contentType {
         case .vod:
             MovieDetailScreen(video: video)
-        case .series, .live:
-            EpisodeDetailTile()
+        case .series:
+            EpisodeDetailTile(video: video)
+                .navigationTitle(video.name)
+        case .live:
+            ScopedPlaceholderView(
+                title: "Live Episodes Are Unavailable",
+                message: "Episode detail only applies to series content."
+            )
                 .navigationTitle(video.name)
         }
     }

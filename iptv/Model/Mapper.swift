@@ -52,6 +52,19 @@ extension Video {
             addedAtRaw: cached.added
         )
     }
+
+    convenience init(from episode: XtreamEpisode) {
+        self.init(
+            id: Int(episode.id) ?? episode.info.id,
+            name: episode.title,
+            containerExtension: episode.containerExtension,
+            contentType: XtreamContentType.series.rawValue,
+            coverImageURL: episode.info.movieImage,
+            tmdbId: nil,
+            rating: episode.info.rating,
+            addedAtRaw: episode.added
+        )
+    }
 }
 
 extension CachedVideoDTO {

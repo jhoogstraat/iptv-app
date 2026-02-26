@@ -31,6 +31,7 @@ final class Catalog {
     var liveCatalog: [Category: [Video]] = [:]
 
     var vodInfo: [Video: VideoInfo] = [:]
+    private var seriesInfoBySeriesID: [Int: XtreamSeries] = [:]
 
     private let providerStore: ProviderStore
     private let cacheManager: CatalogCacheManager
@@ -43,15 +44,15 @@ final class Catalog {
     init(
         providerStore: ProviderStore,
         modelContainer: ModelContainer,
-        cacheManager: CatalogCacheManager = CatalogCacheManager(),
-        imagePrefetcher: ImagePrefetching = NoopImagePrefetcher(),
-        searchIndexStore: SearchIndexStore = SearchIndexStore(),
+        cacheManager: CatalogCacheManager? = nil,
+        imagePrefetcher: ImagePrefetching? = nil,
+        searchIndexStore: SearchIndexStore? = nil,
         searchOrchestrator: SearchOrchestrator? = nil
     ) {
         self.providerStore = providerStore
-        self.cacheManager = cacheManager
-        self.imagePrefetcher = imagePrefetcher
-        self.searchIndexStore = searchIndexStore
+        self.cacheManager = cacheManager ?? CatalogCacheManager()
+        self.imagePrefetcher = imagePrefetcher ?? NoopImagePrefetcher()
+        self.searchIndexStore = searchIndexStore ?? SearchIndexStore()
         self.searchOrchestrator = searchOrchestrator ?? SearchOrchestrator()
         _ = modelContainer
         self.providerRevision = providerStore.revision
@@ -68,6 +69,7 @@ final class Catalog {
         seriesCatalog = [:]
         liveCatalog = [:]
         vodInfo = [:]
+        seriesInfoBySeriesID = [:]
         Task(priority: .utility) {
             await cacheManager.clearMemoryCache()
             await searchIndexStore.clearAll()
@@ -181,6 +183,17 @@ final class Catalog {
         guard force || vodInfo[video] == nil else { return }
         let dto = try await self.service().getVodInfo(of: String(video.id))
         self.vodInfo[video] = VideoInfo(from: dto)
+    }
+
+    func getSeriesInfo(_ video: Video, force: Bool = false) async throws -> XtreamSeries {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        if !force, let cached = seriesInfoBySeriesID[video.id] {
+            return cached
+        }
+
+        let dto = try await self.service().getSeriesInfo(of: String(video.id))
+        seriesInfoBySeriesID[video.id] = dto
+        return dto
     }
 
     func resolveURL(for video: Video) throws -> URL {

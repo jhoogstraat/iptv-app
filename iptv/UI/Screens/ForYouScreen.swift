@@ -199,10 +199,18 @@ struct ForYouScreen: View {
         switch video.xtreamContentType {
         case .vod:
             AnyView(MovieDetailScreen(video: video))
-        case .series, .live:
+        case .series:
             AnyView(
-                EpisodeDetailTile()
+                EpisodeDetailTile(video: video)
                     .navigationTitle(video.name)
+            )
+        case .live:
+            AnyView(
+                ScopedPlaceholderView(
+                    title: "Live Episodes Are Unavailable",
+                    message: "Episode detail only applies to series content."
+                )
+                .navigationTitle(video.name)
             )
         }
     }

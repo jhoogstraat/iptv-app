@@ -52,6 +52,13 @@ struct XtreamService: Sendable {
         let data = try await client.load(resource)
         return data
     }
+
+    func getSeriesInfo(of id: String) async throws -> XtreamSeries {
+        let query = [URLQueryItem(name: "action", value: "get_series_info"), URLQueryItem(name: "series_id", value: id)]
+        let resource = Resource<XtreamSeries>(url: baseURL, method: .get(auth + query))
+        let data = try await client.load(resource)
+        return data
+    }
     
     func getPlayURL(for streamId: Int, type: String, containerExtension: String) -> URL {
         let url = URL(string: "\(type)/\(username)/\(password)/\(streamId).\(containerExtension)", relativeTo: baseURL)!

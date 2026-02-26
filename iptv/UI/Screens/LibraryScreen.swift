@@ -16,6 +16,10 @@ struct LibraryScreen: View {
     @State private var isLoading = false
     @State private var errorMessage: String?
 
+    private var reloadToken: String {
+        "\(providerStore.revision)|\(favoritesStore.revision)"
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -33,10 +37,7 @@ struct LibraryScreen: View {
             }
             .navigationTitle("Library")
         }
-        .task(id: providerStore.revision) {
-            await loadData()
-        }
-        .task(id: favoritesStore.revision) {
+        .task(id: reloadToken) {
             await loadData()
         }
     }
@@ -122,8 +123,14 @@ struct LibraryScreen: View {
         switch video.xtreamContentType {
         case .vod:
             MovieDetailScreen(video: video)
-        case .series, .live:
-            EpisodeDetailTile()
+        case .series:
+            EpisodeDetailTile(video: video)
+                .navigationTitle(video.name)
+        case .live:
+            ScopedPlaceholderView(
+                title: "Live Episodes Are Unavailable",
+                message: "Episode detail only applies to series content."
+            )
                 .navigationTitle(video.name)
         }
     }
@@ -132,6 +139,7 @@ struct LibraryScreen: View {
         guard providerStore.hasConfiguration else {
             favorites = []
             continueWatching = []
+            errorMessage = nil
             return
         }
 
@@ -163,4 +171,3 @@ struct LibraryScreen: View {
 #Preview(traits: .previewData) {
     LibraryScreen()
 }
-
