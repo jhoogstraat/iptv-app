@@ -29,6 +29,7 @@ struct PlayerView: View {
 
     #if os(iOS)
     @State private var mobileSheet: MobileSheet?
+    @State private var iOSScrubSession: IOSScrubSession?
     #endif
 
     #if os(tvOS)
@@ -227,6 +228,9 @@ struct PlayerView: View {
 
     private var timelineControls: some View {
         VStack(spacing: 8) {
+            #if os(iOS)
+            iOSTimelineScrubber
+            #else
             Slider(
                 value: sliderValue,
                 in: sliderRange,
@@ -242,6 +246,7 @@ struct PlayerView: View {
                 }
             )
             .accessibilityIdentifier("player.timeline")
+            #endif
 
             HStack {
                 Text(player.formattedCurrentTime)
@@ -254,6 +259,57 @@ struct PlayerView: View {
             .foregroundStyle(.secondary)
         }
     }
+
+    #if os(iOS)
+    private var iOSTimelineScrubber: some View {
+        GeometryReader { proxy in
+            let currentValue = scrubTime ?? player.currentTime
+            let fraction = timelineFraction(for: currentValue)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(.white.opacity(0.22))
+                    .frame(height: 6)
+
+                Capsule()
+                    .fill(.white)
+                    .frame(width: max(proxy.size.width * fraction, 12), height: 6)
+
+                Circle()
+                    .fill(.white)
+                    .frame(width: 18, height: 18)
+                    .offset(x: thumbOffset(in: proxy.size.width, fraction: fraction))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { value in
+                        updateIOSScrub(at: value.location, size: proxy.size)
+                    }
+                    .onEnded { _ in
+                        commitIOSScrub()
+                    }
+            )
+            .accessibilityIdentifier("player.timeline")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Playback position")
+            .accessibilityValue("\(player.formattedCurrentTime) of \(player.formattedDuration)")
+            .accessibilityAdjustableAction { direction in
+                let delta = 10.0
+                switch direction {
+                case .increment:
+                    player.seek(to: min(player.currentTime + delta, sliderRange.upperBound))
+                case .decrement:
+                    player.seek(to: max(player.currentTime - delta, 0))
+                @unknown default:
+                    break
+                }
+            }
+        }
+        .frame(height: 28)
+    }
+    #endif
 
     private var statusMessages: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1110,6 +1166,19 @@ struct PlayerView: View {
         return parts.joined(separator: " • ")
     }
 
+    private func timelineFraction(for value: Double) -> CGFloat {
+        let upperBound = sliderRange.upperBound
+        guard upperBound > 0 else { return 0 }
+        let clamped = min(max(value, sliderRange.lowerBound), upperBound)
+        return CGFloat(clamped / upperBound)
+    }
+
+    private func thumbOffset(in width: CGFloat, fraction: CGFloat) -> CGFloat {
+        let thumbSize: CGFloat = 18
+        let availableWidth = max(width - thumbSize, 0)
+        return min(max(availableWidth * fraction, 0), availableWidth)
+    }
+
     private func scheduleAutoHideIfNeeded() {
         hideControlsTask?.cancel()
         guard player.isPlaying else { return }
@@ -1166,6 +1235,50 @@ struct PlayerView: View {
         isFavorite = targetState
     }
 
+    #if os(iOS)
+    private func updateIOSScrub(at location: CGPoint, size: CGSize) {
+        guard sliderRange.upperBound > 0 else { return }
+
+        hideControlsTask?.cancel()
+
+        let clampedX = min(max(location.x, 0), size.width)
+        let trackFraction = size.width > 0 ? clampedX / size.width : 0
+        let anchorTime = sliderRange.upperBound * Double(trackFraction)
+
+        if iOSScrubSession == nil {
+            iOSScrubSession = IOSScrubSession(
+                anchorTime: anchorTime,
+                anchorLocation: CGPoint(x: clampedX, y: location.y),
+                trackWidth: max(size.width, 1),
+                trackCenterY: size.height / 2
+            )
+            scrubTime = anchorTime
+            return
+        }
+
+        guard let session = iOSScrubSession else { return }
+        let verticalDistance = abs(location.y - session.trackCenterY)
+        let speedMultiplier = scrubVelocityMultiplier(for: verticalDistance)
+        let horizontalDelta = Double(clampedX - session.anchorLocation.x)
+        let secondsPerPoint = sliderRange.upperBound / Double(session.trackWidth)
+        let nextValue = session.anchorTime + (horizontalDelta * secondsPerPoint * speedMultiplier)
+        scrubTime = min(max(nextValue, sliderRange.lowerBound), sliderRange.upperBound)
+    }
+
+    private func commitIOSScrub() {
+        let target = min(max(scrubTime ?? player.currentTime, sliderRange.lowerBound), sliderRange.upperBound)
+        player.seek(to: target)
+        scrubTime = nil
+        iOSScrubSession = nil
+        scheduleAutoHideIfNeeded()
+    }
+
+    private func scrubVelocityMultiplier(for verticalDistance: CGFloat) -> Double {
+        let normalized = min(max(verticalDistance / 36, 0), 5)
+        return 1 + Double(normalized * 1.4)
+    }
+    #endif
+
     private func formatTime(_ rawSeconds: Double) -> String {
         let totalSeconds = max(0, Int(rawSeconds.rounded()))
         let seconds = totalSeconds % 60
@@ -1188,6 +1301,13 @@ private enum MobileSheet: String, Identifiable {
     case episodes
 
     var id: String { rawValue }
+}
+
+private struct IOSScrubSession {
+    let anchorTime: Double
+    let anchorLocation: CGPoint
+    let trackWidth: CGFloat
+    let trackCenterY: CGFloat
 }
 #endif
 
