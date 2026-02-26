@@ -304,14 +304,14 @@ struct CoreSpecTests {
     }
 
     @Test
-    func avBackendCapabilityMappingProvidesQualityVariants() {
+    func avBackendCapabilityMappingRequiresDiscoveredVariantsForQualitySelection() {
         let backend = AVPlaybackBackend()
         let qualities = backend.qualityVariants()
 
-        #expect(qualities.contains(where: { $0.isAuto }))
-        #expect(qualities.count >= 2)
+        #expect(qualities.isEmpty)
 
         let caps = backend.capabilities()
+        #expect(caps.supportsQualitySelection == false)
         #expect(caps.supportsAudioDelay == false)
     }
 

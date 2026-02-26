@@ -133,6 +133,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     private let continuation: AsyncStream<PlaybackEvent>.Continuation
     private var progressTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
+    private var automaticQualityTrackID: String?
 
     override init() {
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
@@ -148,6 +149,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func load(url: URL, autoplay: Bool) throws {
+        automaticQualityTrackID = nil
         player.media = VLCMedia(url: url)
         continuation.yield(.ready(duration: mediaDuration()))
         if autoplay {
@@ -226,6 +228,8 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func qualityVariants() -> [QualityVariant] {
+        cacheAutomaticQualityTrackIfNeeded()
+
         let manualVariants = player.videoTracks.enumerated().map { index, track in
             let video = track.video
             let width = video?.width ?? 0
@@ -307,9 +311,14 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
 
     func selectQualityVariant(id: String) throws {
         if id == QualityVariant.auto.id {
+            if let automaticQualityTrackID,
+               let track = player.videoTracks.first(where: { qualityVariantID(for: $0) == automaticQualityTrackID }) {
+                track.isSelectedExclusively = true
+            }
             return
         }
 
+        cacheAutomaticQualityTrackIfNeeded()
         guard let track = player.videoTracks.first(where: { qualityVariantID(for: $0) == id }) else {
             throw PlaybackRuntimeError.backendFailure("Quality variant is unavailable.")
         }
@@ -399,6 +408,19 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
 
     private func qualityVariantID(for track: VLCMediaPlayer.Track) -> String {
         "vlc-quality:\(track.trackId)"
+    }
+
+    private func cacheAutomaticQualityTrackIfNeeded() {
+        guard automaticQualityTrackID == nil else { return }
+
+        if let selected = player.videoTracks.first(where: \.isSelected) {
+            automaticQualityTrackID = qualityVariantID(for: selected)
+            return
+        }
+
+        if let first = player.videoTracks.first {
+            automaticQualityTrackID = qualityVariantID(for: first)
+        }
     }
 
     private func mediaTrackLabel(for track: VLCMediaPlayer.Track, fallbackPrefix: String) -> String {
@@ -515,6 +537,14 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     private var endedObserver: NSObjectProtocol?
     private let outputRouteController = SystemOutputRouteController()
 
+    private struct QualityVariantDescriptor {
+        let variant: QualityVariant
+        let preferredPeakBitRate: Double
+        let preferredMaximumResolution: CGSize?
+        let sortHeight: Double
+        let sortBitRate: Double
+    }
+
     override init() {
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
         self.stream = AsyncStream<PlaybackEvent> { continuation = $0 }
@@ -597,10 +627,12 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func capabilities() -> PlaybackCapabilities {
-        PlaybackCapabilities(
+        let qualityDescriptors = qualityVariantDescriptors()
+
+        return PlaybackCapabilities(
             supportsAudioTracks: mediaSelectionGroup(for: .audible) != nil,
             supportsSubtitles: mediaSelectionGroup(for: .legible) != nil,
-            supportsQualitySelection: player.currentItem != nil,
+            supportsQualitySelection: !qualityDescriptors.isEmpty,
             supportsChapterMarkers: !chapterMarkers().isEmpty,
             supportsOutputRouteSelection: supportsSystemRoutePicker,
             supportsAudioDelay: false,
@@ -617,7 +649,9 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func qualityVariants() -> [QualityVariant] {
-        qualityPresets
+        let descriptors = qualityVariantDescriptors()
+        guard !descriptors.isEmpty else { return [] }
+        return [QualityVariant.auto] + descriptors.map(\.variant)
     }
 
     func chapterMarkers() -> [ChapterMarker] {
@@ -659,13 +693,15 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
 
         if id == QualityVariant.auto.id {
             item.preferredPeakBitRate = 0
+            item.preferredMaximumResolution = .zero
             return
         }
 
-        guard let bitrate = qualityPresetBitrates[id] else {
+        guard let descriptor = qualityVariantDescriptors().first(where: { $0.variant.id == id }) else {
             throw PlaybackRuntimeError.backendFailure("Quality variant is unavailable.")
         }
-        item.preferredPeakBitRate = bitrate
+        item.preferredPeakBitRate = descriptor.preferredPeakBitRate
+        item.preferredMaximumResolution = descriptor.preferredMaximumResolution ?? .zero
     }
 
     func setPlaybackSpeed(_ speed: Double) {
@@ -841,20 +877,87 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         #endif
     }
 
-    private var qualityPresets: [QualityVariant] {
-        [
-            .auto,
-            QualityVariant(id: "av-low", label: "Low", bitrate: 1_000_000, resolution: nil, frameRate: nil, isAuto: false),
-            QualityVariant(id: "av-medium", label: "Medium", bitrate: 2_500_000, resolution: nil, frameRate: nil, isAuto: false),
-            QualityVariant(id: "av-high", label: "High", bitrate: 5_000_000, resolution: nil, frameRate: nil, isAuto: false),
-            QualityVariant(id: "av-max", label: "Max", bitrate: 8_000_000, resolution: nil, frameRate: nil, isAuto: false)
-        ]
+    private func qualityVariantDescriptors() -> [QualityVariantDescriptor] {
+        guard #available(macOS 12.0, iOS 15.0, tvOS 15.0, *),
+              let asset = player.currentItem?.asset as? AVURLAsset
+        else {
+            return []
+        }
+
+        var seenIDs = Set<String>()
+        let descriptors = asset.variants.compactMap { variant -> QualityVariantDescriptor? in
+            let bitrateCandidates = [variant.peakBitRate, variant.averageBitRate].compactMap { $0 }.filter { $0 > 0 }
+            let preferredPeakBitRate = bitrateCandidates.max() ?? 0
+
+            let presentationSize = variant.videoAttributes?.presentationSize ?? .zero
+            let hasVideoSize = presentationSize.width > 0 && presentationSize.height > 0
+            let resolution = hasVideoSize
+                ? "\(Int(presentationSize.width.rounded()))x\(Int(presentationSize.height.rounded()))"
+                : nil
+            let frameRate = variant.videoAttributes?.nominalFrameRate.flatMap { $0 > 0 ? $0 : nil }
+
+            guard hasVideoSize || preferredPeakBitRate > 0 else { return nil }
+
+            let identifier = qualityVariantID(
+                presentationSize: presentationSize,
+                bitrate: preferredPeakBitRate,
+                frameRate: frameRate
+            )
+            guard seenIDs.insert(identifier).inserted else { return nil }
+
+            return QualityVariantDescriptor(
+                variant: QualityVariant(
+                    id: identifier,
+                    label: qualityVariantLabel(
+                        presentationSize: presentationSize,
+                        bitrate: preferredPeakBitRate
+                    ),
+                    bitrate: preferredPeakBitRate > 0 ? Int(preferredPeakBitRate.rounded()) : nil,
+                    resolution: resolution,
+                    frameRate: frameRate,
+                    isAuto: false
+                ),
+                preferredPeakBitRate: preferredPeakBitRate,
+                preferredMaximumResolution: hasVideoSize ? presentationSize : nil,
+                sortHeight: hasVideoSize ? presentationSize.height : 0,
+                sortBitRate: preferredPeakBitRate
+            )
+        }
+
+        return descriptors.sorted {
+            if $0.sortHeight == $1.sortHeight {
+                return $0.sortBitRate > $1.sortBitRate
+            }
+            return $0.sortHeight > $1.sortHeight
+        }
     }
 
-    private var qualityPresetBitrates: [String: Double] {
-        Dictionary(uniqueKeysWithValues: qualityPresets.map { variant in
-            (variant.id, Double(variant.bitrate ?? 0))
-        })
+    private func qualityVariantID(
+        presentationSize: CGSize,
+        bitrate: Double,
+        frameRate: Double?
+    ) -> String {
+        let width = Int(presentationSize.width.rounded())
+        let height = Int(presentationSize.height.rounded())
+        let roundedBitrate = Int(bitrate.rounded())
+        let roundedFrameRate = Int((frameRate ?? 0).rounded())
+        return "av-quality:\(width)x\(height):\(roundedBitrate):\(roundedFrameRate)"
+    }
+
+    private func qualityVariantLabel(presentationSize: CGSize, bitrate: Double) -> String {
+        let height = Int(presentationSize.height.rounded())
+        if height > 0 {
+            return "\(height)p"
+        }
+
+        if bitrate > 0 {
+            return ByteCountFormatter.string(
+                fromByteCount: Int64((bitrate / 8.0).rounded()),
+                countStyle: .file
+            ) + "/s"
+        }
+
+        return "Variant"
     }
 
     private func cleanupItemObservers() {
