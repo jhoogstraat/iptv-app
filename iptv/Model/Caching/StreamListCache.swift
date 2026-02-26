@@ -92,7 +92,7 @@ actor DiskStreamListCacheStore: StreamListCacheStore {
         directoryURL: URL? = nil,
         maxCacheBytes: Int = 100 * 1024 * 1024
     ) {
-        let baseDirectory = directoryURL ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let baseDirectory = directoryURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         self.directoryURL = baseDirectory.appending(path: "StreamListCache", directoryHint: .isDirectory)
         self.maxCacheBytes = maxCacheBytes
     }
@@ -214,16 +214,16 @@ actor CatalogCacheManager {
     private let now: @Sendable () -> Date
 
     init(
-        diskStore: StreamListCacheStore = DiskStreamListCacheStore(),
+        diskStore: StreamListCacheStore? = nil,
         ttl: TimeInterval = 15 * 60,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.diskStore = diskStore
+        self.diskStore = diskStore ?? DiskStreamListCacheStore()
         self.ttl = ttl
         self.now = now
 
         Task(priority: .utility) {
-            try? await diskStore.pruneCacheIfNeeded()
+            try? await self.diskStore.pruneCacheIfNeeded()
         }
     }
 

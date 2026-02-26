@@ -35,15 +35,15 @@ final class ForYouViewModel {
     init(
         catalog: Catalog,
         providerStore: ProviderStore,
-        watchActivityStore: any WatchActivityStoring = DiskWatchActivityStore.shared,
-        recommendationProvider: any RecommendationProviding = LocalRecommendationProvider(),
+        watchActivityStore: (any WatchActivityStoring)? = nil,
+        recommendationProvider: (any RecommendationProviding)? = nil,
         vodCategoryLimit: Int = 8,
         seriesCategoryLimit: Int = 6
     ) {
         self.catalog = catalog
         self.providerStore = providerStore
-        self.watchActivityStore = watchActivityStore
-        self.recommendationProvider = recommendationProvider
+        self.watchActivityStore = watchActivityStore ?? DiskWatchActivityStore.shared
+        self.recommendationProvider = recommendationProvider ?? LocalRecommendationProvider()
         self.vodCategoryLimit = vodCategoryLimit
         self.seriesCategoryLimit = seriesCategoryLimit
     }

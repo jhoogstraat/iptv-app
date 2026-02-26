@@ -64,6 +64,7 @@ struct FavoriteRecord: Codable, Hashable, Sendable, Identifiable {
 
 protocol FavoriteStoring: Sendable {
     func loadAll() async -> [FavoriteRecord]
+    func contains(providerFingerprint: String, contentType: String, videoID: Int) async -> Bool
     func add(input: FavoriteInput, providerFingerprint: String) async
     func remove(input: FavoriteInput, providerFingerprint: String) async
     func clear(for providerFingerprint: String) async
@@ -93,6 +94,16 @@ actor DiskFavoritesStore: FavoriteStoring {
     func loadAll() async -> [FavoriteRecord] {
         await ensureLoaded()
         return recordsByKey.values.sorted { $0.createdAt > $1.createdAt }
+    }
+
+    func contains(providerFingerprint: String, contentType: String, videoID: Int) async -> Bool {
+        await ensureLoaded()
+        let key = FavoriteRecord.makeKey(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            videoID: videoID
+        )
+        return recordsByKey[key] != nil
     }
 
     func add(input: FavoriteInput, providerFingerprint: String) async {
@@ -165,8 +176,8 @@ final class FavoritesStore {
     private let store: any FavoriteStoring
     private(set) var revision = 0
 
-    init(store: any FavoriteStoring = DiskFavoritesStore.shared) {
-        self.store = store
+    init(store: (any FavoriteStoring)? = nil) {
+        self.store = store ?? DiskFavoritesStore.shared
     }
 
     func load(providerFingerprint: String) async -> [FavoriteRecord] {
@@ -174,12 +185,11 @@ final class FavoritesStore {
     }
 
     func contains(video: Video, providerFingerprint: String) async -> Bool {
-        let key = FavoriteRecord.makeKey(
+        await store.contains(
             providerFingerprint: providerFingerprint,
             contentType: video.contentType,
             videoID: video.id
         )
-        return await store.loadAll().contains { $0.id == key }
     }
 
     func setFavorite(video: Video, providerFingerprint: String, isFavorite: Bool) async {
@@ -200,4 +210,3 @@ final class FavoritesStore {
         revision += 1
     }
 }
-
