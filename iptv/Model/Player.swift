@@ -35,6 +35,32 @@ final class Player {
     private(set) var rendererRevision = 0
     private(set) var shouldAutoPlay = true
 
+    private(set) var capabilities: PlaybackCapabilities = .unsupported
+    private(set) var audioTracks: [MediaTrack] = []
+    private(set) var subtitleTracks: [MediaTrack] = []
+    private(set) var qualityVariants: [QualityVariant] = [QualityVariant.auto]
+    private(set) var chapterMarkers: [ChapterMarker] = []
+    private(set) var outputRoutes: [OutputRoute] = []
+
+    private(set) var selectedAudioTrackID: String?
+    private(set) var selectedSubtitleTrackID = MediaTrack.subtitleOffID
+    private(set) var selectedQualityVariantID = QualityVariant.auto.id
+    private(set) var selectedOutputRouteID: String?
+
+    private(set) var playbackSpeed: Double = 1
+    private(set) var aspectRatioMode: PlayerAspectRatioMode = .fit
+    private(set) var audioDelayMilliseconds = 0
+    private(set) var volume: Double = 1
+    private(set) var brightness: Double = 0.5
+
+    private(set) var sleepTimerOption: SleepTimerOption = .off
+    private(set) var sleepTimerEndsAt: Date?
+
+    private(set) var controlMessage: String?
+    private(set) var canRetryEpisodeSwitch = false
+
+    private(set) var episodeOptions: [Video] = []
+
     var progressFraction: Double {
         guard let duration, duration > 0 else { return 0 }
         return min(max(currentTime / duration, 0), 1)
@@ -48,22 +74,55 @@ final class Player {
         Self.formatTime(duration ?? 0)
     }
 
+    var formattedRemainingTime: String {
+        let total = duration ?? 0
+        let remaining = max(0, total - currentTime)
+        return "-\(Self.formatTime(remaining))"
+    }
+
+    var unsupportedFeaturesSummary: String? {
+        var features: [String] = []
+        if !capabilities.supportsAudioTracks { features.append("Audio tracks") }
+        if !capabilities.supportsSubtitles { features.append("Subtitles") }
+        if !capabilities.supportsQualitySelection { features.append("Quality") }
+        if !capabilities.supportsChapterMarkers { features.append("Chapters") }
+        if !capabilities.supportsOutputRouteSelection { features.append("Output route") }
+        if !capabilities.supportsAudioDelay { features.append("Audio delay") }
+
+        #if os(iOS) || os(tvOS)
+        if !capabilities.supportsBrightness { features.append("Brightness") }
+        #endif
+
+        guard !features.isEmpty else { return nil }
+        return "Unavailable for current stream/backend: \(features.joined(separator: ", "))."
+    }
+
     private let backendFactory: PlaybackBackendFactory
     private let watchActivityStore: any WatchActivityStoring
     private let providerFingerprintProvider: @MainActor () -> String?
+    private let defaults: UserDefaults
     private var backend: (any PlaybackBackend)?
     private var eventTask: Task<Void, Never>?
+    private var sleepTimerTask: Task<Void, Never>?
     private var didFallbackForCurrentItem = false
     private var lastPersistedProgressByVideoKey: [String: (time: Double, fraction: Double)] = [:]
+    private var preferredAudioLanguageCode: String?
+    private var preferredSubtitleLanguageCode: String?
+    private var subtitleEnabledByDefault = false
+    private var didApplyTrackPreferencesForCurrentItem = false
+    private var episodeURLResolver: ((Video) throws -> URL)?
+    private var lastEpisodeSwitchAttemptID: Int?
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
-        watchActivityStore: any WatchActivityStoring = DiskWatchActivityStore.shared,
-        providerFingerprintProvider: @escaping @MainActor () -> String? = { nil }
+        watchActivityStore: (any WatchActivityStoring)? = nil,
+        providerFingerprintProvider: @escaping @MainActor () -> String? = { nil },
+        defaults: UserDefaults = .standard
     ) {
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()
-        self.watchActivityStore = watchActivityStore
+        self.watchActivityStore = watchActivityStore ?? DiskWatchActivityStore.shared
         self.providerFingerprintProvider = providerFingerprintProvider
+        self.defaults = defaults
     }
 
     var vlcRenderer: VLCPlayerReference? {
@@ -82,15 +141,28 @@ final class Player {
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
         errorMessage = nil
+        controlMessage = nil
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
         currentTime = 0
         duration = nil
         playbackState = .loading
         self.presentation = presentation
+        didApplyTrackPreferencesForCurrentItem = false
+
         let key = makePersistenceKey(for: video)
         lastPersistedProgressByVideoKey[key] = nil
 
+        if episodeOptions.isEmpty || !episodeOptions.contains(where: { $0.id == video.id }) {
+            episodeOptions = [video]
+        }
+
+        loadSavedPreferencesForCurrentProfile()
+
         do {
             try activateBackend(for: video, url: url)
+            refreshAdvancedStateFromBackend()
+            applySavedPreferencesIfPossible()
             try backend?.load(url: url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
         } catch {
@@ -102,6 +174,12 @@ final class Player {
     func reset() {
         eventTask?.cancel()
         eventTask = nil
+
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+        sleepTimerOption = .off
+        sleepTimerEndsAt = nil
+
         backend?.stop()
         backend = nil
         activeBackendID = nil
@@ -117,8 +195,34 @@ final class Player {
         currentTime = 0
         duration = nil
         errorMessage = nil
+        controlMessage = nil
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
         playbackState = .idle
         presentation = .inline
+
+        capabilities = .unsupported
+        audioTracks = []
+        subtitleTracks = []
+        qualityVariants = [QualityVariant.auto]
+        chapterMarkers = []
+        outputRoutes = []
+
+        selectedAudioTrackID = nil
+        selectedSubtitleTrackID = MediaTrack.subtitleOffID
+        selectedQualityVariantID = QualityVariant.auto.id
+        selectedOutputRouteID = nil
+
+        playbackSpeed = 1
+        aspectRatioMode = .fit
+        audioDelayMilliseconds = 0
+        volume = 1
+        brightness = 0.5
+
+        episodeOptions = []
+        episodeURLResolver = nil
+
+        didApplyTrackPreferencesForCurrentItem = false
         lastPersistedProgressByVideoKey.removeAll()
     }
 
@@ -142,6 +246,231 @@ final class Player {
 
     func seek(to seconds: Double) {
         backend?.seek(to: seconds)
+    }
+
+    // MARK: - Advanced controls
+
+    func clearControlMessage() {
+        controlMessage = nil
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
+    }
+
+    func setPlaybackSpeed(_ speed: Double) {
+        let clamped = max(0.5, min(speed, 2.0))
+        playbackSpeed = clamped
+        backend?.setPlaybackSpeed(clamped)
+        persistPreference("defaultSpeed", value: clamped)
+    }
+
+    func setAspectRatio(_ mode: PlayerAspectRatioMode) {
+        aspectRatioMode = mode
+        backend?.setAspectRatio(mode)
+        persistPreference("defaultAspectRatio", value: mode.rawValue)
+    }
+
+    func setAudioDelay(milliseconds: Int) {
+        guard capabilities.supportsAudioDelay else {
+            setUnsupportedFeatureMessage("Audio delay")
+            return
+        }
+
+        let clamped = max(-5000, min(milliseconds, 5000))
+        audioDelayMilliseconds = clamped
+        backend?.setAudioDelay(milliseconds: clamped)
+        persistPreference("defaultAudioDelayMs", value: clamped)
+    }
+
+    func resetAudioDelay() {
+        setAudioDelay(milliseconds: 0)
+    }
+
+    func selectAudioTrack(id: String) {
+        guard capabilities.supportsAudioTracks else {
+            setUnsupportedFeatureMessage("Audio track selection")
+            return
+        }
+
+        guard audioTracks.contains(where: { $0.id == id }) else { return }
+        selectedAudioTrackID = id
+        backend?.selectAudioTrack(id: id)
+
+        if let track = audioTracks.first(where: { $0.id == id }),
+           let language = track.languageCode,
+           !language.isEmpty {
+            persistPreference("preferredAudioLanguage", value: language)
+            preferredAudioLanguageCode = language
+        }
+    }
+
+    func selectSubtitleTrack(id: String) {
+        guard capabilities.supportsSubtitles else {
+            setUnsupportedFeatureMessage("Subtitle selection")
+            return
+        }
+
+        if id != MediaTrack.subtitleOffID,
+           !subtitleTracks.contains(where: { $0.id == id }) {
+            return
+        }
+
+        selectedSubtitleTrackID = id
+        backend?.selectSubtitleTrack(id: id)
+
+        let enabled = id != MediaTrack.subtitleOffID
+        subtitleEnabledByDefault = enabled
+        persistPreference("defaultSubtitleEnabled", value: enabled)
+
+        if let track = subtitleTracks.first(where: { $0.id == id }),
+           let language = track.languageCode,
+           !language.isEmpty {
+            persistPreference("preferredSubtitleLanguage", value: language)
+            preferredSubtitleLanguageCode = language
+        }
+    }
+
+    func selectQualityVariant(id: String) {
+        guard capabilities.supportsQualitySelection else {
+            setUnsupportedFeatureMessage("Quality selection")
+            return
+        }
+
+        guard qualityVariants.contains(where: { $0.id == id }) else { return }
+        let previousID = selectedQualityVariantID
+        selectedQualityVariantID = id
+
+        do {
+            try backend?.selectQualityVariant(id: id)
+            controlMessage = nil
+            canRetryEpisodeSwitch = false
+            lastEpisodeSwitchAttemptID = nil
+        } catch {
+            selectedQualityVariantID = previousID
+            if qualityVariants.contains(where: { $0.id == previousID }) {
+                try? backend?.selectQualityVariant(id: previousID)
+            }
+
+            let previousLabel = qualityVariants.first(where: { $0.id == previousID })?.label ?? "Auto"
+            controlMessage = "Could not switch quality. Reverted to \(previousLabel)."
+            logger.error("Quality switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func jumpToChapter(id: String) {
+        guard capabilities.supportsChapterMarkers else {
+            setUnsupportedFeatureMessage("Chapter navigation")
+            return
+        }
+
+        guard let chapter = chapterMarkers.first(where: { $0.id == id }) else { return }
+        seek(to: chapter.startSeconds)
+    }
+
+    func selectOutputRoute(id: String) {
+        guard capabilities.supportsOutputRouteSelection else {
+            setUnsupportedFeatureMessage("Output route selection")
+            return
+        }
+
+        guard outputRoutes.contains(where: { $0.id == id }) else { return }
+        let previousRoutes = outputRoutes
+        backend?.selectOutputRoute(id: id)
+        refreshOutputRoutes()
+        if outputRoutes.isEmpty {
+            selectedOutputRouteID = id
+            outputRoutes = previousRoutes.map { route in
+                OutputRoute(id: route.id, name: route.name, isActive: route.id == id)
+            }
+        }
+        controlMessage = nil
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
+    }
+
+    func refreshOutputRoutes() {
+        guard capabilities.supportsOutputRouteSelection, let backend else {
+            outputRoutes = []
+            selectedOutputRouteID = nil
+            return
+        }
+
+        outputRoutes = backend.availableOutputRoutes()
+
+        if let active = outputRoutes.first(where: { $0.isActive }) {
+            selectedOutputRouteID = active.id
+        } else if !outputRoutes.contains(where: { $0.id == selectedOutputRouteID }) {
+            selectedOutputRouteID = outputRoutes.first?.id
+        }
+    }
+
+    func setVolume(_ value: Double) {
+        let clamped = max(0, min(value, 1))
+        volume = clamped
+        backend?.setVolume(clamped)
+    }
+
+    func setBrightness(_ value: Double) {
+        guard capabilities.supportsBrightness else {
+            setUnsupportedFeatureMessage("Brightness control")
+            return
+        }
+
+        let clamped = max(0, min(value, 1))
+        brightness = clamped
+        backend?.setBrightness(clamped)
+    }
+
+    func setSleepTimer(_ option: SleepTimerOption) {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+
+        sleepTimerOption = option
+        sleepTimerEndsAt = nil
+
+        guard let seconds = option.seconds else { return }
+
+        let fireDate = Date().addingTimeInterval(seconds)
+        sleepTimerEndsAt = fireDate
+
+        sleepTimerTask = Task { [weak self] in
+            let nanoseconds = UInt64(seconds * 1_000_000_000)
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.fireSleepTimer()
+        }
+    }
+
+    func configureEpisodeSwitcher(
+        episodes: [Video],
+        resolver: @escaping (Video) throws -> URL
+    ) {
+        episodeOptions = episodes
+        episodeURLResolver = resolver
+    }
+
+    func quickSwitchEpisode(id: Int) {
+        guard let target = episodeOptions.first(where: { $0.id == id }) else { return }
+        guard let resolver = episodeURLResolver else {
+            setUnsupportedFeatureMessage("Episode quick switch")
+            return
+        }
+
+        lastEpisodeSwitchAttemptID = id
+        do {
+            let url = try resolver(target)
+            canRetryEpisodeSwitch = false
+            controlMessage = nil
+            load(target, url, presentation: presentation, autoplay: true)
+        } catch {
+            controlMessage = "Could not switch episode. Try again."
+            canRetryEpisodeSwitch = true
+            logger.error("Episode quick switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func retryEpisodeSwitch() {
+        guard canRetryEpisodeSwitch, let id = lastEpisodeSwitchAttemptID else { return }
+        quickSwitchEpisode(id: id)
     }
 
     // MARK: - Internals
@@ -184,6 +513,8 @@ final class Player {
             playbackState = .ready
             isBuffering = false
             errorMessage = nil
+            refreshAdvancedStateFromBackend()
+            applySavedPreferencesIfPossible()
 
         case .playing:
             isPlaying = true
@@ -217,9 +548,168 @@ final class Player {
             playbackState = .paused
             markCurrentItemCompleted()
 
+            if sleepTimerOption == .endOfItem {
+                fireSleepTimer()
+            }
+
         case .failed(let error):
             processFailure(error, from: backendID)
         }
+    }
+
+    private func refreshAdvancedStateFromBackend() {
+        guard let backend else {
+            capabilities = .unsupported
+            audioTracks = []
+            subtitleTracks = []
+            qualityVariants = [QualityVariant.auto]
+            chapterMarkers = []
+            outputRoutes = []
+            selectedOutputRouteID = nil
+            return
+        }
+
+        var nextCapabilities = backend.capabilities()
+
+        #if os(iOS) || os(tvOS)
+        nextCapabilities.supportsBrightness = true
+        nextCapabilities.supportsOutputRouteSelection = true
+        #endif
+
+        capabilities = nextCapabilities
+
+        audioTracks = nextCapabilities.supportsAudioTracks ? backend.audioTracks() : []
+        subtitleTracks = nextCapabilities.supportsSubtitles ? backend.subtitleTracks() : []
+
+        let backendQuality = backend.qualityVariants()
+        qualityVariants = backendQuality.isEmpty ? [QualityVariant.auto] : backendQuality
+
+        chapterMarkers = nextCapabilities.supportsChapterMarkers
+            ? backend.chapterMarkers().sorted { $0.startSeconds < $1.startSeconds }
+            : []
+
+        if selectedAudioTrackID == nil {
+            selectedAudioTrackID = audioTracks.first(where: { $0.isDefault })?.id ?? audioTracks.first?.id
+        }
+
+        if !subtitleTracks.contains(where: { $0.id == selectedSubtitleTrackID }) {
+            selectedSubtitleTrackID = MediaTrack.subtitleOffID
+        }
+
+        if !qualityVariants.contains(where: { $0.id == selectedQualityVariantID }) {
+            selectedQualityVariantID = qualityVariants.first(where: { $0.isAuto })?.id ?? qualityVariants[0].id
+        }
+
+        if nextCapabilities.supportsOutputRouteSelection {
+            refreshOutputRoutes()
+        } else {
+            outputRoutes = []
+            selectedOutputRouteID = nil
+        }
+    }
+
+    private func applySavedPreferencesIfPossible() {
+        backend?.setPlaybackSpeed(playbackSpeed)
+        backend?.setAspectRatio(aspectRatioMode)
+        backend?.setAudioDelay(milliseconds: audioDelayMilliseconds)
+
+        guard !didApplyTrackPreferencesForCurrentItem else { return }
+        didApplyTrackPreferencesForCurrentItem = true
+
+        if let preferredAudioLanguageCode,
+           let match = audioTracks.first(where: { language($0.languageCode, matches: preferredAudioLanguageCode) }) {
+            selectedAudioTrackID = match.id
+            backend?.selectAudioTrack(id: match.id)
+        }
+
+        if subtitleEnabledByDefault {
+            if let preferredSubtitleLanguageCode,
+               let match = subtitleTracks.first(where: { language($0.languageCode, matches: preferredSubtitleLanguageCode) }) {
+                selectedSubtitleTrackID = match.id
+                backend?.selectSubtitleTrack(id: match.id)
+            } else if let fallback = subtitleTracks.first {
+                selectedSubtitleTrackID = fallback.id
+                backend?.selectSubtitleTrack(id: fallback.id)
+            }
+        } else {
+            selectedSubtitleTrackID = MediaTrack.subtitleOffID
+            backend?.selectSubtitleTrack(id: MediaTrack.subtitleOffID)
+        }
+    }
+
+    private func loadSavedPreferencesForCurrentProfile() {
+        let keyPrefix = profilePreferencePrefix()
+
+        if let storedSpeed = defaults.object(forKey: "\(keyPrefix).defaultSpeed") as? Double,
+           storedSpeed.isFinite,
+           storedSpeed > 0 {
+            playbackSpeed = storedSpeed
+        } else {
+            playbackSpeed = 1
+        }
+
+        if let rawAspect = defaults.string(forKey: "\(keyPrefix).defaultAspectRatio"),
+           let mode = PlayerAspectRatioMode(rawValue: rawAspect) {
+            aspectRatioMode = mode
+        } else {
+            aspectRatioMode = .fit
+        }
+
+        if let storedDelay = defaults.object(forKey: "\(keyPrefix).defaultAudioDelayMs") as? Int {
+            audioDelayMilliseconds = storedDelay
+        } else {
+            audioDelayMilliseconds = 0
+        }
+
+        preferredAudioLanguageCode = defaults.string(forKey: "\(keyPrefix).preferredAudioLanguage")
+        preferredSubtitleLanguageCode = defaults.string(forKey: "\(keyPrefix).preferredSubtitleLanguage")
+
+        if defaults.object(forKey: "\(keyPrefix).defaultSubtitleEnabled") != nil {
+            subtitleEnabledByDefault = defaults.bool(forKey: "\(keyPrefix).defaultSubtitleEnabled")
+        } else {
+            subtitleEnabledByDefault = false
+        }
+    }
+
+    private func persistPreference(_ key: String, value: Any) {
+        defaults.set(value, forKey: "\(profilePreferencePrefix()).\(key)")
+    }
+
+    private func profilePreferencePrefix() -> String {
+        let profile = providerFingerprintProvider() ?? "default"
+        return "player.preferences.\(profile)"
+    }
+
+    private func language(_ lhs: String?, matches rhs: String) -> Bool {
+        guard let lhs, !lhs.isEmpty else { return false }
+        let normalizedLHS = lhs.lowercased()
+        let normalizedRHS = rhs.lowercased()
+
+        if normalizedLHS == normalizedRHS {
+            return true
+        }
+
+        let lhsPrimary = normalizedLHS.split(separator: "-").first.map(String.init)
+        let rhsPrimary = normalizedRHS.split(separator: "-").first.map(String.init)
+        return lhsPrimary == rhsPrimary
+    }
+
+    private func setUnsupportedFeatureMessage(_ feature: String) {
+        controlMessage = "\(feature) is not supported by the current stream/backend."
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
+    }
+
+    private func fireSleepTimer() {
+        sleepTimerTask?.cancel()
+        sleepTimerTask = nil
+
+        sleepTimerOption = .off
+        sleepTimerEndsAt = nil
+
+        pause()
+        presentation = .inline
+        controlMessage = "Sleep timer finished. Playback paused."
     }
 
     private func processFailure(_ error: Error, from backendID: PlaybackBackendID) {
@@ -239,6 +729,8 @@ final class Player {
 
         do {
             try activateBackend(for: currentItem, url: currentURL, excluding: [.vlc])
+            refreshAdvancedStateFromBackend()
+            applySavedPreferencesIfPossible()
             try backend?.load(url: currentURL, autoplay: shouldAutoPlay)
             playbackState = .loading
             errorMessage = nil

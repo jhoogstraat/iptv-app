@@ -44,6 +44,61 @@ protocol PlaybackBackend: AnyObject {
     func stop()
     func seek(to seconds: Double)
     func events() -> AsyncStream<PlaybackEvent>
+
+    // MARK: Advanced controls
+
+    func capabilities() -> PlaybackCapabilities
+    func audioTracks() -> [MediaTrack]
+    func subtitleTracks() -> [MediaTrack]
+    func qualityVariants() -> [QualityVariant]
+    func chapterMarkers() -> [ChapterMarker]
+    func availableOutputRoutes() -> [OutputRoute]
+
+    func selectAudioTrack(id: String)
+    func selectSubtitleTrack(id: String)
+    func selectQualityVariant(id: String) throws
+    func setPlaybackSpeed(_ speed: Double)
+    func setAspectRatio(_ mode: PlayerAspectRatioMode)
+    func setAudioDelay(milliseconds: Int)
+    func selectOutputRoute(id: String)
+    func setVolume(_ value: Double)
+    func setBrightness(_ value: Double)
+}
+
+extension PlaybackBackend {
+    func capabilities() -> PlaybackCapabilities {
+        .unsupported
+    }
+
+    func audioTracks() -> [MediaTrack] {
+        []
+    }
+
+    func subtitleTracks() -> [MediaTrack] {
+        []
+    }
+
+    func qualityVariants() -> [QualityVariant] {
+        []
+    }
+
+    func chapterMarkers() -> [ChapterMarker] {
+        []
+    }
+
+    func availableOutputRoutes() -> [OutputRoute] {
+        []
+    }
+
+    func selectAudioTrack(id: String) {}
+    func selectSubtitleTrack(id: String) {}
+    func selectQualityVariant(id: String) throws {}
+    func setPlaybackSpeed(_ speed: Double) {}
+    func setAspectRatio(_ mode: PlayerAspectRatioMode) {}
+    func setAudioDelay(milliseconds: Int) {}
+    func selectOutputRoute(id: String) {}
+    func setVolume(_ value: Double) {}
+    func setBrightness(_ value: Double) {}
 }
 
 @MainActor

@@ -56,6 +56,84 @@ final class iptvUITests: XCTestCase {
         }
     }
 
+    #if os(iOS)
+    @MainActor
+    func testPlayerQuickSettingsSheetShowsVolumeAndBrightnessControls() throws {
+        let app = makeApp()
+        app.launchArguments.append("--uitest-open-player")
+        app.launch()
+
+        let settingsChip = app.buttons["player.chip.settings"]
+        XCTAssertTrue(settingsChip.waitForExistence(timeout: 5))
+        settingsChip.tap()
+
+        XCTAssertTrue(app.navigationBars["Quick Settings"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.sliders["player.volume"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.sliders["player.brightness"].exists)
+        XCTAssertTrue(app.otherElements["player.outputRoutePicker"].exists)
+        XCTAssertTrue(app.buttons["player.outputRouteSelection"].exists)
+    }
+
+    @MainActor
+    func testPlayerSeriesModeShowsEpisodeSwitcher() throws {
+        let app = makeApp()
+        app.launchArguments.append("--uitest-open-player-series")
+        app.launch()
+
+        let episodesChip = app.buttons["player.chip.episodes"]
+        XCTAssertTrue(episodesChip.waitForExistence(timeout: 5))
+        XCTAssertTrue(episodesChip.isEnabled)
+        episodesChip.tap()
+
+        XCTAssertTrue(app.navigationBars["Episodes"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Episode 1"].exists)
+        XCTAssertTrue(app.buttons["Episode 2"].exists)
+    }
+
+    @MainActor
+    func testUnsupportedControlsRemainVisibleButDisabled() throws {
+        let app = makeApp()
+        app.launchArguments.append("--uitest-open-player")
+        app.launch()
+
+        let mediaChip = app.buttons["player.chip.media"]
+        XCTAssertTrue(mediaChip.waitForExistence(timeout: 5))
+        XCTAssertFalse(mediaChip.isEnabled)
+    }
+    #endif
+
+    #if os(tvOS)
+    @MainActor
+    func testTvOSPlayerOverlayShowsTransportAndMediaActions() throws {
+        let app = makeApp()
+        app.launchArguments.append("--uitest-open-player")
+        app.launch()
+
+        XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Media"].exists)
+        XCTAssertTrue(app.buttons["Quality"].exists)
+        XCTAssertTrue(app.buttons["Chapters"].exists)
+    }
+    #endif
+
+    #if os(macOS)
+    @MainActor
+    func testMacOSPlayerMenuContainsAdvancedSections() throws {
+        let app = makeApp()
+        app.launchArguments.append("--uitest-open-player")
+        app.launch()
+
+        let playerMenu = app.menuBars.menuBarItems["Player"]
+        XCTAssertTrue(playerMenu.waitForExistence(timeout: 5))
+        playerMenu.click()
+
+        XCTAssertTrue(app.menuItems["Audio Tracks"].exists)
+        XCTAssertTrue(app.menuItems["Subtitles"].exists)
+        XCTAssertTrue(app.menuItems["Quality"].exists)
+        XCTAssertTrue(app.menuItems["Playback Speed"].exists)
+    }
+    #endif
+
     private func makeApp() -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments.append("--disable-keychain-auth-ui")

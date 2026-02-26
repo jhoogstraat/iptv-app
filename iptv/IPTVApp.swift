@@ -47,7 +47,11 @@ struct IPTVApp: App {
         
         // The video player window
         #if os(macOS)
-        PlayerWindow(player: player)
+        PlayerWindow(
+            player: player,
+            providerStore: providerStore,
+            favoritesStore: favoritesStore
+        )
         #endif
     }
     
@@ -64,6 +68,13 @@ struct IPTVApp: App {
             let favoritesStore = FavoritesStore()
             let watchActivityStore = DiskWatchActivityStore.shared
             let imagePrefetcher = URLSessionImagePrefetcher()
+            let player = Player(
+                watchActivityStore: watchActivityStore,
+                providerFingerprintProvider: {
+                    guard let config = try? providerStore.configuration() else { return nil }
+                    return ProviderCacheFingerprint.make(from: config)
+                }
+            )
             self._providerStore = State(initialValue: providerStore)
             self._favoritesStore = State(initialValue: favoritesStore)
             self._catalog = State(initialValue: Catalog(
@@ -71,13 +82,38 @@ struct IPTVApp: App {
                 modelContainer: modelContainer,
                 imagePrefetcher: imagePrefetcher
             ))
-            self._player = State(initialValue: Player(
-                watchActivityStore: watchActivityStore,
-                providerFingerprintProvider: {
-                    guard let config = try? providerStore.configuration() else { return nil }
-                    return ProviderCacheFingerprint.make(from: config)
+
+            let launchArgs = ProcessInfo.processInfo.arguments
+            if launchArgs.contains("--uitest-open-player-series") {
+                let episodes: [Video] = [
+                    Video(id: 8001, name: "Episode 1", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil),
+                    Video(id: 8002, name: "Episode 2", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil)
+                ]
+                player.configureEpisodeSwitcher(episodes: episodes) { episode in
+                    guard let url = URL(string: "https://example.com/\(episode.id).mp4") else {
+                        throw URLError(.badURL)
+                    }
+                    return url
                 }
-            ))
+                if let first = episodes.first,
+                   let url = URL(string: "https://example.com/8001.mp4") {
+                    player.load(first, url, presentation: .fullWindow, autoplay: false)
+                }
+            } else if launchArgs.contains("--uitest-open-player"),
+                      let url = URL(string: "https://example.com/demo.mp4") {
+                let video = Video(
+                    id: 9001,
+                    name: "UI Test Player Demo",
+                    containerExtension: "mp4",
+                    contentType: XtreamContentType.vod.rawValue,
+                    coverImageURL: nil,
+                    tmdbId: nil,
+                    rating: nil
+                )
+                player.load(video, url, presentation: .fullWindow, autoplay: false)
+            }
+
+            self._player = State(initialValue: player)
             self.modelContainer = modelContainer
         } catch {
             fatalError(error.localizedDescription)

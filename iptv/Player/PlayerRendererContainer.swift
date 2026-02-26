@@ -11,6 +11,14 @@ struct PlayerRendererContainer: View {
     @Environment(Player.self) private var player
 
     var body: some View {
+        renderer
+            .modifier(PlayerAspectRatioModifier(mode: player.aspectRatioMode))
+            .id(player.rendererRevision)
+            .background(Color.black)
+    }
+
+    @ViewBuilder
+    private var renderer: some View {
         Group {
             switch player.activeBackendID {
             case .vlc:
@@ -21,7 +29,25 @@ struct PlayerRendererContainer: View {
                 Color.black
             }
         }
-        .id(player.rendererRevision)
-        .background(Color.black)
+    }
+}
+
+private struct PlayerAspectRatioModifier: ViewModifier {
+    let mode: PlayerAspectRatioMode
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch mode {
+        case .fill:
+            content
+                .aspectRatio(contentMode: .fill)
+                .clipped()
+        case .sixteenByNine, .fourByThree:
+            content
+                .aspectRatio(mode.fixedAspectRatio, contentMode: .fit)
+        case .fit, .original:
+            content
+                .aspectRatio(contentMode: .fit)
+        }
     }
 }

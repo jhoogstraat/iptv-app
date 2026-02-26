@@ -28,6 +28,7 @@ struct PreviewData: PreviewModifier {
             .environment(providerStore)
             .environment(Catalog(providerStore: providerStore, modelContainer: context))
             .environment(Player())
+            .environment(FavoritesStore())
             #if os(visionOS)
             .environment(ImmersiveEnvironment())
             #endif
