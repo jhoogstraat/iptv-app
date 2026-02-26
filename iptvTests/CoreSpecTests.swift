@@ -93,6 +93,26 @@ struct CoreSpecTests {
     }
 
     @Test
+    func sleepTimerEndOfItemPausesAndExitsFullWindowPresentation() async {
+        let backend = MockBackend(id: .vlc, canPlayResult: true)
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+        let video = makeVideo(containerExtension: "mkv")
+        let url = URL(string: "https://example.com/movie.mkv")!
+
+        player.load(video, url, presentation: .fullWindow, autoplay: false)
+        player.setSleepTimer(.endOfItem)
+        backend.emit(.ended)
+
+        let slept = await waitUntil {
+            player.presentation == .inline && player.sleepTimerOption == .off
+        }
+
+        #expect(slept)
+        #expect(backend.pauseCallCount == 1)
+    }
+
+    @Test
     func providerStorePersistsURLInDefaultsAndCredentialsInKeychain() throws {
         let suiteName = "iptv.tests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -283,6 +303,395 @@ struct CoreSpecTests {
         #expect(cache.cachedResponse(for: URLRequest(url: url)) != nil)
     }
 
+    @Test
+    func avBackendCapabilityMappingProvidesQualityVariants() {
+        let backend = AVPlaybackBackend()
+        let qualities = backend.qualityVariants()
+
+        #expect(qualities.contains(where: { $0.isAuto }))
+        #expect(qualities.count >= 2)
+
+        let caps = backend.capabilities()
+        #expect(caps.supportsAudioDelay == false)
+    }
+
+    @Test
+    func vlcBackendCapabilityMappingReflectsRuntimeFeatureSet() {
+        let backend = VLCPlaybackBackend()
+        let caps = backend.capabilities()
+
+        #expect(caps.supportsAudioTracks == false)
+        #expect(caps.supportsSubtitles == false)
+        #expect(caps.supportsQualitySelection == false)
+        #expect(caps.supportsChapterMarkers == false)
+        #expect(caps.supportsAudioDelay == true)
+        #if os(iOS) || os(tvOS)
+        #expect(caps.supportsOutputRouteSelection == true)
+        #expect(caps.supportsBrightness == true)
+        #else
+        #expect(caps.supportsOutputRouteSelection == false)
+        #expect(caps.supportsBrightness == false)
+        #endif
+    }
+
+    @Test
+    func playerMapsAdvancedCapabilitiesAndCollectionsFromBackend() async {
+        let audio = [
+            MediaTrack(id: "aud-en", kind: .audio, languageCode: "en", label: "English", isDefault: true, isForced: false),
+            MediaTrack(id: "aud-es", kind: .audio, languageCode: "es", label: "Spanish", isDefault: false, isForced: false)
+        ]
+        let subtitles = [
+            MediaTrack(id: "sub-en", kind: .subtitle, languageCode: "en", label: "English CC", isDefault: true, isForced: false)
+        ]
+        let qualities = [
+            QualityVariant.auto,
+            QualityVariant(id: "q-720", label: "720p", bitrate: 3_000_000, resolution: "1280x720", frameRate: 30, isAuto: false)
+        ]
+        let chapters = [
+            ChapterMarker(id: "c2", title: "Second", startSeconds: 120),
+            ChapterMarker(id: "c1", title: "First", startSeconds: 10)
+        ]
+        let routes = [
+            OutputRoute(id: "route-a", name: "Built-in", isActive: true),
+            OutputRoute(id: "route-b", name: "AirPlay", isActive: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: true,
+            supportsSubtitles: true,
+            supportsQualitySelection: true,
+            supportsChapterMarkers: true,
+            supportsOutputRouteSelection: true,
+            supportsAudioDelay: true,
+            supportsBrightness: true
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            audioTracks: audio,
+            subtitleTracks: subtitles,
+            qualityVariants: qualities,
+            chapterMarkers: chapters,
+            outputRoutes: routes
+        )
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 300))
+        _ = await waitUntil { player.duration == 300 }
+
+        #expect(player.capabilities == caps)
+        #expect(player.audioTracks == audio)
+        #expect(player.subtitleTracks == subtitles)
+        #expect(player.qualityVariants == qualities)
+        #expect(player.chapterMarkers.map(\.id) == ["c1", "c2"])
+        #expect(player.selectedOutputRouteID == "route-a")
+    }
+
+    @Test
+    func qualitySelectionFailureRevertsToPreviousVariant() async {
+        let qualities = [
+            QualityVariant.auto,
+            QualityVariant(id: "q-1080", label: "1080p", bitrate: 5_000_000, resolution: "1920x1080", frameRate: 30, isAuto: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: false,
+            supportsSubtitles: false,
+            supportsQualitySelection: true,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: false,
+            supportsAudioDelay: false,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            qualityVariants: qualities
+        )
+        backend.shouldFailQualitySelection = true
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        #expect(player.selectedQualityVariantID == QualityVariant.auto.id)
+        player.selectQualityVariant(id: "q-1080")
+
+        #expect(player.selectedQualityVariantID == QualityVariant.auto.id)
+        #expect(player.controlMessage?.contains("Could not switch quality") == true)
+        #expect(backend.selectedQualityVariantIDs.isEmpty)
+
+        backend.shouldFailQualitySelection = false
+        player.selectQualityVariant(id: "q-1080")
+        #expect(player.selectedQualityVariantID == "q-1080")
+        #expect(backend.selectedQualityVariantIDs == ["q-1080"])
+    }
+
+    @Test
+    func trackAndSubtitleSelectionTransitionsPersistInPlayerState() async {
+        let audio = [
+            MediaTrack(id: "aud-en", kind: .audio, languageCode: "en", label: "English", isDefault: true, isForced: false),
+            MediaTrack(id: "aud-es", kind: .audio, languageCode: "es", label: "Spanish", isDefault: false, isForced: false)
+        ]
+        let subtitles = [
+            MediaTrack(id: "sub-en", kind: .subtitle, languageCode: "en", label: "English", isDefault: true, isForced: false),
+            MediaTrack(id: "sub-es", kind: .subtitle, languageCode: "es", label: "Spanish", isDefault: false, isForced: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: true,
+            supportsSubtitles: true,
+            supportsQualitySelection: false,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: false,
+            supportsAudioDelay: false,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            audioTracks: audio,
+            subtitleTracks: subtitles
+        )
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        player.selectAudioTrack(id: "aud-es")
+        player.selectSubtitleTrack(id: "sub-es")
+        player.selectSubtitleTrack(id: MediaTrack.subtitleOffID)
+
+        #expect(player.selectedAudioTrackID == "aud-es")
+        #expect(player.selectedSubtitleTrackID == MediaTrack.subtitleOffID)
+        #expect(backend.selectedAudioTrackIDs.last == "aud-es")
+        #expect(backend.selectedSubtitleTrackIDs == ["sub-es", MediaTrack.subtitleOffID])
+    }
+
+    @Test
+    func sleepTimerTracksDeadlineForDurationOptions() {
+        let backend = MockBackend(id: .vlc, canPlayResult: true)
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.setSleepTimer(.minutes15)
+        #expect(player.sleepTimerOption == .minutes15)
+        #expect(player.sleepTimerEndsAt != nil)
+
+        player.setSleepTimer(.off)
+        #expect(player.sleepTimerOption == .off)
+        #expect(player.sleepTimerEndsAt == nil)
+    }
+
+    @Test
+    func preferencesAutoApplyWithLanguageFallback() async {
+        let suiteName = "iptv.tests.player.preferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let keyPrefix = "player.preferences.profile-a"
+        defaults.set(1.25, forKey: "\(keyPrefix).defaultSpeed")
+        defaults.set(PlayerAspectRatioMode.fill.rawValue, forKey: "\(keyPrefix).defaultAspectRatio")
+        defaults.set(120, forKey: "\(keyPrefix).defaultAudioDelayMs")
+        defaults.set("es", forKey: "\(keyPrefix).preferredAudioLanguage")
+        defaults.set("de", forKey: "\(keyPrefix).preferredSubtitleLanguage")
+        defaults.set(true, forKey: "\(keyPrefix).defaultSubtitleEnabled")
+
+        let audio = [
+            MediaTrack(id: "aud-en", kind: .audio, languageCode: "en", label: "English", isDefault: true, isForced: false),
+            MediaTrack(id: "aud-es", kind: .audio, languageCode: "es", label: "Spanish", isDefault: false, isForced: false)
+        ]
+        let subtitles = [
+            MediaTrack(id: "sub-fr", kind: .subtitle, languageCode: "fr", label: "French", isDefault: true, isForced: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: true,
+            supportsSubtitles: true,
+            supportsQualitySelection: false,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: false,
+            supportsAudioDelay: true,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            audioTracks: audio,
+            subtitleTracks: subtitles
+        )
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(
+            backendFactory: factory,
+            providerFingerprintProvider: { "profile-a" },
+            defaults: defaults
+        )
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        #expect(player.playbackSpeed == 1.25)
+        #expect(player.aspectRatioMode == .fill)
+        #expect(player.audioDelayMilliseconds == 120)
+        #expect(player.selectedAudioTrackID == "aud-es")
+        #expect(player.selectedSubtitleTrackID == "sub-fr")
+        #expect(backend.playbackSpeedValues.contains(1.25))
+        #expect(backend.aspectRatioValues.contains(.fill))
+        #expect(backend.audioDelayValues.contains(120))
+    }
+
+    @Test
+    func episodeQuickSwitchFailureExposesRetryAction() async {
+        let backend = MockBackend(id: .vlc, canPlayResult: true)
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        let episode1 = Video(id: 2001, name: "Episode 1", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil)
+        let episode2 = Video(id: 2002, name: "Episode 2", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil)
+
+        player.load(episode1, URL(string: "https://example.com/episode1.mp4")!, presentation: .fullWindow, autoplay: false)
+        var shouldFail = true
+        player.configureEpisodeSwitcher(episodes: [episode1, episode2]) { episode in
+            if shouldFail && episode.id == episode2.id {
+                throw MockError.failed
+            }
+            return URL(string: "https://example.com/\(episode.id).mp4")!
+        }
+
+        player.quickSwitchEpisode(id: episode2.id)
+        #expect(player.currentItem?.id == episode1.id)
+        #expect(player.canRetryEpisodeSwitch)
+        #expect(player.controlMessage?.contains("Could not switch episode") == true)
+
+        shouldFail = false
+        player.retryEpisodeSwitch()
+        let switched = await waitUntil { player.currentItem?.id == episode2.id }
+        #expect(switched)
+        #expect(player.canRetryEpisodeSwitch == false)
+    }
+
+    @Test
+    func outputRouteSelectionUpdatesSelectedRoute() async {
+        let routes = [
+            OutputRoute(id: "local", name: "Local", isActive: true),
+            OutputRoute(id: "airplay", name: "AirPlay", isActive: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: false,
+            supportsSubtitles: false,
+            supportsQualitySelection: false,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: true,
+            supportsAudioDelay: false,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            outputRoutes: routes
+        )
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        #expect(player.selectedOutputRouteID == "local")
+        player.selectOutputRoute(id: "airplay")
+
+        #expect(player.selectedOutputRouteID == "airplay")
+        #expect(player.outputRoutes.first(where: { $0.id == "airplay" })?.isActive == true)
+        #expect(backend.selectedOutputRouteIDs == ["airplay"])
+    }
+
+    @Test
+    func outputRouteRefreshPullsLatestBackendState() async {
+        let routes = [
+            OutputRoute(id: "local", name: "Local", isActive: true),
+            OutputRoute(id: "airplay", name: "AirPlay", isActive: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: false,
+            supportsSubtitles: false,
+            supportsQualitySelection: false,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: true,
+            supportsAudioDelay: false,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            outputRoutes: routes
+        )
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        #expect(player.selectedOutputRouteID == "local")
+
+        backend.setOutputRoutes([
+            OutputRoute(id: "local", name: "Local", isActive: false),
+            OutputRoute(id: "airplay", name: "AirPlay", isActive: true)
+        ])
+        player.refreshOutputRoutes()
+
+        #expect(player.selectedOutputRouteID == "airplay")
+        #expect(player.outputRoutes.first(where: { $0.id == "airplay" })?.isActive == true)
+    }
+
+    @Test
+    func outputRouteSelectionFallsBackWhenBackendReturnsNoRoutes() async {
+        let routes = [
+            OutputRoute(id: "local", name: "Local", isActive: true),
+            OutputRoute(id: "airplay", name: "AirPlay", isActive: false)
+        ]
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: false,
+            supportsSubtitles: false,
+            supportsQualitySelection: false,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: true,
+            supportsAudioDelay: false,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .vlc,
+            canPlayResult: true,
+            capabilities: caps,
+            outputRoutes: routes
+        )
+        backend.clearOutputRoutesOnSelect = true
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mkv"), URL(string: "https://example.com/movie.mkv")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        #expect(player.selectedOutputRouteID == "local")
+
+        player.selectOutputRoute(id: "airplay")
+
+        #expect(player.selectedOutputRouteID == "airplay")
+        #expect(player.outputRoutes.count == 2)
+        #expect(player.outputRoutes.first(where: { $0.id == "airplay" })?.isActive == true)
+        #expect(player.outputRoutes.first(where: { $0.id == "local" })?.isActive == false)
+        #expect(backend.selectedOutputRouteIDs == ["airplay"])
+    }
+
     private func makeVideo(containerExtension: String) -> Video {
         Video(
             id: 1,
@@ -322,6 +731,12 @@ private final class MockBackend: PlaybackBackend {
     let id: PlaybackBackendID
     let isAvailable: Bool
     private let canPlayResult: Bool
+    private let mockedCapabilities: PlaybackCapabilities
+    private let mockedAudioTracks: [MediaTrack]
+    private let mockedSubtitleTracks: [MediaTrack]
+    private let mockedQualityVariants: [QualityVariant]
+    private let mockedChapterMarkers: [ChapterMarker]
+    private var mockedOutputRoutes: [OutputRoute]
 
     private let stream: AsyncStream<PlaybackEvent>
     private let continuation: AsyncStream<PlaybackEvent>.Continuation
@@ -332,15 +747,38 @@ private final class MockBackend: PlaybackBackend {
     private(set) var toggleCallCount = 0
     private(set) var stopCallCount = 0
     private(set) var lastSeekTime: Double?
+    private(set) var selectedAudioTrackIDs: [String] = []
+    private(set) var selectedSubtitleTrackIDs: [String] = []
+    private(set) var selectedQualityVariantIDs: [String] = []
+    private(set) var selectedOutputRouteIDs: [String] = []
+    private(set) var playbackSpeedValues: [Double] = []
+    private(set) var aspectRatioValues: [PlayerAspectRatioMode] = []
+    private(set) var audioDelayValues: [Int] = []
+    private(set) var volumeValues: [Double] = []
+    private(set) var brightnessValues: [Double] = []
+    var shouldFailQualitySelection = false
+    var clearOutputRoutesOnSelect = false
 
     init(
         id: PlaybackBackendID,
         isAvailable: Bool = true,
-        canPlayResult: Bool
+        canPlayResult: Bool,
+        capabilities: PlaybackCapabilities = .unsupported,
+        audioTracks: [MediaTrack] = [],
+        subtitleTracks: [MediaTrack] = [],
+        qualityVariants: [QualityVariant] = [QualityVariant.auto],
+        chapterMarkers: [ChapterMarker] = [],
+        outputRoutes: [OutputRoute] = []
     ) {
         self.id = id
         self.isAvailable = isAvailable
         self.canPlayResult = canPlayResult
+        self.mockedCapabilities = capabilities
+        self.mockedAudioTracks = audioTracks
+        self.mockedSubtitleTracks = subtitleTracks
+        self.mockedQualityVariants = qualityVariants
+        self.mockedChapterMarkers = chapterMarkers
+        self.mockedOutputRoutes = outputRoutes
 
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
         self.stream = AsyncStream { continuation = $0 }
@@ -377,6 +815,83 @@ private final class MockBackend: PlaybackBackend {
 
     func events() -> AsyncStream<PlaybackEvent> {
         stream
+    }
+
+    func capabilities() -> PlaybackCapabilities {
+        mockedCapabilities
+    }
+
+    func audioTracks() -> [MediaTrack] {
+        mockedAudioTracks
+    }
+
+    func subtitleTracks() -> [MediaTrack] {
+        mockedSubtitleTracks
+    }
+
+    func qualityVariants() -> [QualityVariant] {
+        mockedQualityVariants
+    }
+
+    func chapterMarkers() -> [ChapterMarker] {
+        mockedChapterMarkers
+    }
+
+    func availableOutputRoutes() -> [OutputRoute] {
+        mockedOutputRoutes
+    }
+
+    func selectAudioTrack(id: String) {
+        selectedAudioTrackIDs.append(id)
+    }
+
+    func selectSubtitleTrack(id: String) {
+        selectedSubtitleTrackIDs.append(id)
+    }
+
+    func selectQualityVariant(id: String) throws {
+        if shouldFailQualitySelection {
+            throw MockError.failed
+        }
+        selectedQualityVariantIDs.append(id)
+    }
+
+    func setPlaybackSpeed(_ speed: Double) {
+        playbackSpeedValues.append(speed)
+    }
+
+    func setAspectRatio(_ mode: PlayerAspectRatioMode) {
+        aspectRatioValues.append(mode)
+    }
+
+    func setAudioDelay(milliseconds: Int) {
+        audioDelayValues.append(milliseconds)
+    }
+
+    func selectOutputRoute(id: String) {
+        selectedOutputRouteIDs.append(id)
+        if clearOutputRoutesOnSelect {
+            mockedOutputRoutes = []
+            return
+        }
+
+        if mockedOutputRoutes.contains(where: { $0.id == id }) {
+            mockedOutputRoutes = mockedOutputRoutes.map { route in
+                OutputRoute(id: route.id, name: route.name, isActive: route.id == id)
+            }
+        }
+    }
+
+    func setOutputRoutes(_ routes: [OutputRoute]) {
+        mockedOutputRoutes = routes
+    }
+
+    func setVolume(_ value: Double) {
+        volumeValues.append(value)
+    }
+
+    func setBrightness(_ value: Double) {
+        brightnessValues.append(value)
     }
 
     func emit(_ event: PlaybackEvent) {
