@@ -74,7 +74,7 @@ enum SearchAddedWindow: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var dayCount: Int? {
+    nonisolated var dayCount: Int? {
         switch self {
         case .any:
             nil
@@ -138,7 +138,7 @@ struct SearchResultItem: Identifiable {
     let matchedFields: Set<SearchMatchedField>
 
     var id: String {
-        "\(scope.rawValue):\(video.id)"
+        "\(video.xtreamContentType.rawValue):\(video.id)"
     }
 }
 
@@ -161,4 +161,3 @@ struct SearchFacetValues: Hashable, Sendable {
     let genres: [String]
     let languages: [String]
 }
-

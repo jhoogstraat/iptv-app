@@ -1,0 +1,17 @@
+# Pinned VLCKit 4 artifacts.
+# Update intentionally; do not replace these URLs with moving "latest" aliases at build time.
+
+VLCKIT_IOS_ARCHIVE="VLCKit-iOS-4.0-20260121-1935.tar.xz"
+VLCKIT_IOS_URL="https://artifacts.videolan.org/VLCKit/dev-artifacts-VLCKit-iOS-main/VLCKit-iOS-4.0-20260121-1935.tar.xz"
+VLCKIT_IOS_SHA256="8b62fce991a0f96f55ffaee10269d181fdf981bffd74e33e4876cf3953005a75"
+VLCKIT_IOS_ROOT="VLCKit-iOS-binary"
+
+VLCKIT_MACOS_ARCHIVE="VLCKit-macOS-4.0.0a18-7334bc1c-c833c4be0.tar.xz"
+VLCKIT_MACOS_URL="https://artifacts.videolan.org/VLCKit/VLCKit-main/VLCKit-macOS-4.0.0a18-7334bc1c-c833c4be0.tar.xz"
+VLCKIT_MACOS_SHA256="c2abade881c6951bc9f2004847b64478aac2973128646cd8fe28cd213ef1e28f"
+VLCKIT_MACOS_ROOT="VLCKit-macOS-binary"
+
+VLCKIT_TVOS_ARCHIVE="VLCKit-tvOS-4.0.0a18-7334bc1c-c833c4be0.tar.xz"
+VLCKIT_TVOS_URL="https://artifacts.videolan.org/VLCKit/TVVLCKit-main/VLCKit-tvOS-4.0.0a18-7334bc1c-c833c4be0.tar.xz"
+VLCKIT_TVOS_SHA256="577fc86919a103a17f318a684664fd4d5d3d7a8f4bec8ed5807504295b206432"
+VLCKIT_TVOS_ROOT="VLCKit-tvOS-binary"

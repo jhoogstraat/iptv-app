@@ -36,7 +36,7 @@ final class SearchOrchestrator {
         let scopeKey = ScopeKey(providerFingerprint: providerFingerprint, scope: scope)
 
         return AsyncStream { continuation in
-            Task { @MainActor in
+            let producerTask = Task { @MainActor in
                 continuation.yield(await progressProvider())
 
                 var inFlight = inFlightCategoryKeysByScope[scopeKey] ?? []
@@ -50,17 +50,57 @@ final class SearchOrchestrator {
                     inFlight.insert(target.key)
                 }
                 inFlightCategoryKeysByScope[scopeKey] = inFlight
+                let pendingKeys = Set(pendingTargets.map(\.key))
 
                 defer {
+                    var remaining = inFlightCategoryKeysByScope[scopeKey] ?? []
+                    remaining.subtract(pendingKeys)
+                    if remaining.isEmpty {
+                        inFlightCategoryKeysByScope[scopeKey] = nil
+                    } else {
+                        inFlightCategoryKeysByScope[scopeKey] = remaining
+                    }
                     continuation.finish()
                 }
 
-                _ = maxConcurrent
-                for target in pendingTargets {
-                    await fetch(target)
-                    inFlightCategoryKeysByScope[scopeKey]?.remove(target.key)
-                    continuation.yield(await progressProvider())
+                let concurrencyLimit = max(1, maxConcurrent)
+                var iterator = pendingTargets.makeIterator()
+
+                await withTaskGroup(of: String?.self) { group in
+                    for _ in 0..<min(concurrencyLimit, pendingTargets.count) {
+                        guard let target = iterator.next() else { break }
+                        let targetKey = target.key
+                        group.addTask {
+                            guard !Task.isCancelled else { return nil }
+                            await fetch(target)
+                            return targetKey
+                        }
+                    }
+
+                    while let completedKey = await group.next() {
+                        guard let completedKey else { continue }
+                        inFlightCategoryKeysByScope[scopeKey]?.remove(completedKey)
+                        continuation.yield(await progressProvider())
+
+                        if Task.isCancelled {
+                            group.cancelAll()
+                            continue
+                        }
+
+                        if let nextTarget = iterator.next() {
+                            let nextTargetKey = nextTarget.key
+                            group.addTask {
+                                guard !Task.isCancelled else { return nil }
+                                await fetch(nextTarget)
+                                return nextTargetKey
+                            }
+                        }
+                    }
                 }
+            }
+
+            continuation.onTermination = { _ in
+                producerTask.cancel()
             }
         }
     }

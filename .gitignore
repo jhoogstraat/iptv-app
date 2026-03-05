@@ -1,1 +1,20 @@
 build/
+.DS_Store
+
+# Xcode user-specific state
+*.xcuserstate
+*.xcbkptlist
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+
+# Local binary dependencies
+Vendor/VLCKit/cache/*
+Vendor/VLCKit/iOS/*
+Vendor/VLCKit/macOS/*
+Vendor/VLCKit/tvOS/*
+!Vendor/VLCKit/cache/.gitkeep
+!Vendor/VLCKit/iOS/.gitkeep
+!Vendor/VLCKit/macOS/.gitkeep
+!Vendor/VLCKit/tvOS/.gitkeep

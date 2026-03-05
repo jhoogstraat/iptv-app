@@ -51,19 +51,15 @@
 		1A0D265E2E6728660091AF6A /* iptv.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iptv.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0D266F2E6728670091AF6A /* iptvTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iptvTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0D26792E6728670091AF6A /* iptvUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iptvUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A1352582E6B8DD3002345D7 /* iptv/Frameworks/VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = iptv/Frameworks/VLCKit.xcframework; sourceTree = "<group>"; };
-		1A89EED62F4A9AA100332D6A /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VLCKit.xcframework; path = "../../Downloads/VLCKit-iOS-binary/VLCKit.xcframework"; sourceTree = "<group>"; };
-		1A89EEDA2F4A9B1F00332D6A /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VLCKit.xcframework; path = "../../Downloads/VLCKit-macOS-binary/VLCKit.xcframework"; sourceTree = "<group>"; };
-		1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-iOS.xcframework"; path = "../../Downloads/VLCKit-iOS-binary/VLCKit-iOS.xcframework"; sourceTree = "<group>"; };
-		1A89EEE12F4A9BAE00332D6A /* VLCKit-tvOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-tvOS.xcframework"; path = "../../Downloads/VLCKit-tvOS-binary/VLCKit-tvOS.xcframework"; sourceTree = "<group>"; };
-		1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-macOS.xcframework"; path = "../../Downloads/VLCKit-macOS-binary/VLCKit-macOS.xcframework"; sourceTree = "<group>"; };
+		1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-iOS.xcframework"; path = Vendor/VLCKit/iOS/VLCKit.xcframework; sourceTree = SOURCE_ROOT; };
+		1A89EEE12F4A9BAE00332D6A /* VLCKit-tvOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-tvOS.xcframework"; path = Vendor/VLCKit/tvOS/VLCKit.xcframework; sourceTree = SOURCE_ROOT; };
+		1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit-macOS.xcframework"; path = Vendor/VLCKit/macOS/VLCKit.xcframework; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		1A0D26812E6728670091AF6A /* Exceptions for "iptv" folder in "iptv" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Frameworks/VLCKit.xcframework,
 				Info.plist,
 			);
 			target = 1A0D265D2E6728660091AF6A /* iptv */;
@@ -147,9 +143,6 @@
 				1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */,
 				1A89EEE12F4A9BAE00332D6A /* VLCKit-tvOS.xcframework */,
 				1A89EEDD2F4A9B9500332D6A /* VLCKit-iOS.xcframework */,
-				1A89EED62F4A9AA100332D6A /* VLCKit.xcframework */,
-				1A89EEDA2F4A9B1F00332D6A /* VLCKit.xcframework */,
-				1A1352582E6B8DD3002345D7 /* iptv/Frameworks/VLCKit.xcframework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";

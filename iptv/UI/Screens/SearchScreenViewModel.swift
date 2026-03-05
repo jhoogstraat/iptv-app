@@ -33,8 +33,10 @@ final class SearchScreenViewModel {
     var availableLanguages: [String] = []
     var favoriteIDs: Set<String> = []
 
+    private var sessionID = UUID()
     private var searchTask: Task<Void, Never>?
     private var coverageTask: Task<Void, Never>?
+    private var startupTask: Task<Void, Never>?
 
     init(catalog: Catalog, providerStore: ProviderStore, favoritesStore: FavoritesStore) {
         self.catalog = catalog
@@ -43,6 +45,9 @@ final class SearchScreenViewModel {
     }
 
     func start() {
+        cancelTasks()
+        sessionID = UUID()
+
         guard providerStore.hasConfiguration else {
             phase = .idle
             results = []
@@ -50,17 +55,19 @@ final class SearchScreenViewModel {
             return
         }
 
-        coverageTask?.cancel()
+        let activeSession = sessionID
+        let activeScope = scope
+
         coverageTask = Task { [weak self] in
             guard let self else { return }
-            await self.consumeCoverageStream()
+            await self.consumeCoverageStream(scope: activeScope, sessionID: activeSession)
         }
 
-        Task { [weak self] in
+        startupTask = Task { [weak self] in
             guard let self else { return }
-            await self.refreshFacets()
-            await self.refreshFavorites()
-            await self.runSearch()
+            await self.refreshFacets(scope: activeScope, sessionID: activeSession)
+            await self.refreshFavorites(sessionID: activeSession)
+            await self.runSearch(scope: activeScope, sessionID: activeSession)
         }
     }
 
@@ -75,13 +82,15 @@ final class SearchScreenViewModel {
 
     func scheduleSearch(debounced: Bool = true) {
         searchTask?.cancel()
+        let activeSession = sessionID
+        let activeScope = scope
         searchTask = Task { [weak self] in
             guard let self else { return }
             if debounced {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
             }
-            await self.runSearch()
+            await self.runSearch(scope: activeScope, sessionID: activeSession)
         }
     }
 
@@ -99,7 +108,8 @@ final class SearchScreenViewModel {
         return favoriteIDs.contains(key)
     }
 
-    private func runSearch() async {
+    private func runSearch(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
+        guard isCurrent(sessionID, scope: requestedScope) else { return }
         guard providerStore.hasConfiguration else {
             phase = .idle
             results = []
@@ -123,54 +133,78 @@ final class SearchScreenViewModel {
             phase = .loading
             let query = SearchQuery(
                 text: queryText,
-                scope: scope,
+                scope: requestedScope,
                 filters: filters,
                 sort: sort
             )
-            results = try await catalog.search(query)
-            await refreshFavorites()
+            let searchResults = try await catalog.search(query)
+            guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
+            results = searchResults
+            await refreshFavorites(sessionID: sessionID)
+            guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             phase = .loaded
         } catch {
+            guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             phase = .failed(error)
         }
     }
 
-    private func consumeCoverageStream() async {
-        let stream = catalog.ensureSearchCoverage(scope: scope)
+    private func consumeCoverageStream(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
+        let stream = catalog.ensureSearchCoverage(scope: requestedScope)
         for await progress in stream {
             if Task.isCancelled { return }
+            guard isCurrent(sessionID, scope: requestedScope) else { return }
             indexProgress = progress
         }
-        await refreshFacets()
+        await refreshFacets(scope: requestedScope, sessionID: sessionID)
     }
 
-    private func refreshFacets() async {
+    private func refreshFacets(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
+        guard isCurrent(sessionID, scope: requestedScope) else { return }
         guard providerStore.hasConfiguration else {
             availableGenres = []
             availableLanguages = []
             return
         }
         do {
-            let facets = try await catalog.searchFacetValues(scope: scope)
+            let facets = try await catalog.searchFacetValues(scope: requestedScope)
+            guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             availableGenres = facets.genres
             availableLanguages = facets.languages
         } catch {
+            guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             availableGenres = []
             availableLanguages = []
         }
     }
 
-    private func refreshFavorites() async {
+    private func refreshFavorites(sessionID: UUID) async {
+        guard isCurrent(sessionID) else { return }
         guard let fingerprint = try? currentProviderFingerprint() else {
             favoriteIDs = []
             return
         }
         let favorites = await favoritesStore.load(providerFingerprint: fingerprint)
+        guard isCurrent(sessionID), !Task.isCancelled else { return }
         favoriteIDs = Set(favorites.map(\.id))
     }
 
     private func currentProviderFingerprint() throws -> String {
         let config = try providerStore.requiredConfiguration()
         return ProviderCacheFingerprint.make(from: config)
+    }
+
+    private func cancelTasks() {
+        searchTask?.cancel()
+        coverageTask?.cancel()
+        startupTask?.cancel()
+    }
+
+    private func isCurrent(_ sessionID: UUID, scope expectedScope: SearchMediaScope? = nil) -> Bool {
+        guard self.sessionID == sessionID else { return false }
+        if let expectedScope {
+            return scope == expectedScope
+        }
+        return true
     }
 }

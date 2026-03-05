@@ -64,7 +64,8 @@ actor SearchIndexStore {
     private struct SearchDocument: Hashable, Sendable {
         let key: String
         let videoID: Int
-        let contentType: XtreamContentType
+        let indexedContentType: XtreamContentType
+        let playbackContentType: String
         let title: String
         let normalizedTitle: String
         let containerExtension: String
@@ -80,7 +81,7 @@ actor SearchIndexStore {
         let normalizedGenres: Set<String>
 
         var scope: SearchMediaScope {
-            switch contentType {
+            switch indexedContentType {
             case .vod:
                 .movies
             case .series:
@@ -89,6 +90,12 @@ actor SearchIndexStore {
                 .all
             }
         }
+    }
+
+    private struct RankedDocument: Sendable {
+        let document: SearchDocument
+        let score: Double
+        let matchedFields: Set<SearchMatchedField>
     }
 
     private struct ProviderIndex: Sendable {
@@ -115,6 +122,7 @@ actor SearchIndexStore {
             let key = Self.makeKey(contentType: contentType, videoID: video.id)
             let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedCategory = Self.normalize(cleanedCategoryName)
+            let playbackContentType = Self.playbackContentType(from: video.contentType, indexedAs: contentType)
 
             let existing = providerIndex.documentsByKey[key]
             let categories = (existing?.categories ?? []).union(cleanedCategoryName.isEmpty ? [] : [cleanedCategoryName])
@@ -129,7 +137,8 @@ actor SearchIndexStore {
             let document = SearchDocument(
                 key: key,
                 videoID: video.id,
-                contentType: contentType,
+                indexedContentType: contentType,
+                playbackContentType: playbackContentType,
                 title: video.name,
                 normalizedTitle: Self.normalize(video.name),
                 containerExtension: video.containerExtension,
@@ -185,8 +194,8 @@ actor SearchIndexStore {
             candidateKeys = providerIndex.seriesKeys
         }
 
-        var items: [SearchResultItem] = []
-        items.reserveCapacity(candidateKeys.count)
+        var rankedDocuments: [RankedDocument] = []
+        rankedDocuments.reserveCapacity(candidateKeys.count)
 
         for key in candidateKeys {
             guard let doc = providerIndex.documentsByKey[key] else { continue }
@@ -203,28 +212,35 @@ actor SearchIndexStore {
                 continue
             }
 
-            let video = Video(
-                id: doc.videoID,
-                name: doc.title,
-                containerExtension: doc.containerExtension,
-                contentType: doc.contentType.rawValue,
-                coverImageURL: doc.coverImageURL,
-                tmdbId: nil,
-                rating: doc.rating,
-                addedAtRaw: doc.addedAtRaw
-            )
-
-            items.append(
-                SearchResultItem(
-                    video: video,
-                    scope: doc.scope,
+            rankedDocuments.append(
+                RankedDocument(
+                    document: doc,
                     score: match.score,
                     matchedFields: match.matchedFields
                 )
             )
         }
 
-        return sort(items, using: query.sort)
+        return sort(rankedDocuments, using: query.sort).map { item in
+            let doc = item.document
+            let video = Video(
+                id: doc.videoID,
+                name: doc.title,
+                containerExtension: doc.containerExtension,
+                contentType: doc.playbackContentType,
+                coverImageURL: doc.coverImageURL,
+                tmdbId: nil,
+                rating: doc.rating,
+                addedAtRaw: doc.addedAtRaw
+            )
+
+            return SearchResultItem(
+                video: video,
+                scope: doc.scope,
+                score: item.score,
+                matchedFields: item.matchedFields
+            )
+        }
     }
 
     func progress(scope: SearchMediaScope, providerFingerprint: String, totalCategories: Int) -> SearchIndexProgress {
@@ -358,7 +374,7 @@ actor SearchIndexStore {
         return score
     }
 
-    private func sort(_ items: [SearchResultItem], using sort: SearchSort) -> [SearchResultItem] {
+    private func sort(_ items: [RankedDocument], using sort: SearchSort) -> [RankedDocument] {
         switch sort {
         case .relevance:
             return items.sorted { lhs, rhs in
@@ -366,27 +382,27 @@ actor SearchIndexStore {
             }
         case .newest:
             return items.sorted { lhs, rhs in
-                compare(lhs, rhs, primary: { Self.parseDate($0.video.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude }, descending: true)
+                compare(lhs, rhs, primary: { $0.document.addedAt?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude }, descending: true)
             }
         case .rating:
             return items.sorted { lhs, rhs in
-                compare(lhs, rhs, primary: { $0.video.rating ?? .leastNormalMagnitude }, descending: true)
+                compare(lhs, rhs, primary: { $0.document.rating ?? .leastNormalMagnitude }, descending: true)
             }
         case .title:
             return items.sorted { lhs, rhs in
-                let titleOrder = lhs.video.name.localizedCaseInsensitiveCompare(rhs.video.name)
+                let titleOrder = lhs.document.title.localizedCaseInsensitiveCompare(rhs.document.title)
                 if titleOrder != .orderedSame {
                     return titleOrder == .orderedAscending
                 }
-                return lhs.video.id < rhs.video.id
+                return lhs.document.videoID < rhs.document.videoID
             }
         }
     }
 
     private func compare(
-        _ lhs: SearchResultItem,
-        _ rhs: SearchResultItem,
-        primary: (SearchResultItem) -> Double,
+        _ lhs: RankedDocument,
+        _ rhs: RankedDocument,
+        primary: (RankedDocument) -> Double,
         descending: Bool
     ) -> Bool {
         let leftPrimary = primary(lhs)
@@ -395,28 +411,39 @@ actor SearchIndexStore {
             return descending ? leftPrimary > rightPrimary : leftPrimary < rightPrimary
         }
 
-        let leftRating = lhs.video.rating ?? .leastNormalMagnitude
-        let rightRating = rhs.video.rating ?? .leastNormalMagnitude
+        let leftRating = lhs.document.rating ?? .leastNormalMagnitude
+        let rightRating = rhs.document.rating ?? .leastNormalMagnitude
         if leftRating != rightRating {
             return leftRating > rightRating
         }
 
-        let leftAdded = Self.parseDate(lhs.video.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
-        let rightAdded = Self.parseDate(rhs.video.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
+        let leftAdded = lhs.document.addedAt?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
+        let rightAdded = rhs.document.addedAt?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
         if leftAdded != rightAdded {
             return leftAdded > rightAdded
         }
 
-        let titleOrder = lhs.video.name.localizedCaseInsensitiveCompare(rhs.video.name)
+        let titleOrder = lhs.document.title.localizedCaseInsensitiveCompare(rhs.document.title)
         if titleOrder != .orderedSame {
             return titleOrder == .orderedAscending
         }
 
-        return lhs.video.id < rhs.video.id
+        return lhs.document.videoID < rhs.document.videoID
     }
 
     private static func makeKey(contentType: XtreamContentType, videoID: Int) -> String {
         "\(contentType.rawValue):\(videoID)"
+    }
+
+    private static func playbackContentType(from rawValue: String, indexedAs contentType: XtreamContentType) -> String {
+        let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized == "movie" {
+            return "movie"
+        }
+        if let parsed = XtreamContentType(rawValue: normalized) {
+            return parsed.playbackPathComponent
+        }
+        return normalized.isEmpty ? contentType.playbackPathComponent : normalized
     }
 
     private static func normalize(_ input: String) -> String {

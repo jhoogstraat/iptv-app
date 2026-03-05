@@ -82,6 +82,17 @@ enum XtreamContentType: String, Codable, Sendable {
     case live
     case vod
     case series
+
+    nonisolated var playbackPathComponent: String {
+        switch self {
+        case .live:
+            "live"
+        case .vod:
+            "movie"
+        case .series:
+            "series"
+        }
+    }
 }
 
 struct XtreamCategory: Decodable, Identifiable, Hashable {

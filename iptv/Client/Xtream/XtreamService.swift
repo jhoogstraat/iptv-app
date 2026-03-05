@@ -61,7 +61,19 @@ struct XtreamService: Sendable {
     }
     
     func getPlayURL(for streamId: Int, type: String, containerExtension: String) -> URL {
-        let url = URL(string: "\(type)/\(username)/\(password)/\(streamId).\(containerExtension)", relativeTo: baseURL)!
+        let pathComponent = playbackPathComponent(for: type)
+        let url = URL(string: "\(pathComponent)/\(username)/\(password)/\(streamId).\(containerExtension)", relativeTo: baseURL)!
         return url
+    }
+
+    private func playbackPathComponent(for type: String) -> String {
+        let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalizedType == "movie" {
+            return "movie"
+        }
+        if let contentType = XtreamContentType(rawValue: normalizedType) {
+            return contentType.playbackPathComponent
+        }
+        return normalizedType
     }
 }

@@ -9,6 +9,7 @@ import Foundation
 import Testing
 @testable import iptv
 
+@MainActor
 struct SearchIndexStoreTests {
     @Test
     func providerIsolation() async {
@@ -99,6 +100,38 @@ struct SearchIndexStoreTests {
         #expect(progress.scope == .movies)
     }
 
+    @Test
+    func queryPreservesPlaybackTypeAndStableIdentityAcrossMediaScopes() async {
+        let store = SearchIndexStore()
+
+        await store.upsert(
+            videos: [makeSnapshot(id: 7, name: "Shared ID Movie", contentType: "movie")],
+            contentType: .vod,
+            categoryID: "movies",
+            categoryName: "Action",
+            providerFingerprint: "provider"
+        )
+
+        await store.upsert(
+            videos: [makeSnapshot(id: 7, name: "Shared ID Series", contentType: "series")],
+            contentType: .series,
+            categoryID: "series",
+            categoryName: "Drama",
+            providerFingerprint: "provider"
+        )
+
+        let results = await store.query(
+            SearchQuery(text: "shared", scope: .all, filters: .default, sort: .title),
+            providerFingerprint: "provider"
+        )
+
+        #expect(results.count == 2)
+        #expect(Set(results.map(\.id)).count == 2)
+
+        let movie = results.first { $0.video.xtreamContentType == .vod }
+        #expect(movie?.video.contentType == "movie")
+    }
+
     private func makeSnapshot(id: Int, name: String, contentType: String) -> SearchVideoSnapshot {
         SearchVideoSnapshot(
             id: id,
@@ -112,4 +145,3 @@ struct SearchIndexStoreTests {
         )
     }
 }
-
