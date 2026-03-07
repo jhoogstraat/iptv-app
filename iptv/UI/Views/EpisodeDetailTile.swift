@@ -13,11 +13,14 @@ struct EpisodeDetailTile: View {
 
     @Environment(Catalog.self) private var catalog
     @Environment(Player.self) private var player
+    @Environment(ProviderStore.self) private var providerStore
+    @Environment(FavoritesStore.self) private var favoritesStore
 
     @State private var isLoading = true
     @State private var loadError: Error?
     @State private var seriesInfo: XtreamSeries?
     @State private var playError: String?
+    @State private var isFavorite = false
     @State private var selectedSeasonKey: String?
     @State private var selectedEpisodeID: Int?
 
@@ -49,6 +52,7 @@ struct EpisodeDetailTile: View {
         .navigationTitle(video.name)
         .task {
             await loadSeriesInfo()
+            await loadFavoriteState()
         }
     }
 
@@ -77,9 +81,9 @@ struct EpisodeDetailTile: View {
                         .disabled(selectedEpisode(from: seriesInfo) == nil)
 
                         Button {
-                            Task { await loadSeriesInfo(force: true) }
+                            Task { await toggleFavorite() }
                         } label: {
-                            Label(localized("Refresh", comment: "Refresh series details action"), systemImage: "arrow.clockwise")
+                            Label(bookmarkActionTitle, systemImage: isFavorite ? "bookmark.fill" : "bookmark")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -427,6 +431,12 @@ struct EpisodeDetailTile: View {
         startPlayback(episode: episode, seriesInfo: seriesInfo)
     }
 
+    private var bookmarkActionTitle: String {
+        isFavorite
+            ? localized("Remove Bookmark", comment: "Remove the series from bookmarks")
+            : localized("Save Bookmark", comment: "Save the series to bookmarks")
+    }
+
     private func startPlayback(episode: XtreamEpisode, seriesInfo: XtreamSeries) {
         let candidates = episodeVideos(from: seriesInfo)
         let episodeID = episodeID(for: episode)
@@ -477,6 +487,25 @@ struct EpisodeDetailTile: View {
         if selectedEpisodeID == nil || !seasonEpisodes.contains(where: { episodeID(for: $0) == selectedEpisodeID }) {
             selectedEpisodeID = seasonEpisodes.first.map(episodeID(for:))
         }
+    }
+
+    private func loadFavoriteState() async {
+        guard let config = try? providerStore.requiredConfiguration() else {
+            isFavorite = false
+            return
+        }
+
+        let fingerprint = ProviderCacheFingerprint.make(from: config)
+        isFavorite = await favoritesStore.contains(video: video, providerFingerprint: fingerprint)
+    }
+
+    private func toggleFavorite() async {
+        guard let config = try? providerStore.requiredConfiguration() else { return }
+
+        let fingerprint = ProviderCacheFingerprint.make(from: config)
+        let targetState = !isFavorite
+        await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: targetState)
+        isFavorite = targetState
     }
 }
 
