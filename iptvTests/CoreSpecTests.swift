@@ -167,6 +167,92 @@ struct CoreSpecTests {
     }
 
     @Test
+    func xtreamStreamDecodingAcceptsStringIsAdultValues() throws {
+        let data = #"""
+        {
+          "stream_id": 10,
+          "name": "Movie",
+          "category_id": "1",
+          "category_ids": [1],
+          "container_extension": "mkv",
+          "rating": "7.1",
+          "rating_5based": "4.2",
+          "stream_type": "movie",
+          "tmdb": "123",
+          "stream_icon": "",
+          "added": "2026-01-01",
+          "trailer": "",
+          "num": 1,
+          "is_adult": "0"
+        }
+        """#.data(using: .utf8)!
+
+        let stream = try JSONDecoder().decode(XtreamStream.self, from: data)
+        #expect(stream.isAdult == 0)
+    }
+
+    @Test
+    func xtreamStreamDecodingNormalizesDirtyFields() throws {
+        let data = #"""
+        {
+          "stream_id": "10",
+          "name": "  Movie  ",
+          "category_id": " 7 ",
+          "category_ids": "[7,8,8]",
+          "container_extension": "  mkv  ",
+          "rating": " 7.1 ",
+          "rating_5based": " 4.2 ",
+          "stream_type": " Movie ",
+          "tmdb": " 123 ",
+          "stream_icon": "  https://example.com/poster.jpg  ",
+          "added": " 2026-01-01 ",
+          "trailer": "  ",
+          "num": "1",
+          "is_adult": "0"
+        }
+        """#.data(using: .utf8)!
+
+        let stream = try JSONDecoder().decode(XtreamStream.self, from: data)
+        #expect(stream.id == 10)
+        #expect(stream.name == "Movie")
+        #expect(stream.categoryId == "7")
+        #expect(stream.categoryIds == [7, 8])
+        #expect(stream.containerExtension == "mkv")
+        #expect(stream.rating == 7.1)
+        #expect(stream.rating5Based == 4.2)
+        #expect(stream.type == "movie")
+        #expect(stream.tmdbId == 123)
+        #expect(stream.streamIcon == "https://example.com/poster.jpg")
+        #expect(stream.added == "2026-01-01")
+        #expect(stream.trailer == "")
+    }
+
+    @Test
+    func xtreamSeriesStreamDecodingNormalizesDirtyFields() throws {
+        let data = #"""
+        {
+          "series_id": "42",
+          "name": " ",
+          "title": "  Series Title  ",
+          "cover": "  https://example.com/cover.jpg  ",
+          "rating": " 7.5 ",
+          "plot": "  Plot  ",
+          "category_id": 3,
+          "category_ids": "[3,4,4]"
+        }
+        """#.data(using: .utf8)!
+
+        let series = try JSONDecoder().decode(XtreamSeriesStream.self, from: data)
+        #expect(series.id == 42)
+        #expect(series.name == "Series Title")
+        #expect(series.cover == "https://example.com/cover.jpg")
+        #expect(series.rating == 7.5)
+        #expect(series.plot == "Plot")
+        #expect(series.categoryId == "3")
+        #expect(series.categoryIds == ["3", "4"])
+    }
+
+    @Test
     func cacheManagerDeduplicatesInFlightLoads() async throws {
         let store = InMemoryStreamListCacheStore()
         let manager = CatalogCacheManager(diskStore: store, ttl: 600)

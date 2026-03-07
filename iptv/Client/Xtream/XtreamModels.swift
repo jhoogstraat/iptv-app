@@ -78,6 +78,110 @@ struct OptionalStringConvertibleDecode<T: LosslessStringConvertible & Decodable>
     }
 }
 
+private extension String {
+    var xtreamTrimmed: String {
+        trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var xtreamNilIfEmpty: String? {
+        let value = xtreamTrimmed
+        return value.isEmpty ? nil : value
+    }
+}
+
+private extension Array where Element: Hashable {
+    func xtreamUniqued() -> [Element] {
+        var seen = Set<Element>()
+        return filter { seen.insert($0).inserted }
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decodeNormalizedStringIfPresent(forKey key: Key) -> String? {
+        if let value = try? decodeIfPresent(String.self, forKey: key),
+           let normalized = value.xtreamNilIfEmpty {
+            return normalized
+        }
+        if let value = try? decodeIfPresent(Int.self, forKey: key) {
+            return String(value)
+        }
+        if let value = try? decodeIfPresent(Double.self, forKey: key) {
+            return String(value)
+        }
+        if let value = try? decodeIfPresent(Bool.self, forKey: key) {
+            return value ? "true" : "false"
+        }
+        return nil
+    }
+
+    func decodeNormalizedString(forKey key: Key, default defaultValue: String = "") -> String {
+        decodeNormalizedStringIfPresent(forKey: key) ?? defaultValue
+    }
+
+    func decodeLosslessValueIfPresent<T>(_ type: T.Type, forKey key: Key) -> T?
+    where T: LosslessStringConvertible & Decodable {
+        if let value = try? decodeIfPresent(T.self, forKey: key) {
+            return value
+        }
+        if let string = decodeNormalizedStringIfPresent(forKey: key) {
+            return T(string)
+        }
+        return nil
+    }
+
+    func decodeLosslessValue<T>(_ type: T.Type, forKey key: Key, default defaultValue: T) -> T
+    where T: LosslessStringConvertible & Decodable {
+        decodeLosslessValueIfPresent(type, forKey: key) ?? defaultValue
+    }
+
+    func decodeNormalizedStringArray(forKey key: Key) -> [String] {
+        if let values = try? decodeIfPresent([String].self, forKey: key) {
+            return values.compactMap(\.xtreamNilIfEmpty).xtreamUniqued()
+        }
+        if let values = try? decodeIfPresent([Int].self, forKey: key) {
+            return values.map(String.init).xtreamUniqued()
+        }
+        if let value = decodeNormalizedStringIfPresent(forKey: key) {
+            let separators = CharacterSet(charactersIn: ",|;")
+            let tokens = value
+                .components(separatedBy: separators)
+                .compactMap(\.xtreamNilIfEmpty)
+            if tokens.count > 1 {
+                return tokens.xtreamUniqued()
+            }
+            return [value]
+        }
+        return []
+    }
+
+    func decodeIdentifierStrings(forKey key: Key) -> [String] {
+        if let values = try? decodeIfPresent([String].self, forKey: key) {
+            return values.compactMap(\.xtreamNilIfEmpty).xtreamUniqued()
+        }
+        if let values = try? decodeIfPresent([Int].self, forKey: key) {
+            return values.map(String.init).xtreamUniqued()
+        }
+        if let value = try? decodeIfPresent(Int.self, forKey: key) {
+            return [String(value)]
+        }
+        if let rawValue = decodeNormalizedStringIfPresent(forKey: key) {
+            let tokens = rawValue
+                .split(whereSeparator: { !$0.isNumber })
+                .map(String.init)
+                .compactMap(\.xtreamNilIfEmpty)
+            if !tokens.isEmpty {
+                return tokens.xtreamUniqued()
+            }
+            return [rawValue]
+        }
+        return []
+    }
+
+    func decodeIdentifierInts(forKey key: Key) -> [Int] {
+        decodeIdentifierStrings(forKey: key).compactMap(Int.init).xtreamUniqued()
+    }
+}
+
 enum XtreamContentType: String, Codable, Sendable {
     case live
     case vod
@@ -103,6 +207,12 @@ struct XtreamCategory: Decodable, Identifiable, Hashable {
         case id = "category_id"
         case name = "category_name"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = container.decodeNormalizedString(forKey: .id)
+        name = container.decodeNormalizedString(forKey: .name, default: "Unknown Category")
+    }
 }
 
 struct XtreamStream: Decodable, Identifiable {
@@ -111,10 +221,10 @@ struct XtreamStream: Decodable, Identifiable {
     let categoryId: String
     let categoryIds: [Int]
     let containerExtension: String?
-    @OptionalStringConvertibleDecode var rating: Double?
-    @StringConvertibleDecode var rating5Based: Double
+    let rating: Double?
+    let rating5Based: Double
     let type: String
-    @OptionalStringConvertibleDecode var tmdbId: Int? // sometimes string, sometimes int...
+    let tmdbId: Int?
     let streamIcon: String
     let added: String
     let trailer: String
@@ -136,6 +246,31 @@ struct XtreamStream: Decodable, Identifiable {
         case trailer
         case num
         case isAdult = "is_adult"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = container.decodeLosslessValue(Int.self, forKey: .id, default: 0)
+        name = container.decodeNormalizedString(forKey: .name, default: "Untitled")
+        categoryId = container.decodeNormalizedString(forKey: .categoryId)
+
+        var normalizedCategoryIds = container.decodeIdentifierInts(forKey: .categoryIds)
+        if let numericCategoryID = Int(categoryId), !normalizedCategoryIds.contains(numericCategoryID) {
+            normalizedCategoryIds.insert(numericCategoryID, at: 0)
+        }
+        categoryIds = normalizedCategoryIds.xtreamUniqued()
+
+        containerExtension = container.decodeNormalizedStringIfPresent(forKey: .containerExtension)
+        rating = container.decodeLosslessValueIfPresent(Double.self, forKey: .rating)
+        rating5Based = container.decodeLosslessValue(Double.self, forKey: .rating5Based, default: 0)
+        type = container.decodeNormalizedString(forKey: .type, default: XtreamContentType.vod.rawValue).lowercased()
+        tmdbId = container.decodeLosslessValueIfPresent(Int.self, forKey: .tmdbId)
+        streamIcon = container.decodeNormalizedString(forKey: .streamIcon)
+        added = container.decodeNormalizedString(forKey: .added)
+        trailer = container.decodeNormalizedString(forKey: .trailer)
+        num = container.decodeLosslessValue(Int.self, forKey: .num, default: 0)
+        isAdult = container.decodeLosslessValue(Int.self, forKey: .isAdult, default: 0)
     }
 }
 
@@ -163,63 +298,30 @@ struct XtreamSeriesStream: Decodable, Identifiable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        if let numericId = try? container.decode(Int.self, forKey: .id) {
+        if let numericId = container.decodeLosslessValueIfPresent(Int.self, forKey: .id) {
             id = numericId
-        } else if let stringId = try? container.decode(String.self, forKey: .id),
-                  let numericId = Int(stringId) {
-            id = numericId
-        } else if let numericId = try? container.decode(Int.self, forKey: .legacyId) {
-            id = numericId
-        } else if let stringId = try? container.decode(String.self, forKey: .legacyId),
-                  let numericId = Int(stringId) {
+        } else if let numericId = container.decodeLosslessValueIfPresent(Int.self, forKey: .legacyId) {
             id = numericId
         } else {
             throw DecodingError.dataCorruptedError(forKey: .id, in: container, debugDescription: "Unable to decode series_id")
         }
 
-        if let decodedName = try container.decodeIfPresent(String.self, forKey: .name), !decodedName.isEmpty {
+        if let decodedName = container.decodeNormalizedStringIfPresent(forKey: .name) {
             name = decodedName
         } else {
-            name = (try? container.decode(String.self, forKey: .title)) ?? "Untitled Series"
+            name = container.decodeNormalizedString(forKey: .title, default: "Untitled Series")
         }
 
-        cover = try? container.decodeIfPresent(String.self, forKey: .cover)
-        plot = try? container.decodeIfPresent(String.self, forKey: .plot)
-        if let decodedCategory = try? container.decode(String.self, forKey: .categoryId) {
-            categoryId = decodedCategory
-        } else if let decodedCategory = try? container.decode(Int.self, forKey: .categoryId) {
-            categoryId = String(decodedCategory)
-        } else {
-            categoryId = nil
-        }
+        cover = container.decodeNormalizedStringIfPresent(forKey: .cover)
+        plot = container.decodeNormalizedStringIfPresent(forKey: .plot)
+        categoryId = container.decodeNormalizedStringIfPresent(forKey: .categoryId)
 
-        var decodedCategoryIds = Set<String>()
-        if let categoryId {
-            decodedCategoryIds.insert(categoryId)
+        var decodedCategoryIds = container.decodeIdentifierStrings(forKey: .categoryIds)
+        if let categoryId, !decodedCategoryIds.contains(categoryId) {
+            decodedCategoryIds.insert(categoryId, at: 0)
         }
-        if let ids = try? container.decode([Int].self, forKey: .categoryIds) {
-            ids.map(String.init).forEach { decodedCategoryIds.insert($0) }
-        } else if let ids = try? container.decode([String].self, forKey: .categoryIds) {
-            ids
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .forEach { decodedCategoryIds.insert($0) }
-        } else if let ids = try? container.decode(Int.self, forKey: .categoryIds) {
-            decodedCategoryIds.insert(String(ids))
-        } else if let idsString = try? container.decode(String.self, forKey: .categoryIds) {
-            let ids = idsString.split(whereSeparator: { !$0.isNumber })
-            ids.map(String.init).forEach { decodedCategoryIds.insert($0) }
-        }
-        categoryIds = Array(decodedCategoryIds)
-
-        if let numericRating = try? container.decode(Double.self, forKey: .rating) {
-            rating = numericRating
-        } else if let stringRating = try? container.decode(String.self, forKey: .rating),
-                  let numericRating = Double(stringRating) {
-            rating = numericRating
-        } else {
-            rating = nil
-        }
+        categoryIds = decodedCategoryIds.xtreamUniqued()
+        rating = container.decodeLosslessValueIfPresent(Double.self, forKey: .rating)
     }
 
     func belongs(to categoryID: String) -> Bool {
@@ -312,56 +414,36 @@ struct XtreamVodInfo: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        // Decode non-optional properties that should always exist
-        self.actors = try container.decode(String.self, forKey: .actors)
-        self.age = try container.decode(String.self, forKey: .age)
-        self.bitrate = try container.decode(Int.self, forKey: .bitrate)
-        self.cast = try container.decode(String.self, forKey: .cast)
-        self.country = try container.decode(String.self, forKey: .country)
-        self.coverBig = try container.decode(String.self, forKey: .coverBig)
-        self.description = try container.decode(String.self, forKey: .description)
-        self.director = try container.decode(String.self, forKey: .director)
-        self.duration = try container.decode(String.self, forKey: .duration)
-        self.genre = try container.decode(String.self, forKey: .genre)
-        self.movieImage = try container.decode(String.self, forKey: .movieImage)
-        self.name = try container.decode(String.self, forKey: .name)
-        self.originalName = try container.decode(String.self, forKey: .originalName)
-        self.plot = try container.decode(String.self, forKey: .plot)
-        self.releaseDate = try container.decode(String.self, forKey: .releaseDate)
+        actors = container.decodeNormalizedString(forKey: .actors)
+        age = container.decodeNormalizedString(forKey: .age)
+        bitrate = container.decodeLosslessValue(Int.self, forKey: .bitrate, default: 0)
+        cast = container.decodeNormalizedString(forKey: .cast)
+        country = container.decodeNormalizedString(forKey: .country)
+        coverBig = container.decodeNormalizedString(forKey: .coverBig)
+        description = container.decodeNormalizedString(forKey: .description)
+        director = container.decodeNormalizedString(forKey: .director)
+        duration = container.decodeNormalizedString(forKey: .duration)
+        genre = container.decodeNormalizedString(forKey: .genre)
+        movieImage = container.decodeNormalizedString(forKey: .movieImage)
+        name = container.decodeNormalizedString(forKey: .name)
+        originalName = container.decodeNormalizedString(forKey: .originalName)
+        plot = container.decodeNormalizedString(forKey: .plot)
+        releaseDate = container.decodeNormalizedString(forKey: .releaseDate)
 
-        // Decode optional properties using decodeIfPresent()
-        self.episodeRunTime = try container.decodeIfPresent(Int.self, forKey: .episodeRunTime)
-        self.kinopoiskUrl = try container.decodeIfPresent(String.self, forKey: .kinopoiskUrl)
-        self.mpaaRating = try container.decodeIfPresent(String.self, forKey: .mpaaRating)
-        self.ratingCountKinopoisk = try container.decodeIfPresent(Int.self, forKey: .ratingCountKinopoisk)
-        self.status = try container.decodeIfPresent(String.self, forKey: .status)
-        self.youtubeTrailer = try emptyToNil(key: .youtubeTrailer)
-        
-        func emptyToNil<T: Collection & Decodable>(key: CodingKeys) throws -> T? {
-            if let value = try container.decodeIfPresent(T.self, forKey: key) {
-                return value.isEmpty ? nil : value
-            }
-            return nil
-        }
-        
-        func lossless<T: LosslessStringConvertible & Decodable>(key: CodingKeys) -> T? {
-            if let value = try? container.decode(T.self, forKey: key) {
-                return value
-            } else if let string = try? container.decode(String.self, forKey: key),
-                      let value = T(string) {
-                return value
-            }
-            return nil
-        }
-        
-        // Decode properties that might fail using try?
-        self.backdropPath = (try? container.decodeIfPresent([String].self, forKey: .backdropPath)) ?? [] // "null"
-        self.audio = try? container.decode(XtreamAudio.self, forKey: .audio) // [] array when no data
-        self.video = try? container.decode(XtreamVideo.self, forKey: .video) // [] array when no data
-        self.durationSecs = lossless(key: .durationSecs) // String or number, but also "" sometimes
-        self.rating = lossless(key: .rating) // String or number, but also "" sometimes
-        self.runtime = lossless(key: .runtime) // String or number, but also "" sometimes
-        self.tmdbId = lossless(key: .tmdbId) // String or number, but also "" sometimes
+        episodeRunTime = container.decodeLosslessValueIfPresent(Int.self, forKey: .episodeRunTime)
+        kinopoiskUrl = container.decodeNormalizedStringIfPresent(forKey: .kinopoiskUrl)
+        mpaaRating = container.decodeNormalizedStringIfPresent(forKey: .mpaaRating)
+        ratingCountKinopoisk = container.decodeLosslessValueIfPresent(Int.self, forKey: .ratingCountKinopoisk)
+        status = container.decodeNormalizedStringIfPresent(forKey: .status)
+        youtubeTrailer = container.decodeNormalizedStringIfPresent(forKey: .youtubeTrailer)
+
+        backdropPath = container.decodeNormalizedStringArray(forKey: .backdropPath)
+        audio = try? container.decode(XtreamAudio.self, forKey: .audio)
+        video = try? container.decode(XtreamVideo.self, forKey: .video)
+        durationSecs = container.decodeLosslessValueIfPresent(Int.self, forKey: .durationSecs)
+        rating = container.decodeLosslessValueIfPresent(Double.self, forKey: .rating)
+        runtime = container.decodeLosslessValueIfPresent(Int.self, forKey: .runtime)
+        tmdbId = container.decodeLosslessValueIfPresent(Int.self, forKey: .tmdbId)
     }
 }
 
@@ -384,6 +466,25 @@ struct XtreamVodData: Decodable {
         case directSource = "direct_source"
         case name
         case streamId = "stream_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        added = container.decodeNormalizedString(forKey: .added)
+        categoryId = container.decodeNormalizedString(forKey: .categoryId)
+
+        var normalizedCategoryIds = container.decodeIdentifierInts(forKey: .categoryIds)
+        if let numericCategoryID = Int(categoryId), !normalizedCategoryIds.contains(numericCategoryID) {
+            normalizedCategoryIds.insert(numericCategoryID, at: 0)
+        }
+        categoryIds = normalizedCategoryIds.xtreamUniqued()
+
+        containerExtension = container.decodeNormalizedString(forKey: .containerExtension, default: "mp4")
+        customSid = container.decodeNormalizedStringIfPresent(forKey: .customSid)
+        directSource = container.decodeNormalizedString(forKey: .directSource)
+        name = container.decodeNormalizedString(forKey: .name, default: "Untitled")
+        streamId = container.decodeLosslessValue(Int.self, forKey: .streamId, default: 0)
     }
 }
 
@@ -453,6 +554,37 @@ struct XtreamShowInfo: Decodable {
         case categoryId = "category_id"
         case categoryIds = "category_ids"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        name = container.decodeNormalizedString(forKey: .name)
+        cover = container.decodeNormalizedString(forKey: .cover)
+        plot = container.decodeNormalizedString(forKey: .plot)
+        cast = container.decodeNormalizedString(forKey: .cast)
+        director = container.decodeNormalizedString(forKey: .director)
+        genre = container.decodeNormalizedString(forKey: .genre)
+
+        let primaryReleaseDate = container.decodeNormalizedStringIfPresent(forKey: .releaseDate)
+        let alternateReleaseDate = container.decodeNormalizedStringIfPresent(forKey: .releaseDateAlt)
+        releaseDate = primaryReleaseDate ?? alternateReleaseDate ?? ""
+        releaseDateAlt = alternateReleaseDate ?? primaryReleaseDate ?? ""
+
+        lastModified = container.decodeNormalizedString(forKey: .lastModified)
+        rating = container.decodeNormalizedString(forKey: .rating)
+        rating5based = container.decodeNormalizedString(forKey: .rating5based)
+        backdropPath = container.decodeNormalizedStringArray(forKey: .backdropPath)
+        tmdb = container.decodeNormalizedString(forKey: .tmdb)
+        youtubeTrailer = container.decodeNormalizedString(forKey: .youtubeTrailer)
+        episodeRunTime = container.decodeNormalizedString(forKey: .episodeRunTime)
+        categoryId = container.decodeNormalizedString(forKey: .categoryId)
+
+        var normalizedCategoryIds = container.decodeIdentifierInts(forKey: .categoryIds)
+        if let numericCategoryID = Int(categoryId), !normalizedCategoryIds.contains(numericCategoryID) {
+            normalizedCategoryIds.insert(numericCategoryID, at: 0)
+        }
+        categoryIds = normalizedCategoryIds.xtreamUniqued()
+    }
 }
 
 struct XtreamEpisode: Decodable {
@@ -477,18 +609,32 @@ struct XtreamEpisode: Decodable {
         case season
         case directSource = "direct_source"
     }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        id = container.decodeNormalizedString(forKey: .id)
+        episodeNum = container.decodeLosslessValue(Int.self, forKey: .episodeNum, default: 0)
+        title = container.decodeNormalizedString(forKey: .title, default: "Untitled Episode")
+        containerExtension = container.decodeNormalizedString(forKey: .containerExtension, default: "mp4")
+        info = try container.decode(XtreamEpisodeInfo.self, forKey: .info)
+        customSid = container.decodeNormalizedStringIfPresent(forKey: .customSid)
+        added = container.decodeNormalizedString(forKey: .added)
+        season = container.decodeLosslessValue(Int.self, forKey: .season, default: 0)
+        directSource = container.decodeNormalizedString(forKey: .directSource)
+    }
 }
 
 struct XtreamEpisodeInfo: Decodable {
     let airDate: String
     let crew: String
-    let rating: Double
+    let rating: Double?
     let id: Int
     let movieImage: String
-    let durationSecs: Int
+    let durationSecs: Int?
     let duration: String
-    let video: XtreamVideo
-    let audio: XtreamAudio
+    let video: XtreamVideo?
+    let audio: XtreamAudio?
     let bitrate: Int
 
     enum CodingKeys: String, CodingKey {
@@ -497,6 +643,21 @@ struct XtreamEpisodeInfo: Decodable {
         case movieImage = "movie_image"
         case durationSecs = "duration_secs"
         case duration, video, audio, bitrate
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        airDate = container.decodeNormalizedString(forKey: .airDate)
+        crew = container.decodeNormalizedString(forKey: .crew)
+        rating = container.decodeLosslessValueIfPresent(Double.self, forKey: .rating)
+        id = container.decodeLosslessValue(Int.self, forKey: .id, default: 0)
+        movieImage = container.decodeNormalizedString(forKey: .movieImage)
+        durationSecs = container.decodeLosslessValueIfPresent(Int.self, forKey: .durationSecs)
+        duration = container.decodeNormalizedString(forKey: .duration)
+        video = try? container.decode(XtreamVideo.self, forKey: .video)
+        audio = try? container.decode(XtreamAudio.self, forKey: .audio)
+        bitrate = container.decodeLosslessValue(Int.self, forKey: .bitrate, default: 0)
     }
 }
 
