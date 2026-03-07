@@ -18,6 +18,12 @@ struct EpisodeDetailTile: View {
     @State private var loadError: Error?
     @State private var seriesInfo: XtreamSeries?
     @State private var playError: String?
+    @State private var selectedSeasonKey: String?
+    @State private var selectedEpisodeID: Int?
+
+    private var contentLocale: Locale {
+        .autoupdatingCurrent
+    }
 
     var body: some View {
         Group {
@@ -36,7 +42,7 @@ struct EpisodeDetailTile: View {
             } else if let seriesInfo {
                 detailContent(seriesInfo: seriesInfo)
             } else {
-                Text("Series details are unavailable.")
+                Text(localized("Series details are unavailable.", comment: "Fallback message when series details cannot be shown"))
                     .foregroundStyle(.secondary)
             }
         }
@@ -50,42 +56,236 @@ struct EpisodeDetailTile: View {
     private func detailContent(seriesInfo: XtreamSeries) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                Text(seriesInfo.info.plot)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                headerArtwork(seriesInfo: seriesInfo)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(video.name)
+                        .font(.title.weight(.semibold))
+
+                    Text(subtitleText(for: seriesInfo))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 12) {
+                        Button {
+                            playSelectedEpisode(from: seriesInfo)
+                        } label: {
+                            Label(primaryActionTitle(for: seriesInfo), systemImage: "play.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(selectedEpisode(from: seriesInfo) == nil)
+
+                        Button {
+                            Task { await loadSeriesInfo(force: true) }
+                        } label: {
+                            Label(localized("Refresh", comment: "Refresh series details action"), systemImage: "arrow.clockwise")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
 
                 if let playError {
                     Text(playError)
                         .foregroundStyle(.red)
                 }
 
-                ForEach(sortedSeasonKeys(from: seriesInfo), id: \.self) { seasonKey in
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Season \(seasonKey)")
-                            .font(.headline)
-
-                        ForEach(episodes(in: seasonKey, from: seriesInfo), id: \.id) { episode in
-                            Button {
-                                startPlayback(episode: episode, seriesInfo: seriesInfo)
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Text("E\(episode.episodeNum)")
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 34, alignment: .leading)
-                                    Text(episode.title)
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Image(systemName: "play.fill")
-                                        .font(.caption.weight(.semibold))
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                }
+                section("Synopsis", text: seriesInfo.info.plot)
+                episodeBrowser(seriesInfo: seriesInfo)
+                section("Cast", text: seriesInfo.info.cast)
+                section("Director", text: seriesInfo.info.director)
+                section("About", text: aboutText(for: seriesInfo))
             }
             .padding()
+        }
+    }
+
+    private func headerArtwork(seriesInfo: XtreamSeries) -> some View {
+        Group {
+            if let heroURL = headerArtworkURL(for: seriesInfo) {
+                AsyncImage(url: heroURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        placeholderArtwork(systemImage: "tv")
+                    }
+                }
+            } else {
+                placeholderArtwork(systemImage: "tv")
+            }
+        }
+        .frame(height: 260)
+        .clipShape(.rect(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func episodeBrowser(seriesInfo: XtreamSeries) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(localized("Episodes", comment: "Episodes section title"))
+                .font(.title3.weight(.semibold))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(sortedSeasonKeys(from: seriesInfo), id: \.self) { seasonKey in
+                        seasonButton(for: seasonKey, in: seriesInfo)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 16) {
+                    ForEach(selectedSeasonEpisodes(from: seriesInfo), id: \.id) { episode in
+                        episodeCard(episode: episode, seriesInfo: seriesInfo)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    private func episodeCard(episode: XtreamEpisode, seriesInfo: XtreamSeries) -> some View {
+        let isSelected = selectedEpisodeID == episodeID(for: episode)
+        let artworkURL = episodeArtworkURL(for: episode, seriesInfo: seriesInfo)
+
+        return Button {
+            selectedEpisodeID = episodeID(for: episode)
+            startPlayback(episode: episode, seriesInfo: seriesInfo)
+        } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                Group {
+                    if let artworkURL {
+                        AsyncImage(url: artworkURL) { phase in
+                            switch phase {
+                            case .success(let image):
+                                image
+                                    .resizable()
+                                    .scaledToFill()
+                            default:
+                                placeholderArtwork(systemImage: "play.rectangle")
+                            }
+                        }
+                    } else {
+                        placeholderArtwork(systemImage: "play.rectangle")
+                    }
+                }
+                .frame(width: 280, height: 158)
+                .clipShape(.rect(cornerRadius: 12))
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(episodeBadgeText(for: episode))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(episode.title)
+                        .font(.headline)
+                        .lineLimit(2)
+
+                    Text(episodeMetaText(for: episode))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.fill")
+                            .font(.caption.weight(.semibold))
+                        Text(localized("Play Episode", comment: "Play a specific episode action"))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(12)
+            .frame(width: 304, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.secondary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func seasonButton(for seasonKey: String, in seriesInfo: XtreamSeries) -> some View {
+        let isSelected = seasonKey == selectedSeasonKey
+
+        let button = Button {
+            selectedSeasonKey = seasonKey
+            selectedEpisodeID = episodes(in: seasonKey, from: seriesInfo).first.map(episodeID(for:))
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(seasonTitle(for: seasonKey, in: seriesInfo))
+                Text(episodeCountText(episodes(in: seasonKey, from: seriesInfo).count))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(minWidth: 150, alignment: .leading)
+        }
+        .controlSize(.large)
+
+        if isSelected {
+            button.buttonStyle(.borderedProminent)
+        } else {
+            button.buttonStyle(.bordered)
+        }
+    }
+
+    private func placeholderArtwork(systemImage: String) -> some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [Color.secondary.opacity(0.3), Color.secondary.opacity(0.12)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .overlay {
+                Image(systemName: systemImage)
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+            }
+    }
+
+    private func subtitleText(for seriesInfo: XtreamSeries) -> String {
+        [
+            normalizedText(seriesInfo.info.genre),
+            normalizedText(seriesInfo.info.releaseDate),
+            seasonCountText(for: seriesInfo)
+        ]
+        .compactMap { $0 }
+        .joined(separator: " • ")
+    }
+
+    private func aboutText(for seriesInfo: XtreamSeries) -> String {
+        var lines: [String] = []
+
+        if let rating = normalizedText(seriesInfo.info.rating) {
+            lines.append("Rating: \(rating)")
+        }
+        if let tmdb = normalizedText(seriesInfo.info.tmdb) {
+            lines.append("TMDB: \(tmdb)")
+        }
+        lines.append("Seasons: \(seriesInfo.seasons.count)")
+        lines.append("Episodes: \(allEpisodes(from: seriesInfo).count)")
+
+        return lines.joined(separator: "\n")
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(localized(title, comment: "Series detail section title"))
+                .font(.title3.weight(.semibold))
+            Text(normalizedText(text) ?? localized("Not available.", comment: "Fallback when metadata is missing"))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -101,15 +301,135 @@ struct EpisodeDetailTile: View {
         }
     }
 
-    private func episodeVideos(from seriesInfo: XtreamSeries) -> [Video] {
+    private func allEpisodes(from seriesInfo: XtreamSeries) -> [XtreamEpisode] {
         sortedSeasonKeys(from: seriesInfo)
-            .flatMap { season in episodes(in: season, from: seriesInfo) }
-            .map(Video.init(from:))
+            .flatMap { episodes(in: $0, from: seriesInfo) }
+    }
+
+    private func selectedSeasonEpisodes(from seriesInfo: XtreamSeries) -> [XtreamEpisode] {
+        guard let seasonKey = selectedSeasonKey ?? sortedSeasonKeys(from: seriesInfo).first else {
+            return []
+        }
+        return episodes(in: seasonKey, from: seriesInfo)
+    }
+
+    private func selectedEpisode(from seriesInfo: XtreamSeries) -> XtreamEpisode? {
+        let seasonEpisodes = selectedSeasonEpisodes(from: seriesInfo)
+        if let selectedEpisodeID {
+            return seasonEpisodes.first(where: { episodeID(for: $0) == selectedEpisodeID }) ?? seasonEpisodes.first
+        }
+        return seasonEpisodes.first
+    }
+
+    private func episodeVideos(from seriesInfo: XtreamSeries) -> [Video] {
+        allEpisodes(from: seriesInfo).map(Video.init(from:))
+    }
+
+    private func episodeID(for episode: XtreamEpisode) -> Int {
+        Int(episode.id) ?? episode.info.id
+    }
+
+    private func primaryActionTitle(for seriesInfo: XtreamSeries) -> String {
+        guard let episode = selectedEpisode(from: seriesInfo) else {
+            return localized("Play", comment: "Generic play action")
+        }
+        return String(
+            localized: "Play E\(episode.episodeNum)",
+            locale: contentLocale,
+            comment: "Primary action to play the selected episode"
+        )
+    }
+
+    private func seasonTitle(for seasonKey: String, in seriesInfo: XtreamSeries) -> String {
+        if let seasonNumber = Int(seasonKey),
+           let season = seriesInfo.seasons.first(where: { $0.seasonNumber == seasonNumber }),
+           let seasonName = normalizedText(season.name) {
+            return seasonName
+        }
+        return String(
+            localized: "Season \(seasonKey)",
+            locale: contentLocale,
+            comment: "Season title in the episode browser"
+        )
+    }
+
+    private func seasonCountText(for seriesInfo: XtreamSeries) -> String? {
+        let count = seriesInfo.seasons.count
+        guard count > 0 else { return nil }
+        return count == 1
+            ? localized("1 season", comment: "Single season count")
+            : String(localized: "\(count) seasons", locale: contentLocale, comment: "Plural season count")
+    }
+
+    private func episodeMetaText(for episode: XtreamEpisode) -> String {
+        [
+            episodeShortLabel(for: episode),
+            normalizedText(episode.info.duration),
+            normalizedText(episode.info.airDate)
+        ]
+        .compactMap { $0 }
+        .joined(separator: " • ")
+    }
+
+    private func headerArtworkURL(for seriesInfo: XtreamSeries) -> URL? {
+        let candidates = [
+            seriesInfo.info.backdropPath.first,
+            normalizedText(seriesInfo.info.cover),
+            video.coverImageURL
+        ]
+
+        return candidates
+            .compactMap { $0 }
+            .compactMap(URL.init(string:))
+            .first
+    }
+
+    private func episodeArtworkURL(for episode: XtreamEpisode, seriesInfo: XtreamSeries) -> URL? {
+        let candidates = [
+            normalizedText(episode.info.movieImage),
+            normalizedText(seriesInfo.info.cover),
+            video.coverImageURL
+        ]
+
+        return candidates
+            .compactMap { $0 }
+            .compactMap(URL.init(string:))
+            .first
+    }
+
+    private func normalizedText(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func localized(_ key: String, comment: StaticString) -> String {
+        String(localized: String.LocalizationValue(key), locale: contentLocale, comment: comment)
+    }
+
+    private func episodeCountText(_ count: Int) -> String {
+        count == 1
+            ? localized("1 episode", comment: "Single episode count")
+            : String(localized: "\(count) episodes", locale: contentLocale, comment: "Plural episode count")
+    }
+
+    private func episodeShortLabel(for episode: XtreamEpisode) -> String {
+        String(localized: "E\(episode.episodeNum)", locale: contentLocale, comment: "Short episode label")
+    }
+
+    private func episodeBadgeText(for episode: XtreamEpisode) -> String {
+        String(localized: "Episode \(episode.episodeNum)", locale: contentLocale, comment: "Episode card title label")
+    }
+
+    private func playSelectedEpisode(from seriesInfo: XtreamSeries) {
+        guard let episode = selectedEpisode(from: seriesInfo) else { return }
+        selectedEpisodeID = episodeID(for: episode)
+        startPlayback(episode: episode, seriesInfo: seriesInfo)
     }
 
     private func startPlayback(episode: XtreamEpisode, seriesInfo: XtreamSeries) {
         let candidates = episodeVideos(from: seriesInfo)
-        let episodeID = Int(episode.id) ?? episode.info.id
+        let episodeID = episodeID(for: episode)
         guard let selected = candidates.first(where: { $0.id == episodeID }) else { return }
 
         do {
@@ -131,11 +451,31 @@ struct EpisodeDetailTile: View {
         defer { isLoading = false }
 
         do {
-            seriesInfo = try await catalog.getSeriesInfo(video, force: force)
+            let loadedSeriesInfo = try await catalog.getSeriesInfo(video, force: force)
+            seriesInfo = loadedSeriesInfo
+            syncSelection(with: loadedSeriesInfo)
             loadError = nil
         } catch {
             loadError = error
             logger.error("Failed to load series detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func syncSelection(with seriesInfo: XtreamSeries) {
+        let seasonKeys = sortedSeasonKeys(from: seriesInfo)
+        guard !seasonKeys.isEmpty else {
+            selectedSeasonKey = nil
+            selectedEpisodeID = nil
+            return
+        }
+
+        if selectedSeasonKey == nil || !seasonKeys.contains(selectedSeasonKey ?? "") {
+            selectedSeasonKey = seasonKeys[0]
+        }
+
+        let seasonEpisodes = selectedSeasonEpisodes(from: seriesInfo)
+        if selectedEpisodeID == nil || !seasonEpisodes.contains(where: { episodeID(for: $0) == selectedEpisodeID }) {
+            selectedEpisodeID = seasonEpisodes.first.map(episodeID(for:))
         }
     }
 }
