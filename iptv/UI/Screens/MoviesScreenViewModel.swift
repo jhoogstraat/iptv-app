@@ -21,6 +21,24 @@ extension Catalog: MoviesBrowsingCatalog {}
 @MainActor
 @Observable
 final class MoviesScreenViewModel {
+    struct CategoryMenuSection: Identifiable {
+        let title: String?
+        let items: [CategoryMenuItem]
+
+        var id: String {
+            title ?? "__ungrouped__"
+        }
+    }
+
+    struct CategoryMenuItem: Identifiable {
+        let category: Category
+        let title: String
+
+        var id: String {
+            category.id
+        }
+    }
+
     enum Phase {
         case idle
         case fetching
@@ -54,6 +72,38 @@ final class MoviesScreenViewModel {
     var selectedCategory: Category? {
         guard let selectedCategoryID else { return nil }
         return categories.first { $0.id == selectedCategoryID }
+    }
+
+    var categoryMenuSections: [CategoryMenuSection] {
+        var ungroupedItems: [CategoryMenuItem] = []
+        var groupedItemsByLanguage: [String: [CategoryMenuItem]] = [:]
+        var languageOrder: [String] = []
+
+        for category in categories {
+            let item = CategoryMenuItem(category: category, title: category.groupedDisplayName)
+
+            guard let languageCode = category.languageGroupCode else {
+                ungroupedItems.append(item)
+                continue
+            }
+
+            if groupedItemsByLanguage[languageCode] == nil {
+                languageOrder.append(languageCode)
+            }
+            groupedItemsByLanguage[languageCode, default: []].append(item)
+        }
+
+        var sections: [CategoryMenuSection] = []
+        if !ungroupedItems.isEmpty {
+            sections.append(CategoryMenuSection(title: nil, items: ungroupedItems))
+        }
+
+        for languageCode in languageOrder {
+            guard let items = groupedItemsByLanguage[languageCode], !items.isEmpty else { continue }
+            sections.append(CategoryMenuSection(title: languageCode, items: items))
+        }
+
+        return sections
     }
 
     func reset() {

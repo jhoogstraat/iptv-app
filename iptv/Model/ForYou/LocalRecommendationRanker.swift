@@ -283,9 +283,7 @@ struct LocalRecommendationRanker {
     }
 
     private func language(from title: String) -> String? {
-        let regex = /^[A-Z]{2}|[A-Z]{2}$/.anchorsMatchLineEndings()
-        guard let match = try? regex.firstMatch(in: title) else { return nil }
-        return String(match.0).lowercased()
+        LanguageTaggedText(title).languageCode?.lowercased()
     }
 
     private func makeVideoKey(_ video: Video) -> String {

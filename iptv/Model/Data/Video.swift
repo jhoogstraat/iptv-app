@@ -65,13 +65,7 @@ extension Video {
     }
     
     var language: String? {
-        let iso6391Regex = /^[A-Z]{2}|[A-Z]{2}$/.anchorsMatchLineEndings()
-        
-        if let matches = try? iso6391Regex.firstMatch(in: name) {
-            return String(matches.0)
-        }
-
-        return nil
+        LanguageTaggedText(name).languageCode
     }
 
     var xtreamContentType: XtreamContentType {

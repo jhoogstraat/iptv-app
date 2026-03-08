@@ -117,6 +117,27 @@ struct MoviesScreenViewModelTests {
         #expect(viewModel.browseResults.map(\.id) == [2, 3])
     }
 
+    @Test
+    func categoryMenuSectionsGroupPrefixedCategoriesByLanguageAndStripPrefixes() {
+        let catalog = MoviesBrowsingCatalogSpy()
+        catalog.categoriesByType[.vod] = [
+            Category(id: "1", name: "Action"),
+            Category(id: "2", name: "|NL| Drama"),
+            Category(id: "3", name: "|NL| Comedy"),
+            Category(id: "4", name: "|MULTI| Thriller")
+        ]
+
+        let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
+
+        #expect(viewModel.categoryMenuSections.count == 3)
+        #expect(viewModel.categoryMenuSections[0].title == nil)
+        #expect(viewModel.categoryMenuSections[0].items.map(\.title) == ["Action"])
+        #expect(viewModel.categoryMenuSections[1].title == "NL")
+        #expect(viewModel.categoryMenuSections[1].items.map(\.title) == ["Drama", "Comedy"])
+        #expect(viewModel.categoryMenuSections[2].title == "MULTI")
+        #expect(viewModel.categoryMenuSections[2].items.map(\.title) == ["Thriller"])
+    }
+
     private func makeVideo(
         id: Int,
         name: String,

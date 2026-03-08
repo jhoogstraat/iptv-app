@@ -136,15 +136,21 @@ struct MoviesScreen: View {
 
     private func categoryTitleMenu(_ viewModel: MoviesScreenViewModel) -> some View {
         Menu {
-            ForEach(viewModel.categories) { category in
-                Button {
-                    Task { await viewModel.selectCategory(id: category.id) }
-                } label: {
-                    if category.id == viewModel.selectedCategoryID {
-                        Label(category.name, systemImage: "checkmark")
-                    } else {
-                        Text(category.name)
+            ForEach(viewModel.categoryMenuSections) { section in
+                if let title = section.title {
+                    Section(title) {
+                        categoryButtons(
+                            for: section.items,
+                            selectedCategoryID: viewModel.selectedCategoryID,
+                            viewModel: viewModel
+                        )
                     }
+                } else {
+                    categoryButtons(
+                        for: section.items,
+                        selectedCategoryID: viewModel.selectedCategoryID,
+                        viewModel: viewModel
+                    )
                 }
             }
         } label: {
@@ -156,6 +162,25 @@ struct MoviesScreen: View {
         }
         .buttonStyle(.plain)
         .help("Category: \(selectedCategoryName(for: viewModel))")
+    }
+
+    @ViewBuilder
+    private func categoryButtons(
+        for items: [MoviesScreenViewModel.CategoryMenuItem],
+        selectedCategoryID: String?,
+        viewModel: MoviesScreenViewModel
+    ) -> some View {
+        ForEach(items) { item in
+            Button {
+                Task { await viewModel.selectCategory(id: item.category.id) }
+            } label: {
+                if item.category.id == selectedCategoryID {
+                    Label(item.title, systemImage: "checkmark")
+                } else {
+                    Text(item.title)
+                }
+            }
+        }
     }
 
     private func sortMenu(_ viewModel: MoviesScreenViewModel) -> some View {
