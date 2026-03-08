@@ -8,6 +8,12 @@
 import SwiftUI
 
 struct MoviesScreen: View {
+    private enum BrowseLayout {
+        static let standardPosterWidth: CGFloat = 170
+        static let minimumPosterWidth: CGFloat = 150
+        static let posterAspectRatio: CGFloat = 2 / 3
+    }
+
     let contentType: XtreamContentType
 
     @Environment(Catalog.self) private var catalog
@@ -209,7 +215,7 @@ struct MoviesScreen: View {
     private func browseTile(for video: Video) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             VideoTile(video: video)
-                .frame(height: 240)
+                .aspectRatio(BrowseLayout.posterAspectRatio, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 8))
 
             Text(video.name)
@@ -275,7 +281,16 @@ struct MoviesScreen: View {
     }
 
     private var gridColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 16, alignment: .top)]
+        [
+            GridItem(
+                .adaptive(
+                    minimum: BrowseLayout.minimumPosterWidth,
+                    maximum: BrowseLayout.standardPosterWidth
+                ),
+                spacing: 16,
+                alignment: .top
+            )
+        ]
     }
 
     private var screenTitle: String {
