@@ -324,3 +324,49 @@ final class Catalog {
         return targets
     }
 }
+
+extension Catalog {
+    func categories(for contentType: XtreamContentType) -> [Category] {
+        switch contentType {
+        case .vod:
+            vodCategories
+        case .series:
+            seriesCategories
+        case .live:
+            []
+        }
+    }
+
+    func cachedVideos(in category: Category, contentType: XtreamContentType) -> [Video]? {
+        switch contentType {
+        case .vod:
+            vodCatalog[category]
+        case .series:
+            seriesCatalog[category]
+        case .live:
+            liveCatalog[category]
+        }
+    }
+
+    func getCategories(for contentType: XtreamContentType, force: Bool = false) async throws {
+        switch contentType {
+        case .vod:
+            try await getVodCategories(force: force)
+        case .series:
+            try await getSeriesCategories(force: force)
+        case .live:
+            break
+        }
+    }
+
+    func getStreams(in category: Category, contentType: XtreamContentType, force: Bool = false) async throws {
+        switch contentType {
+        case .vod:
+            try await getVodStreams(in: category, force: force)
+        case .series:
+            try await getSeriesStreams(in: category, force: force)
+        case .live:
+            break
+        }
+    }
+}
