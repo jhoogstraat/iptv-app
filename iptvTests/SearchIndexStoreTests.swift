@@ -132,15 +132,131 @@ struct SearchIndexStoreTests {
         #expect(movie?.video.contentType == "movie")
     }
 
-    private func makeSnapshot(id: Int, name: String, contentType: String) -> SearchVideoSnapshot {
+    @Test
+    func categoryFilteringRespectsScopeAndSelectedCategory() async {
+        let store = SearchIndexStore()
+
+        await store.upsert(
+            videos: [makeSnapshot(id: 1, name: "Action Movie", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "action",
+            categoryName: "Action",
+            providerFingerprint: "provider"
+        )
+        await store.upsert(
+            videos: [makeSnapshot(id: 2, name: "Comedy Movie", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "comedy",
+            categoryName: "Comedy",
+            providerFingerprint: "provider"
+        )
+        await store.upsert(
+            videos: [makeSnapshot(id: 3, name: "Action Series", contentType: "series")],
+            contentType: .series,
+            categoryID: "action",
+            categoryName: "Action",
+            providerFingerprint: "provider"
+        )
+
+        var filters = SearchFilters.default
+        filters.categoryIDs = ["action"]
+
+        let movieResults = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: filters, sort: .title),
+            providerFingerprint: "provider"
+        )
+        #expect(movieResults.map(\.video.id) == [1])
+
+        let seriesResults = await store.query(
+            SearchQuery(text: "", scope: .series, filters: filters, sort: .title),
+            providerFingerprint: "provider"
+        )
+        #expect(seriesResults.map(\.video.id) == [3])
+    }
+
+    @Test
+    func categoryFilteringCombinesWithTextQuery() async {
+        let store = SearchIndexStore()
+
+        await store.upsert(
+            videos: [
+                makeSnapshot(id: 11, name: "Galaxy Patrol", contentType: "vod"),
+                makeSnapshot(id: 12, name: "Galaxy Quest", contentType: "vod")
+            ],
+            contentType: .vod,
+            categoryID: "scifi",
+            categoryName: "Sci-Fi",
+            providerFingerprint: "provider"
+        )
+        await store.upsert(
+            videos: [makeSnapshot(id: 13, name: "Galaxy Patrol", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "drama",
+            categoryName: "Drama",
+            providerFingerprint: "provider"
+        )
+
+        var filters = SearchFilters.default
+        filters.categoryIDs = ["scifi"]
+
+        let results = await store.query(
+            SearchQuery(text: "patrol", scope: .movies, filters: filters, sort: .title),
+            providerFingerprint: "provider"
+        )
+
+        #expect(results.map(\.video.id) == [11])
+    }
+
+    @Test
+    func browseSortsOrderByTitleNewestAndRating() async {
+        let store = SearchIndexStore()
+
+        await store.upsert(
+            videos: [
+                makeSnapshot(id: 21, name: "Bravo", contentType: "vod", rating: 7.2, addedAtRaw: "2026-01-01"),
+                makeSnapshot(id: 22, name: "Alpha", contentType: "vod", rating: 8.8, addedAtRaw: "2026-03-01"),
+                makeSnapshot(id: 23, name: "Charlie", contentType: "vod", rating: 6.1, addedAtRaw: "2026-02-01")
+            ],
+            contentType: .vod,
+            categoryID: "browse",
+            categoryName: "Browse",
+            providerFingerprint: "provider"
+        )
+
+        let titleResults = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider"
+        )
+        #expect(titleResults.map(\.video.id) == [22, 21, 23])
+
+        let newestResults = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .newest),
+            providerFingerprint: "provider"
+        )
+        #expect(newestResults.map(\.video.id) == [22, 23, 21])
+
+        let ratingResults = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .rating),
+            providerFingerprint: "provider"
+        )
+        #expect(ratingResults.map(\.video.id) == [22, 21, 23])
+    }
+
+    private func makeSnapshot(
+        id: Int,
+        name: String,
+        contentType: String,
+        rating: Double = 7.2,
+        addedAtRaw: String = "2026-02-01"
+    ) -> SearchVideoSnapshot {
         SearchVideoSnapshot(
             id: id,
             name: name,
             containerExtension: "mp4",
             contentType: contentType,
             coverImageURL: nil,
-            rating: 7.2,
-            addedAtRaw: "2026-02-01",
+            rating: rating,
+            addedAtRaw: addedAtRaw,
             language: "EN"
         )
     }

@@ -55,6 +55,34 @@ enum SearchSort: String, CaseIterable, Codable, Sendable {
     }
 }
 
+enum BrowseSort: String, CaseIterable, Codable, Sendable {
+    case title
+    case newest
+    case rating
+
+    var displayName: String {
+        switch self {
+        case .title:
+            "Title"
+        case .newest:
+            "Newest"
+        case .rating:
+            "Rating"
+        }
+    }
+
+    var searchSort: SearchSort {
+        switch self {
+        case .title:
+            .title
+        case .newest:
+            .newest
+        case .rating:
+            .rating
+        }
+    }
+}
+
 enum SearchAddedWindow: String, CaseIterable, Codable, Sendable {
     case any
     case days30
@@ -101,6 +129,7 @@ struct SearchFilters: Hashable, Sendable {
     var maxRating: Double?
     var genres: Set<String>
     var languages: Set<String>
+    var categoryIDs: Set<String>
     var addedWindow: SearchAddedWindow
 
     static let `default` = SearchFilters(
@@ -108,6 +137,7 @@ struct SearchFilters: Hashable, Sendable {
         maxRating: nil,
         genres: [],
         languages: [],
+        categoryIDs: [],
         addedWindow: .any
     )
 }

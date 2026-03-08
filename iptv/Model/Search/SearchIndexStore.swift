@@ -75,6 +75,7 @@ actor SearchIndexStore {
         let addedAt: Date?
         let language: String?
         let normalizedLanguage: String?
+        let categoryIDs: Set<String>
         let categories: Set<String>
         let normalizedCategories: Set<String>
         let genres: Set<String>
@@ -120,11 +121,13 @@ actor SearchIndexStore {
         var providerIndex = indexesByProvider[providerFingerprint] ?? ProviderIndex()
         for video in videos {
             let key = Self.makeKey(contentType: contentType, videoID: video.id)
+            let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedCategory = Self.normalize(cleanedCategoryName)
             let playbackContentType = Self.playbackContentType(from: video.contentType, indexedAs: contentType)
 
             let existing = providerIndex.documentsByKey[key]
+            let categoryIDs = (existing?.categoryIDs ?? []).union(cleanedCategoryID.isEmpty ? [] : [cleanedCategoryID])
             let categories = (existing?.categories ?? []).union(cleanedCategoryName.isEmpty ? [] : [cleanedCategoryName])
             let normalizedCategories = (existing?.normalizedCategories ?? []).union(normalizedCategory.isEmpty ? [] : [normalizedCategory])
             let genres = (existing?.genres ?? []).union(cleanedCategoryName.isEmpty ? [] : [cleanedCategoryName])
@@ -148,6 +151,7 @@ actor SearchIndexStore {
                 addedAt: Self.parseDate(addedAtRaw),
                 language: language,
                 normalizedLanguage: normalizedLanguage,
+                categoryIDs: categoryIDs,
                 categories: categories,
                 normalizedCategories: normalizedCategories,
                 genres: genres,
@@ -317,6 +321,9 @@ actor SearchIndexStore {
         }
         if !normalizedLanguageFilters.isEmpty {
             guard let language = doc.normalizedLanguage, normalizedLanguageFilters.contains(language) else { return false }
+        }
+        if !filters.categoryIDs.isEmpty && doc.categoryIDs.isDisjoint(with: filters.categoryIDs) {
+            return false
         }
         if let dayCount = filters.addedWindow.dayCount {
             guard let addedAt = doc.addedAt else { return false }

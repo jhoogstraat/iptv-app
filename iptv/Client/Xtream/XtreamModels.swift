@@ -272,6 +272,16 @@ struct XtreamStream: Decodable, Identifiable {
         num = container.decodeLosslessValue(Int.self, forKey: .num, default: 0)
         isAdult = container.decodeLosslessValue(Int.self, forKey: .isAdult, default: 0)
     }
+
+    nonisolated func belongs(to categoryID: String) -> Bool {
+        if categoryId == categoryID {
+            return true
+        }
+        guard let numericCategoryID = Int(categoryID) else {
+            return false
+        }
+        return categoryIds.contains(numericCategoryID)
+    }
 }
 
 struct XtreamSeriesStream: Decodable, Identifiable {
@@ -324,7 +334,7 @@ struct XtreamSeriesStream: Decodable, Identifiable {
         rating = container.decodeLosslessValueIfPresent(Double.self, forKey: .rating)
     }
 
-    func belongs(to categoryID: String) -> Bool {
+    nonisolated func belongs(to categoryID: String) -> Bool {
         categoryIds.contains(categoryID)
     }
 }

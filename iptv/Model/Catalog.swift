@@ -134,9 +134,19 @@ final class Catalog {
         let key = try cacheKey(for: category, contentType: .vod)
         let categoryID = category.id
 
-        let cachedVideos = try await cacheManager.loadStreamList(for: key, force: force) {
-            let streams = try await service.getStreams(of: .vod, in: categoryID)
+        func fetchVideos() async throws -> [CachedVideoDTO] {
+            var streams = try await service.getStreams(of: .vod, in: categoryID)
+            if streams.isEmpty {
+                let allStreams = try await service.getStreams(of: .vod)
+                let filtered = allStreams.filter { $0.belongs(to: categoryID) }
+                streams = filtered.isEmpty ? allStreams : filtered
+            }
             return streams.map(CachedVideoDTO.init)
+        }
+
+        var cachedVideos = try await cacheManager.loadStreamList(for: key, force: force, fetcher: fetchVideos)
+        if cachedVideos.isEmpty, !force {
+            cachedVideos = try await cacheManager.loadStreamList(for: key, force: true, fetcher: fetchVideos)
         }
 
         self.vodCatalog[category] = cachedVideos.map(Video.init)

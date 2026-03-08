@@ -23,10 +23,11 @@ struct MoviesScreen: View {
 
     @State private var state: LoadState = .idle
     @State private var isPresentingSettings = false
-    @State private var prefetchCoordinator = StreamPrefetchCoordinator()
     @State private var queryText = ""
-    @State private var scopedResults: [SearchResultItem] = []
-    @State private var scopedSearchTask: Task<Void, Never>?
+    @State private var selectedCategoryID: String?
+    @State private var browseSort: BrowseSort = .title
+    @State private var browseResults: [SearchResultItem] = []
+    @State private var browseTask: Task<Void, Never>?
     @State private var coverageTask: Task<Void, Never>?
     @State private var searchProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: .all)
 
@@ -46,7 +47,24 @@ struct MoviesScreen: View {
             .navigationTitle(screenTitle)
             .searchable(text: $queryText, prompt: "Search \(screenTitle)")
             .onChange(of: queryText) { _, _ in
-                scheduleScopedSearch()
+                scheduleBrowseRefresh()
+            }
+            .onChange(of: selectedCategoryID) { _, _ in
+                scheduleBrowseRefresh(debounced: false)
+            }
+            .onChange(of: browseSort) { _, _ in
+                scheduleBrowseRefresh(debounced: false)
+            }
+            .toolbar {
+                if providerStore.hasConfiguration, !categories.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        categoryMenu
+                    }
+
+                    ToolbarItem(placement: .primaryAction) {
+                        sortMenu
+                    }
+                }
             }
             .sheet(isPresented: $isPresentingSettings) {
                 NavigationStack {
@@ -65,20 +83,19 @@ struct MoviesScreen: View {
         .task(id: providerStore.revision) {
             guard providerStore.hasConfiguration else {
                 state = .idle
-                prefetchCoordinator.stop()
                 catalog.reset()
                 coverageTask?.cancel()
-                scopedSearchTask?.cancel()
-                scopedResults = []
+                browseTask?.cancel()
+                browseResults = []
+                selectedCategoryID = nil
                 return
             }
 
             await loadCategories(force: true)
         }
         .onDisappear {
-            prefetchCoordinator.stop()
             coverageTask?.cancel()
-            scopedSearchTask?.cancel()
+            browseTask?.cancel()
         }
     }
 
@@ -110,55 +127,83 @@ struct MoviesScreen: View {
                     }
                     .padding()
                 } else {
-                    ScrollView {
-                        LazyVStack(alignment: .leading) {
-                            if !queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                scopedResultsSection
+                    VStack(alignment: .leading, spacing: 12) {
+                        if searchProgress.totalCategories > 0, !searchProgress.isComplete {
+                            Text("Indexing \(searchProgress.indexedCategories)/\(searchProgress.totalCategories) categories")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal)
+                        }
+
+                        if browseResults.isEmpty {
+                            if isIndexing {
+                                ProgressView("Loading titles...")
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            } else {
+                                ContentUnavailableView(
+                                    "No Results",
+                                    systemImage: "film",
+                                    description: Text(emptyBrowseMessage)
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
-                            ForEach(categories) { category in
-                                VideoTileRow(category: category, contentType: contentType)
+                        } else {
+                            ScrollView {
+                                LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
+                                    ForEach(browseResults) { item in
+                                        NavigationLink {
+                                            destination(for: item.video)
+                                        } label: {
+                                            browseTile(for: item)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                .padding(.horizontal)
+                                .padding(.bottom, 20)
                             }
                         }
-                        .padding(.bottom, 20)
                     }
-                    .toolbar(.hidden)
                 }
         }
     }
 
-    @ViewBuilder
-    private var scopedResultsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Search Results")
-                    .font(.headline)
-                Spacer()
-                if searchProgress.totalCategories > 0, !searchProgress.isComplete {
-                    Text("Indexing \(searchProgress.indexedCategories)/\(searchProgress.totalCategories)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+    private var categoryMenu: some View {
+        Menu {
+            Section("Category") {
+                Text(selectedCategoryName)
             }
-            .padding(.horizontal)
 
-            if scopedResults.isEmpty {
-                Text("No matches for \"\(queryText)\"")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal)
-            } else {
-                ForEach(scopedResults.prefix(20)) { item in
-                    NavigationLink {
-                        destination(for: item.video)
-                    } label: {
-                        SearchResultRowView(item: item, isFavorite: false)
-                            .padding(.horizontal)
-                    }
-                    .buttonStyle(.plain)
+            Picker("Category", selection: $selectedCategoryID) {
+                Text("All Categories")
+                    .tag(Optional<String>.none)
+                ForEach(categories) { category in
+                    Text(category.name)
+                        .tag(Optional(category.id))
                 }
             }
+        } label: {
+            Image(systemName: "line.3.horizontal.decrease.circle")
         }
-        .padding(.vertical, 8)
+        .help(selectedCategoryName)
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Section("Sort") {
+                Text(browseSort.displayName)
+            }
+
+            Picker("Sort", selection: $browseSort) {
+                ForEach(BrowseSort.allCases, id: \.self) { sort in
+                    Text(sort.displayName)
+                        .tag(sort)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+        }
+        .help("Sort: \(browseSort.displayName)")
     }
 
     @ViewBuilder
@@ -197,9 +242,26 @@ struct MoviesScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    private func browseTile(for item: SearchResultItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VideoTile(video: item.video)
+                .frame(height: 240)
+                .clipShape(.rect(cornerRadius: 8))
+
+            Text(item.video.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
     private func loadCategories(force: Bool = false) async {
         do {
             state = .fetching
+            coverageTask?.cancel()
+            browseTask?.cancel()
+
             switch contentType {
             case .vod:
                 try await catalog.getVodCategories(force: force)
@@ -209,9 +271,11 @@ struct MoviesScreen: View {
                 break
             }
             state = .done
-            prefetchCoordinator.start(categories: categories, contentType: contentType, catalog: catalog)
+            if let selectedCategoryID, !categories.contains(where: { $0.id == selectedCategoryID }) {
+                self.selectedCategoryID = nil
+            }
             startCoverageIfNeeded()
-            scheduleScopedSearch(debounced: false)
+            scheduleBrowseRefresh(debounced: false)
         } catch {
             logger.error("Failed to load \(contentType.rawValue, privacy: .public) categories: \(error.localizedDescription, privacy: .public)")
             state = .error(error)
@@ -228,35 +292,44 @@ struct MoviesScreen: View {
             for await progress in catalog.ensureSearchCoverage(scope: scope) {
                 if Task.isCancelled { return }
                 searchProgress = progress
+                await performBrowseQuery()
             }
         }
     }
 
-    private func scheduleScopedSearch(debounced: Bool = true) {
-        scopedSearchTask?.cancel()
-        scopedSearchTask = Task {
+    private func scheduleBrowseRefresh(debounced: Bool = true) {
+        browseTask?.cancel()
+        browseTask = Task {
             if debounced {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
             }
-            await performScopedSearch()
+            await performBrowseQuery()
         }
     }
 
     @MainActor
-    private func performScopedSearch() async {
-        let text = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            scopedResults = []
-            return
-        }
+    private func performBrowseQuery() async {
         do {
-            let scope: SearchMediaScope = contentType == .series ? .series : .movies
-            let query = SearchQuery(text: text, scope: scope, filters: .default, sort: .relevance)
-            scopedResults = try await catalog.search(query)
+            browseResults = try await catalog.search(
+                SearchQuery(
+                    text: queryText.trimmingCharacters(in: .whitespacesAndNewlines),
+                    scope: searchScope,
+                    filters: browseFilters,
+                    sort: browseSort.searchSort
+                )
+            )
         } catch {
-            scopedResults = []
+            browseResults = []
         }
+    }
+
+    private var browseFilters: SearchFilters {
+        var filters = SearchFilters.default
+        if let selectedCategoryID {
+            filters.categoryIDs = [selectedCategoryID]
+        }
+        return filters
     }
 
     private var categories: [Category] {
@@ -268,6 +341,49 @@ struct MoviesScreen: View {
         case .live:
             []
         }
+    }
+
+    private var searchScope: SearchMediaScope {
+        switch contentType {
+        case .vod:
+            .movies
+        case .series:
+            .series
+        case .live:
+            .all
+        }
+    }
+
+    private var selectedCategoryName: String {
+        guard let selectedCategoryID,
+              let category = categories.first(where: { $0.id == selectedCategoryID }) else {
+            return "All Categories"
+        }
+        return category.name
+    }
+
+    private var isIndexing: Bool {
+        searchProgress.totalCategories > 0 && !searchProgress.isComplete
+    }
+
+    private var emptyBrowseMessage: String {
+        if let selectedCategoryID,
+           let category = categories.first(where: { $0.id == selectedCategoryID }) {
+            if queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "No titles are available in \(category.name)."
+            }
+            return "No titles match \"\(queryText)\" in \(category.name)."
+        }
+
+        if queryText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "No titles match this category/filter combination."
+        }
+
+        return "No titles match \"\(queryText)\"."
+    }
+
+    private var gridColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 150, maximum: 190), spacing: 16, alignment: .top)]
     }
 
     private var screenTitle: String {
