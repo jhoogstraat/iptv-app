@@ -79,6 +79,7 @@ struct StreamListCacheEntry: Codable, Sendable {
 protocol StreamListCacheStore: Sendable {
     func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry?
     func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws
+    func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry]
     func pruneCacheIfNeeded() async throws
     func removeAll(for providerFingerprint: String) async throws
 }
@@ -165,7 +166,7 @@ actor DiskStreamListCacheStore: StreamListCacheStore {
         files.removeAll(keepingCapacity: false)
     }
 
-    func removeAll(for providerFingerprint: String) async throws {
+    func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry] {
         try ensureDirectoryExists()
 
         let files = try fileManager.contentsOfDirectory(
@@ -175,13 +176,20 @@ actor DiskStreamListCacheStore: StreamListCacheStore {
         )
 
         let decoder = JSONDecoder()
-        for file in files {
+        return files.compactMap { file in
             guard let data = try? Data(contentsOf: file),
                   let entry = try? decoder.decode(StreamListCacheEntry.self, from: data),
                   entry.key.providerFingerprint == providerFingerprint else {
-                continue
+                return nil
             }
-            try? fileManager.removeItem(at: file)
+            return entry
+        }
+    }
+
+    func removeAll(for providerFingerprint: String) async throws {
+        let providerEntries = try await entries(providerFingerprint: providerFingerprint)
+        for entry in providerEntries {
+            try? fileManager.removeItem(at: fileURL(for: entry.key))
         }
     }
 
@@ -215,7 +223,7 @@ actor CatalogCacheManager {
 
     init(
         diskStore: StreamListCacheStore? = nil,
-        ttl: TimeInterval = 15 * 60,
+        ttl: TimeInterval = 60 * 60,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.diskStore = diskStore ?? DiskStreamListCacheStore()
@@ -235,6 +243,52 @@ actor CatalogCacheManager {
 
     func pruneCacheIfNeeded() async throws {
         try await diskStore.pruneCacheIfNeeded()
+    }
+
+    func cachedValue(
+        for key: StreamListCacheKey,
+        ttl: TimeInterval
+    ) async throws -> CatalogCachedValue<[CachedVideoDTO]>? {
+        let currentDate = now()
+
+        if let memoryEntry = memoryCache[key] {
+            let touched = memoryEntry.touching(at: currentDate)
+            memoryCache[key] = touched
+            return CatalogCachedValue(
+                value: touched.videos,
+                savedAt: touched.savedAt,
+                isStale: isStale(touched.savedAt, ttl: ttl, at: currentDate)
+            )
+        }
+
+        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
+        memoryCache[key] = diskEntry
+        return CatalogCachedValue(
+            value: diskEntry.videos,
+            savedAt: diskEntry.savedAt,
+            isStale: isStale(diskEntry.savedAt, ttl: ttl, at: currentDate)
+        )
+    }
+
+    func refreshValue(
+        for key: StreamListCacheKey,
+        fetcher: @escaping @Sendable () async throws -> [CachedVideoDTO]
+    ) async throws -> [CachedVideoDTO] {
+        if let inFlight = inFlightTasks[key] {
+            return try await inFlight.task.value
+        }
+
+        let inFlight = startFetch(for: key, fetcher: fetcher)
+        return try await inFlight.task.value
+    }
+
+    func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry] {
+        try await diskStore.entries(providerFingerprint: providerFingerprint)
+    }
+
+    func removeAll(for providerFingerprint: String) async throws {
+        memoryCache = memoryCache.filter { $0.key.providerFingerprint != providerFingerprint }
+        try await diskStore.removeAll(for: providerFingerprint)
     }
 
     func loadStreamList(
@@ -325,8 +379,12 @@ actor CatalogCacheManager {
         inFlightTasks[key] = nil
     }
 
-    private func isStale(_ savedAt: Date, at currentDate: Date) -> Bool {
+    private func isStale(_ savedAt: Date, ttl: TimeInterval, at currentDate: Date) -> Bool {
         currentDate.timeIntervalSince(savedAt) > ttl
+    }
+
+    private func isStale(_ savedAt: Date, at currentDate: Date) -> Bool {
+        isStale(savedAt, ttl: ttl, at: currentDate)
     }
 }
 

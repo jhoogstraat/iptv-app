@@ -14,7 +14,11 @@ struct ContentView: View {
     #if !os(macOS) && !os(tvOS)
     @AppStorage("sidebarCustomizations") var tabViewCustomization: TabViewCustomization
     #endif
+    @Environment(Catalog.self) private var catalog
+    @Environment(BackgroundActivityCenter.self) private var backgroundActivityCenter
+    @Environment(ProviderStore.self) private var providerStore
     @State private var selectedTab: Tabs = ProcessInfo.processInfo.arguments.contains("--uitest-open-movies") ? .movies : .home
+    @State private var warmupCoordinator = CatalogWarmupCoordinator()
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -87,6 +91,18 @@ struct ContentView: View {
         .tabViewCustomization($tabViewCustomization)
         #endif
         .withVideoPlayer()
+        .overlay(alignment: .bottomTrailing) {
+            BackgroundActivityIndicatorView(activityCenter: backgroundActivityCenter)
+                .padding(.trailing, 16)
+                .padding(.bottom, 16)
+        }
+        .task(id: "\(providerStore.revision)|\(selectedTab.id)") {
+            guard providerStore.hasConfiguration else {
+                warmupCoordinator.stop()
+                return
+            }
+            warmupCoordinator.start(selectedTab: selectedTab, providerRevision: providerStore.revision, catalog: catalog)
+        }
     }
 }
 

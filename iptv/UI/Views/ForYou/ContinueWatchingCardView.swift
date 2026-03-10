@@ -17,10 +17,7 @@ struct ContinueWatchingCardView: View {
                     switch phase {
                     case .success(let image):
                         image
-                            .resizable()
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipped()
+                            .boundedCoverArtwork()
                     case .failure:
                         Color.gray.opacity(0.25)
                     case .empty:
@@ -38,6 +35,7 @@ struct ContinueWatchingCardView: View {
                 }
             }
             .frame(height: 195)
+            .background(Color.secondary.opacity(0.12))
             .clipShape(.rect(cornerRadius: 10))
 
             Text(item.video.name)

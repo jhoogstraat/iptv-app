@@ -20,11 +20,11 @@ struct MoviesScreenViewModelTests {
         catalog.cachedVideosByKey["vod:1"] = [makeVideo(id: 10, name: "Alpha")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(force: true)
+        await viewModel.load(policy: .refreshNow)
 
         #expect(catalog.recordedEvents == [
-            .getCategories(.vod, true),
-            .getStreams(.vod, "1", true)
+            .getCategories(.vod, .refreshNow),
+            .getStreams(.vod, "1", .refreshNow)
         ])
         #expect(viewModel.selectedCategoryID == "1")
         #expect(viewModel.browseResults.map(\.id) == [10])
@@ -40,13 +40,13 @@ struct MoviesScreenViewModelTests {
         catalog.fetchedVideosByKey["vod:2"] = [makeVideo(id: 20, name: "Beta")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(force: false)
+        await viewModel.load(policy: .cachedThenRefresh)
         catalog.recordedEvents.removeAll()
 
         await viewModel.selectCategory(id: "2")
 
         #expect(catalog.recordedEvents == [
-            .getStreams(.vod, "2", false)
+            .getStreams(.vod, "2", .cachedThenRefresh)
         ])
         #expect(viewModel.selectedCategoryID == "2")
         #expect(viewModel.browseResults.map(\.id) == [20])
@@ -62,7 +62,7 @@ struct MoviesScreenViewModelTests {
         catalog.cachedVideosByKey["vod:2"] = [makeVideo(id: 20, name: "Beta")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(force: false)
+        await viewModel.load(policy: .cachedThenRefresh)
         await viewModel.selectCategory(id: "2")
         catalog.recordedEvents.removeAll()
 
@@ -82,19 +82,19 @@ struct MoviesScreenViewModelTests {
         catalog.cachedVideosByKey["vod:old"] = [makeVideo(id: 10, name: "Legacy")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(force: false)
+        await viewModel.load(policy: .cachedThenRefresh)
 
         catalog.categoriesByType[.vod] = [newCategory]
         catalog.cachedVideosByKey["vod:new"] = [makeVideo(id: 20, name: "Fresh")]
         catalog.recordedEvents.removeAll()
 
-        await viewModel.load(force: true)
+        await viewModel.load(policy: .refreshNow)
 
         #expect(viewModel.selectedCategoryID == "new")
         #expect(viewModel.browseResults.map(\.id) == [20])
         #expect(catalog.recordedEvents == [
-            .getCategories(.vod, true),
-            .getStreams(.vod, "new", true)
+            .getCategories(.vod, .refreshNow),
+            .getStreams(.vod, "new", .refreshNow)
         ])
     }
 
@@ -110,7 +110,7 @@ struct MoviesScreenViewModelTests {
         ]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(force: false)
+        await viewModel.load(policy: .cachedThenRefresh)
         viewModel.queryText = "patrol"
         viewModel.browseSort = .rating
 
@@ -160,8 +160,8 @@ struct MoviesScreenViewModelTests {
 @MainActor
 private final class MoviesBrowsingCatalogSpy: MoviesBrowsingCatalog {
     enum Event: Equatable {
-        case getCategories(XtreamContentType, Bool)
-        case getStreams(XtreamContentType, String, Bool)
+        case getCategories(XtreamContentType, CatalogLoadPolicy)
+        case getStreams(XtreamContentType, String, CatalogLoadPolicy)
     }
 
     var categoriesByType: [XtreamContentType: [iptv.Category]] = [:]
@@ -169,16 +169,16 @@ private final class MoviesBrowsingCatalogSpy: MoviesBrowsingCatalog {
     var fetchedVideosByKey: [String: [Video]] = [:]
     var recordedEvents: [Event] = []
 
-    func getCategories(for contentType: XtreamContentType, force: Bool) async throws {
-        recordedEvents.append(.getCategories(contentType, force))
+    func getCategories(for contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws {
+        recordedEvents.append(.getCategories(contentType, policy))
     }
 
     func categories(for contentType: XtreamContentType) -> [iptv.Category] {
         categoriesByType[contentType] ?? []
     }
 
-    func getStreams(in category: iptv.Category, contentType: XtreamContentType, force: Bool) async throws {
-        recordedEvents.append(.getStreams(contentType, category.id, force))
+    func getStreams(in category: iptv.Category, contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws {
+        recordedEvents.append(.getStreams(contentType, category.id, policy))
         let key = "\(contentType.rawValue):\(category.id)"
         if let fetchedVideos = fetchedVideosByKey[key] {
             cachedVideosByKey[key] = fetchedVideos

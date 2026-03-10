@@ -43,10 +43,7 @@ private struct ForYouPosterCard: View {
                 switch phase {
                 case .success(let image):
                     image
-                        .resizable()
-                        .scaledToFill()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
+                        .boundedCoverArtwork()
                 case .failure:
                     fallback
                 case .empty:
@@ -63,6 +60,8 @@ private struct ForYouPosterCard: View {
                     .padding(8)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.secondary.opacity(0.12))
         .clipShape(.rect(cornerRadius: 10))
     }
 

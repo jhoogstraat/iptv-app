@@ -37,7 +37,7 @@ struct EpisodeDetailTile: View {
                     Text(loadError.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await loadSeriesInfo(force: true) }
+                        Task { await loadSeriesInfo(policy: .refreshNow) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -51,7 +51,7 @@ struct EpisodeDetailTile: View {
         }
         .navigationTitle(video.name)
         .task {
-            await loadSeriesInfo()
+            await loadSeriesInfo(policy: .cachedThenRefresh)
             await loadFavoriteState()
         }
     }
@@ -112,8 +112,7 @@ struct EpisodeDetailTile: View {
                     switch phase {
                     case .success(let image):
                         image
-                            .resizable()
-                            .scaledToFill()
+                            .boundedFillArtwork()
                     default:
                         placeholderArtwork(systemImage: "tv")
                     }
@@ -167,8 +166,7 @@ struct EpisodeDetailTile: View {
                             switch phase {
                             case .success(let image):
                                 image
-                                    .resizable()
-                                    .scaledToFill()
+                                    .boundedCoverArtwork()
                             default:
                                 placeholderArtwork(systemImage: "play.rectangle")
                             }
@@ -456,12 +454,12 @@ struct EpisodeDetailTile: View {
         }
     }
 
-    private func loadSeriesInfo(force: Bool = false) async {
+    private func loadSeriesInfo(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let loadedSeriesInfo = try await catalog.getSeriesInfo(video, force: force)
+            let loadedSeriesInfo = try await catalog.getSeriesInfo(video, policy: policy)
             seriesInfo = loadedSeriesInfo
             syncSelection(with: loadedSeriesInfo)
             loadError = nil

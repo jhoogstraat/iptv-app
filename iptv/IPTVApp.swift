@@ -19,6 +19,7 @@ struct IPTVApp: App {
     @State private var providerStore: ProviderStore
     @State private var catalog: Catalog
     @State private var favoritesStore: FavoritesStore
+    @State private var backgroundActivityCenter: BackgroundActivityCenter
     
     var body: some Scene {
         WindowGroup {
@@ -27,6 +28,7 @@ struct IPTVApp: App {
                 .environment(providerStore)
                 .environment(catalog)
                 .environment(favoritesStore)
+                .environment(backgroundActivityCenter)
                 .modelContainer(modelContainer)
                 #if os(macOS)
                 .toolbar(removing: .title)
@@ -73,6 +75,7 @@ struct IPTVApp: App {
 //            try Importer.importVideoMetadata(into: modelContainer.mainContext)
             let providerStore = ProviderStore()
             let favoritesStore = FavoritesStore()
+            let backgroundActivityCenter = BackgroundActivityCenter()
             let watchActivityStore = DiskWatchActivityStore.shared
             let imagePrefetcher = URLSessionImagePrefetcher()
             let player = Player(
@@ -84,10 +87,12 @@ struct IPTVApp: App {
             )
             self._providerStore = State(initialValue: providerStore)
             self._favoritesStore = State(initialValue: favoritesStore)
+            self._backgroundActivityCenter = State(initialValue: backgroundActivityCenter)
             self._catalog = State(initialValue: Catalog(
                 providerStore: providerStore,
                 modelContainer: modelContainer,
-                imagePrefetcher: imagePrefetcher
+                imagePrefetcher: imagePrefetcher,
+                activityCenter: backgroundActivityCenter
             ))
 
             let launchArgs = ProcessInfo.processInfo.arguments

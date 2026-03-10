@@ -18,8 +18,7 @@ struct ForYouHeroView: View {
                 switch phase {
                 case .success(let image):
                     image
-                        .resizable()
-                        .scaledToFill()
+                        .boundedFillArtwork()
                 case .failure:
                     Rectangle()
                         .fill(.gray.opacity(0.35))

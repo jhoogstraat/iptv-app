@@ -75,7 +75,7 @@ struct MoviesScreen: View {
                 return
             }
 
-            await viewModel?.load(force: true)
+            await viewModel?.load(policy: .cachedThenRefresh)
         }
     }
 
@@ -90,7 +90,7 @@ struct MoviesScreen: View {
                     Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await viewModel.load(force: true) }
+                        Task { await viewModel.load(policy: .refreshNow) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -101,7 +101,7 @@ struct MoviesScreen: View {
                     VStack(spacing: 12) {
                         Text(emptyCatalogMessage)
                         Button("Refresh") {
-                            Task { await viewModel.load(force: true) }
+                            Task { await viewModel.load(policy: .refreshNow) }
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -156,14 +156,35 @@ struct MoviesScreen: View {
                 }
             }
         } label: {
-            Text(navigationBarTitle(for: viewModel))
-                .font(.headline)
-                .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
+            categorySelectorLabel(title: navigationBarTitle(for: viewModel))
         }
         .buttonStyle(.plain)
         .help("Category: \(selectedCategoryName(for: viewModel))")
+    }
+
+    @ViewBuilder
+    private func categorySelectorLabel(title: String) -> some View {
+        #if os(macOS)
+        Text(title)
+            .font(.headline)
+            .lineLimit(1)
+            .padding(.horizontal, categorySelectorHorizontalPadding)
+            .padding(.vertical, categorySelectorVerticalPadding)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+        )
+        #else
+        Text(title)
+            .font(.headline)
+            .lineLimit(1)
+            .padding(.horizontal, categorySelectorHorizontalPadding)
+            .padding(.vertical, categorySelectorVerticalPadding)
+        #endif
     }
 
     @ViewBuilder
@@ -325,6 +346,22 @@ struct MoviesScreen: View {
                 alignment: .top
             )
         ]
+    }
+
+    private var categorySelectorHorizontalPadding: CGFloat {
+        #if os(macOS)
+        18
+        #else
+        10
+        #endif
+    }
+
+    private var categorySelectorVerticalPadding: CGFloat {
+        #if os(macOS)
+        6
+        #else
+        4
+        #endif
     }
 
     private var screenTitle: String {

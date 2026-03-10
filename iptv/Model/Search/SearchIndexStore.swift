@@ -61,7 +61,7 @@ struct SearchVideoSnapshot: Hashable, Sendable {
 }
 
 actor SearchIndexStore {
-    private struct SearchDocument: Hashable, Sendable {
+    fileprivate struct SearchDocument: Codable, Hashable, Sendable {
         let key: String
         let videoID: Int
         let indexedContentType: XtreamContentType
@@ -99,7 +99,7 @@ actor SearchIndexStore {
         let matchedFields: Set<SearchMatchedField>
     }
 
-    private struct ProviderIndex: Sendable {
+    fileprivate struct ProviderIndex: Codable, Sendable {
         var documentsByKey: [String: SearchDocument] = [:]
         var movieKeys: Set<String> = []
         var seriesKeys: Set<String> = []
@@ -107,7 +107,99 @@ actor SearchIndexStore {
         var indexedSeriesCategoryIDs: Set<String> = []
     }
 
+    fileprivate struct ProviderIndexSnapshot: Codable, Sendable {
+        static let schemaVersion = 1
+
+        let schemaVersion: Int
+        let providerFingerprint: String
+        let index: ProviderIndex
+
+        init(providerFingerprint: String, index: ProviderIndex) {
+            self.schemaVersion = Self.schemaVersion
+            self.providerFingerprint = providerFingerprint
+            self.index = index
+        }
+    }
+
+    actor DiskSnapshotStore {
+        private let fileManager = FileManager.default
+        private let directoryURL: URL
+        private let encoder = JSONEncoder()
+        private let decoder = JSONDecoder()
+
+        init(directoryURL: URL? = nil) {
+            let baseDirectory = directoryURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+            self.directoryURL = baseDirectory.appending(path: "SearchIndexSnapshots", directoryHint: .isDirectory)
+        }
+
+        fileprivate func load(providerFingerprint: String) async throws -> ProviderIndex? {
+            try ensureDirectoryExists()
+
+            let fileURL = fileURL(for: providerFingerprint)
+            guard fileManager.fileExists(atPath: fileURL.path()) else { return nil }
+
+            do {
+                let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
+                let snapshot = try decoder.decode(ProviderIndexSnapshot.self, from: data)
+                guard snapshot.schemaVersion == ProviderIndexSnapshot.schemaVersion,
+                      snapshot.providerFingerprint == providerFingerprint else {
+                    try? fileManager.removeItem(at: fileURL)
+                    return nil
+                }
+                return snapshot.index
+            } catch {
+                try? fileManager.removeItem(at: fileURL)
+                return nil
+            }
+        }
+
+        fileprivate func save(_ index: ProviderIndex, providerFingerprint: String) async throws {
+            try ensureDirectoryExists()
+            let snapshot = ProviderIndexSnapshot(providerFingerprint: providerFingerprint, index: index)
+            let data = try encoder.encode(snapshot)
+            try data.write(to: fileURL(for: providerFingerprint), options: [.atomic])
+        }
+
+        fileprivate func remove(providerFingerprint: String) async throws {
+            let fileURL = fileURL(for: providerFingerprint)
+            guard fileManager.fileExists(atPath: fileURL.path()) else { return }
+            try? fileManager.removeItem(at: fileURL)
+        }
+
+        fileprivate func removeAll() async throws {
+            guard fileManager.fileExists(atPath: directoryURL.path()) else { return }
+            let files = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+            for file in files {
+                try? fileManager.removeItem(at: file)
+            }
+        }
+
+        private func ensureDirectoryExists() throws {
+            if !fileManager.fileExists(atPath: directoryURL.path()) {
+                try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            }
+        }
+
+        private func fileURL(for providerFingerprint: String) -> URL {
+            directoryURL.appending(path: providerFingerprint.snapshotFileName)
+        }
+    }
+
     private var indexesByProvider: [String: ProviderIndex] = [:]
+    private var hydratedProviders: Set<String> = []
+    private let snapshotStore: DiskSnapshotStore
+
+    init() {
+        self.snapshotStore = DiskSnapshotStore()
+    }
+
+    init(snapshotDirectoryURL: URL) {
+        self.snapshotStore = DiskSnapshotStore(directoryURL: snapshotDirectoryURL)
+    }
 
     func upsert(
         videos: [SearchVideoSnapshot],
@@ -115,8 +207,9 @@ actor SearchIndexStore {
         categoryID: String,
         categoryName: String,
         providerFingerprint: String
-    ) {
+    ) async {
         guard contentType == .vod || contentType == .series else { return }
+        await ensureLoaded(providerFingerprint: providerFingerprint)
 
         var providerIndex = indexesByProvider[providerFingerprint] ?? ProviderIndex()
         for video in videos {
@@ -179,10 +272,13 @@ actor SearchIndexStore {
         }
 
         indexesByProvider[providerFingerprint] = providerIndex
+        try? await snapshotStore.save(providerIndex, providerFingerprint: providerFingerprint)
     }
 
-    func query(_ query: SearchQuery, providerFingerprint: String) -> [SearchResultItem] {
+    func query(_ query: SearchQuery, providerFingerprint: String) async -> [SearchResultItem] {
+        await ensureLoaded(providerFingerprint: providerFingerprint)
         guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
+
         let now = Date()
         let normalizedQuery = Self.normalize(query.text)
         let normalizedGenreFilters = Set(query.filters.genres.map(Self.normalize))
@@ -247,12 +343,13 @@ actor SearchIndexStore {
         }
     }
 
-    func progress(scope: SearchMediaScope, providerFingerprint: String, totalCategories: Int) -> SearchIndexProgress {
-        let indexed = indexedCategories(scope: scope, providerFingerprint: providerFingerprint).count
+    func progress(scope: SearchMediaScope, providerFingerprint: String, totalCategories: Int) async -> SearchIndexProgress {
+        let indexed = await indexedCategories(scope: scope, providerFingerprint: providerFingerprint).count
         return SearchIndexProgress(indexedCategories: indexed, totalCategories: totalCategories, scope: scope)
     }
 
-    func facetValues(scope: SearchMediaScope, providerFingerprint: String) -> SearchFacetValues {
+    func facetValues(scope: SearchMediaScope, providerFingerprint: String) async -> SearchFacetValues {
+        await ensureLoaded(providerFingerprint: providerFingerprint)
         guard let providerIndex = indexesByProvider[providerFingerprint] else {
             return SearchFacetValues(genres: [], languages: [])
         }
@@ -283,7 +380,8 @@ actor SearchIndexStore {
         )
     }
 
-    func indexedCategories(scope: SearchMediaScope, providerFingerprint: String) -> Set<String> {
+    func indexedCategories(scope: SearchMediaScope, providerFingerprint: String) async -> Set<String> {
+        await ensureLoaded(providerFingerprint: providerFingerprint)
         guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
         switch scope {
         case .movies:
@@ -295,12 +393,22 @@ actor SearchIndexStore {
         }
     }
 
-    func clear(providerFingerprint: String) {
+    func clear(providerFingerprint: String) async {
         indexesByProvider[providerFingerprint] = nil
+        hydratedProviders.insert(providerFingerprint)
+        try? await snapshotStore.remove(providerFingerprint: providerFingerprint)
     }
 
-    func clearAll() {
+    func clearAll() async {
         indexesByProvider.removeAll()
+        hydratedProviders.removeAll()
+        try? await snapshotStore.removeAll()
+    }
+
+    private func ensureLoaded(providerFingerprint: String) async {
+        guard !hydratedProviders.contains(providerFingerprint) else { return }
+        hydratedProviders.insert(providerFingerprint)
+        indexesByProvider[providerFingerprint] = try? await snapshotStore.load(providerFingerprint: providerFingerprint)
     }
 
     private func matchesFilters(
@@ -490,5 +598,16 @@ actor SearchIndexStore {
             }
         }
         return nil
+    }
+}
+
+private extension String {
+    nonisolated
+    var snapshotFileName: String {
+        let encoded = Data(utf8).base64EncodedString()
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "=", with: "")
+        return encoded + ".json"
     }
 }

@@ -1035,13 +1035,15 @@ private actor InMemoryStreamListCacheStore: StreamListCacheStore {
     private var storage: [String: StreamListCacheEntry] = [:]
 
     func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry? {
-        let rawKey = await key.rawKey
-        return storage[rawKey]
+        storage[key.rawKey]
     }
 
     func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws {
-        let rawKey = await key.rawKey
-        storage[rawKey] = entry
+        storage[key.rawKey] = entry
+    }
+
+    func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry] {
+        storage.values.filter { $0.key.providerFingerprint == providerFingerprint }
     }
 
     func pruneCacheIfNeeded() async throws { }

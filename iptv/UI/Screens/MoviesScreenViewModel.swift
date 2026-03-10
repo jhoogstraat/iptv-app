@@ -10,9 +10,9 @@ import Observation
 
 @MainActor
 protocol MoviesBrowsingCatalog: AnyObject {
-    func getCategories(for contentType: XtreamContentType, force: Bool) async throws
+    func getCategories(for contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws
     func categories(for contentType: XtreamContentType) -> [Category]
-    func getStreams(in category: Category, contentType: XtreamContentType, force: Bool) async throws
+    func getStreams(in category: Category, contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws
     func cachedVideos(in category: Category, contentType: XtreamContentType) -> [Video]?
 }
 
@@ -112,11 +112,11 @@ final class MoviesScreenViewModel {
         browseResults = []
     }
 
-    func load(force: Bool = false) async {
+    func load(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         phase = .fetching
 
         do {
-            try await catalog.getCategories(for: contentType, force: force)
+            try await catalog.getCategories(for: contentType, policy: policy)
             reconcileSelection()
 
             guard selectedCategory != nil else {
@@ -125,7 +125,7 @@ final class MoviesScreenViewModel {
                 return
             }
 
-            await loadSelectedCategory(force: force)
+            await loadSelectedCategory(policy: policy)
         } catch {
             phase = .error(error)
         }
@@ -138,7 +138,7 @@ final class MoviesScreenViewModel {
         }
 
         selectedCategoryID = id
-        await loadSelectedCategory()
+        await loadSelectedCategory(policy: .cachedThenRefresh)
     }
 
     func refreshBrowseResults() {
@@ -175,24 +175,28 @@ final class MoviesScreenViewModel {
         selectedCategoryID = categories.first?.id
     }
 
-    private func loadSelectedCategory(force: Bool = false) async {
+    private func loadSelectedCategory(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         guard let category = selectedCategory else {
             browseResults = []
             phase = .done
             return
         }
 
-        if !force, catalog.cachedVideos(in: category, contentType: contentType) != nil {
+        if policy != .refreshNow,
+           catalog.cachedVideos(in: category, contentType: contentType) != nil {
             refreshBrowseResults()
             phase = .done
-            return
         }
 
-        phase = .fetching
-        browseResults = []
+        if policy == .refreshNow || browseResults.isEmpty {
+            phase = .fetching
+            if policy == .refreshNow {
+                browseResults = []
+            }
+        }
 
         do {
-            try await catalog.getStreams(in: category, contentType: contentType, force: force)
+            try await catalog.getStreams(in: category, contentType: contentType, policy: policy)
             refreshBrowseResults()
             phase = .done
         } catch {

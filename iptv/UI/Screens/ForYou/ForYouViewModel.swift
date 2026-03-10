@@ -12,6 +12,11 @@ import Observation
 @MainActor
 @Observable
 final class ForYouViewModel {
+    private struct CategoryLoadOutcome {
+        let categories: [Category]
+        let error: Error?
+    }
+
     enum Phase {
         case idle
         case loading
@@ -48,7 +53,7 @@ final class ForYouViewModel {
         self.seriesCategoryLimit = seriesCategoryLimit
     }
 
-    func load(force: Bool = false) async {
+    func load(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         guard providerStore.hasConfiguration else {
             phase = .idle
             hero = nil
@@ -59,15 +64,31 @@ final class ForYouViewModel {
         do {
             phase = .loading
 
-            try await catalog.getVodCategories(force: force)
-            try await catalog.getSeriesCategories(force: force)
+            let vodOutcome = await loadCategories(
+                policy: policy,
+                contentType: .vod,
+                limit: vodCategoryLimit
+            )
+            let seriesOutcome = await loadCategories(
+                policy: policy,
+                contentType: .series,
+                limit: seriesCategoryLimit
+            )
 
-            let selectedVodCategories = Array(catalog.vodCategories.prefix(vodCategoryLimit))
-            let selectedSeriesCategories = Array(catalog.seriesCategories.prefix(seriesCategoryLimit))
+            if vodOutcome.error is CancellationError || seriesOutcome.error is CancellationError {
+                throw CancellationError()
+            }
+
+            if vodOutcome.categories.isEmpty, seriesOutcome.categories.isEmpty {
+                throw vodOutcome.error ?? seriesOutcome.error ?? CatalogError.missingProviderConfiguration
+            }
+
+            let selectedVodCategories = vodOutcome.categories
+            let selectedSeriesCategories = seriesOutcome.categories
 
             for category in selectedVodCategories {
                 do {
-                    try await catalog.getVodStreams(in: category, force: force)
+                    try await catalog.getVodStreams(in: category, policy: policy)
                 } catch {
                     logger.debug("ForYou VOD prefetch failed for category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
@@ -75,7 +96,7 @@ final class ForYouViewModel {
 
             for category in selectedSeriesCategories {
                 do {
-                    try await catalog.getSeriesStreams(in: category, force: force)
+                    try await catalog.getSeriesStreams(in: category, policy: policy)
                 } catch {
                     logger.debug("ForYou series prefetch failed for category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
@@ -104,6 +125,8 @@ final class ForYouViewModel {
             sections = output.sections
             lastRefresh = Date()
             phase = .loaded
+        } catch is CancellationError {
+            logger.debug("ForYou load cancelled")
         } catch {
             logger.error("ForYou load failed: \(error.localizedDescription, privacy: .public)")
             phase = .failed(error)
@@ -111,11 +134,89 @@ final class ForYouViewModel {
     }
 
     func refresh() async {
-        await load(force: true)
+        await load(policy: .refreshNow)
     }
 
     private func currentProviderFingerprint() throws -> String {
         let config = try providerStore.requiredConfiguration()
         return ProviderCacheFingerprint.make(from: config)
+    }
+
+    private func loadCategories(
+        policy: CatalogLoadPolicy,
+        contentType: XtreamContentType,
+        limit: Int
+    ) async -> CategoryLoadOutcome {
+        var loadError: Error?
+
+        do {
+            try await loadCategoriesWithRetry(policy: policy, contentType: contentType)
+        } catch is CancellationError {
+            return CategoryLoadOutcome(categories: [], error: CancellationError())
+        } catch {
+            loadError = error
+            logger.debug("ForYou \(contentType.rawValue, privacy: .public) categories failed: \(error.localizedDescription, privacy: .public)")
+        }
+
+        let categories = Array(catalog.categories(for: contentType).prefix(limit))
+        return CategoryLoadOutcome(categories: categories, error: categories.isEmpty ? loadError : nil)
+    }
+
+    private func loadCategoriesWithRetry(
+        policy: CatalogLoadPolicy,
+        contentType: XtreamContentType,
+        retries: Int = 1
+    ) async throws {
+        var attemptsRemaining = retries
+
+        while true {
+            do {
+                try await catalog.getCategories(for: contentType, policy: policy)
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                guard attemptsRemaining > 0, shouldRetryCategoryLoad(for: error) else {
+                    throw error
+                }
+
+                attemptsRemaining -= 1
+                try await Task.sleep(for: .milliseconds(350))
+            }
+        }
+    }
+
+    private func shouldRetryCategoryLoad(for error: Error) -> Bool {
+        if error is CancellationError {
+            return false
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut,
+                 .cannotFindHost,
+                 .cannotConnectToHost,
+                 .networkConnectionLost,
+                 .dnsLookupFailed,
+                 .notConnectedToInternet,
+                 .internationalRoamingOff,
+                 .callIsActive,
+                 .dataNotAllowed,
+                 .secureConnectionFailed:
+                return true
+            default:
+                return false
+            }
+        }
+
+        if case NetworkError.invalidResponse = error {
+            return true
+        }
+
+        if case NetworkError.httpError(let statusCode) = error {
+            return statusCode == 429 || (500...599).contains(statusCode)
+        }
+
+        return false
     }
 }

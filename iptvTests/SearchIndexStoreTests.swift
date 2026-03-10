@@ -242,6 +242,65 @@ struct SearchIndexStoreTests {
         #expect(ratingResults.map(\.video.id) == [22, 21, 23])
     }
 
+    @Test
+    func persistsProviderSnapshotsAcrossStoreInstances() async throws {
+        let directoryURL = makeTemporaryDirectory()
+        let providerFingerprint = "provider"
+
+        let firstStore = SearchIndexStore(snapshotDirectoryURL: directoryURL)
+        await firstStore.upsert(
+            videos: [makeSnapshot(id: 31, name: "Persisted Movie", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "persisted",
+            categoryName: "Offline",
+            providerFingerprint: providerFingerprint
+        )
+
+        let secondStore = SearchIndexStore(snapshotDirectoryURL: directoryURL)
+        let results = await secondStore.query(
+            SearchQuery(text: "persisted", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: providerFingerprint
+        )
+        let progress = await secondStore.progress(
+            scope: .movies,
+            providerFingerprint: providerFingerprint,
+            totalCategories: 1
+        )
+
+        #expect(results.map(\.video.id) == [31])
+        #expect(progress.indexedCategories == 1)
+    }
+
+    @Test
+    func corruptedSnapshotsAreDroppedDuringHydration() async throws {
+        let directoryURL = makeTemporaryDirectory()
+        let providerFingerprint = "provider"
+
+        let store = SearchIndexStore(snapshotDirectoryURL: directoryURL)
+        await store.upsert(
+            videos: [makeSnapshot(id: 41, name: "Corrupt Me", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "corrupt",
+            categoryName: "Offline",
+            providerFingerprint: providerFingerprint
+        )
+
+        let snapshotDirectory = directoryURL.appending(path: "SearchIndexSnapshots", directoryHint: .isDirectory)
+        let snapshotFile = try #require(
+            FileManager.default.contentsOfDirectory(at: snapshotDirectory, includingPropertiesForKeys: nil).first
+        )
+        try Data("not-json".utf8).write(to: snapshotFile, options: [.atomic])
+
+        let reloadedStore = SearchIndexStore(snapshotDirectoryURL: directoryURL)
+        let results = await reloadedStore.query(
+            SearchQuery(text: "corrupt", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: providerFingerprint
+        )
+
+        #expect(results.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: snapshotFile.path()) == false)
+    }
+
     private func makeSnapshot(
         id: Int,
         name: String,
@@ -259,5 +318,11 @@ struct SearchIndexStoreTests {
             addedAtRaw: addedAtRaw,
             language: "EN"
         )
+    }
+
+    private func makeTemporaryDirectory() -> URL {
+        let directoryURL = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        return directoryURL
     }
 }

@@ -11,75 +11,62 @@ struct VideoTile: View {
     let video: Video
 
     var body: some View {
+        ZStack(alignment: .top) {
+            artwork
+            badgeRow
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.secondary.opacity(0.12))
+        .clipShape(.rect(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
         AsyncImage(url: URL(string: video.coverImageURL ?? "")) { phase in
             if let image = phase.image {
-                ZStack(alignment: .top) {
-                    image.resizable().scaledToFill()
-                        .clipShape(.rect(cornerRadius: 8))
-                    HStack {
-                        if let rating = video.formattedRating {
-                            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                                Image(systemName: "star.fill")
-                                    .foregroundStyle(.orange)
-                                Text(rating)
-                                    .fontWeight(.semibold)
-                            }
-                            .font(.footnote)
-                            .padding(.horizontal, 2)
-                            .padding(4)
-                            .background(.thinMaterial)
-                            .clipShape(.rect(cornerRadius: 8))
-                        }
-                        Spacer()
-                        if let lang = video.language {
-                            Text(lang)
-                                .font(.footnote.weight(.semibold))
-                                .padding(.horizontal, 2)
-                                .padding(4)
-                                .background(.thinMaterial)
-                                .clipShape(.rect(cornerRadius: 8))
-                        }
-                    }.padding(6)
-                }
+                image.boundedCoverArtwork()
             } else if phase.error != nil {
                 VStack {
-                    HStack {
-                        if let rating = video.formattedRating {
-                            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                                Image(systemName: "star.fill")
-                                    .foregroundStyle(.orange)
-                                Text(rating)
-                                    .fontWeight(.semibold)
-                            }
-                            .font(.footnote)
-                            .padding(.horizontal, 2)
-                            .padding(4)
-                            .background(.thinMaterial)
-                            .clipShape(.rect(cornerRadius: 8))
-                        }
-                        Spacer()
-                        if let lang = video.language {
-                            Text(lang)
-                                .font(.footnote.weight(.semibold))
-                                .padding(.horizontal, 2)
-                                .padding(4)
-                                .background(.thinMaterial)
-                                .clipShape(.rect(cornerRadius: 8))
-                        }
-                    }
                     Spacer()
                     Text(video.name)
+                        .multilineTextAlignment(.center)
                     Spacer()
                 }
                 .padding(6)
-                .background(.clear)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ZStack {
-                    Color.clear
-                    ProgressView()
-                }
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+    }
+
+    private var badgeRow: some View {
+        HStack {
+            if let rating = video.formattedRating {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.orange)
+                    Text(rating)
+                        .fontWeight(.semibold)
+                }
+                .font(.footnote)
+                .padding(.horizontal, 2)
+                .padding(4)
+                .background(.thinMaterial)
+                .clipShape(.rect(cornerRadius: 8))
+            }
+            Spacer()
+            if let lang = video.language {
+                Text(lang)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 2)
+                    .padding(4)
+                    .background(.thinMaterial)
+                    .clipShape(.rect(cornerRadius: 8))
+            }
+        }
+        .padding(6)
     }
 }
 

@@ -41,7 +41,7 @@ struct MovieDetailScreen: View {
                     Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await loadInfo(force: true) }
+                        Task { await loadInfo(policy: .refreshNow) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -56,7 +56,7 @@ struct MovieDetailScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         #endif
         .task {
-            await loadInfo()
+            await loadInfo(policy: .cachedThenRefresh)
             await loadFavoriteState()
         }
     }
@@ -84,7 +84,7 @@ struct MovieDetailScreen: View {
                         .buttonStyle(.borderedProminent)
 
                         Button {
-                            Task { await loadInfo(force: true) }
+                            Task { await loadInfo(policy: .refreshNow) }
                         } label: {
                             Label("Refresh", systemImage: "arrow.clockwise")
                                 .frame(maxWidth: .infinity)
@@ -122,8 +122,7 @@ struct MovieDetailScreen: View {
                     switch phase {
                     case .success(let image):
                         image
-                            .resizable()
-                            .scaledToFill()
+                            .boundedFillArtwork()
                     default:
                         Rectangle()
                             .fill(.gray.opacity(0.3))
@@ -177,15 +176,15 @@ struct MovieDetailScreen: View {
         }
     }
 
-    private func loadInfo(force: Bool = false) async {
-        guard force || info == nil else {
+    private func loadInfo(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
+        guard policy == .refreshNow || info == nil else {
             state = .done
             return
         }
 
         do {
             state = .fetching
-            try await catalog.getVodInfo(video, force: force)
+            try await catalog.getVodInfo(video, policy: policy)
             state = .done
         } catch {
             logger.error("Failed to load movie detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")

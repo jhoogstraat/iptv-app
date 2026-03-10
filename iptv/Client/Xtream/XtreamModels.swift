@@ -499,13 +499,13 @@ struct XtreamVodData: Decodable {
 }
 
 // - MARK: Series
-struct XtreamSeries: Decodable {
+struct XtreamSeries: Codable {
     let seasons: [XtreamSeason]
     let info: XtreamShowInfo
     let episodes: [String: [XtreamEpisode]]
 }
 
-struct XtreamSeason: Decodable {
+struct XtreamSeason: Codable {
     let name: String
     let episodeCount: String
     let overview: String
@@ -531,7 +531,7 @@ struct XtreamSeason: Decodable {
     }
 }
 
-struct XtreamShowInfo: Decodable {
+struct XtreamShowInfo: Codable {
     let name: String
     let cover: String
     let plot: String
@@ -595,9 +595,30 @@ struct XtreamShowInfo: Decodable {
         }
         categoryIds = normalizedCategoryIds.xtreamUniqued()
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encode(cover, forKey: .cover)
+        try container.encode(plot, forKey: .plot)
+        try container.encode(cast, forKey: .cast)
+        try container.encode(director, forKey: .director)
+        try container.encode(genre, forKey: .genre)
+        try container.encode(releaseDate, forKey: .releaseDate)
+        try container.encode(releaseDateAlt, forKey: .releaseDateAlt)
+        try container.encode(lastModified, forKey: .lastModified)
+        try container.encode(rating, forKey: .rating)
+        try container.encode(rating5based, forKey: .rating5based)
+        try container.encode(backdropPath, forKey: .backdropPath)
+        try container.encode(tmdb, forKey: .tmdb)
+        try container.encode(youtubeTrailer, forKey: .youtubeTrailer)
+        try container.encode(episodeRunTime, forKey: .episodeRunTime)
+        try container.encode(categoryId, forKey: .categoryId)
+        try container.encode(categoryIds, forKey: .categoryIds)
+    }
 }
 
-struct XtreamEpisode: Decodable {
+struct XtreamEpisode: Codable {
     let id: String
     let episodeNum: Int
     let title: String
@@ -633,9 +654,22 @@ struct XtreamEpisode: Decodable {
         season = container.decodeLosslessValue(Int.self, forKey: .season, default: 0)
         directSource = container.decodeNormalizedString(forKey: .directSource)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(episodeNum, forKey: .episodeNum)
+        try container.encode(title, forKey: .title)
+        try container.encode(containerExtension, forKey: .containerExtension)
+        try container.encode(info, forKey: .info)
+        try container.encodeIfPresent(customSid, forKey: .customSid)
+        try container.encode(added, forKey: .added)
+        try container.encode(season, forKey: .season)
+        try container.encode(directSource, forKey: .directSource)
+    }
 }
 
-struct XtreamEpisodeInfo: Decodable {
+struct XtreamEpisodeInfo: Codable {
     let airDate: String
     let crew: String
     let rating: Double?
@@ -669,9 +703,23 @@ struct XtreamEpisodeInfo: Decodable {
         audio = try? container.decode(XtreamAudio.self, forKey: .audio)
         bitrate = container.decodeLosslessValue(Int.self, forKey: .bitrate, default: 0)
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(airDate, forKey: .airDate)
+        try container.encode(crew, forKey: .crew)
+        try container.encodeIfPresent(rating, forKey: .rating)
+        try container.encode(id, forKey: .id)
+        try container.encode(movieImage, forKey: .movieImage)
+        try container.encodeIfPresent(durationSecs, forKey: .durationSecs)
+        try container.encode(duration, forKey: .duration)
+        try container.encodeIfPresent(video, forKey: .video)
+        try container.encodeIfPresent(audio, forKey: .audio)
+        try container.encode(bitrate, forKey: .bitrate)
+    }
 }
 
-struct XtreamVideo: Decodable {
+struct XtreamVideo: Codable {
     let index: Int
     let codecName: String
     let codecLongName: String
@@ -732,7 +780,7 @@ struct XtreamVideo: Decodable {
     }
 }
 
-struct XtreamAudio: Decodable {
+struct XtreamAudio: Codable {
     let index: Int
     let codecName: String
     let codecLongName: String
@@ -777,7 +825,7 @@ struct XtreamAudio: Decodable {
     }
 }
 
-struct XtreamDisposition: Decodable {
+struct XtreamDisposition: Codable {
     let `default`: Int
     let dub: Int
     let original: Int

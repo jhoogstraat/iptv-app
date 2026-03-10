@@ -61,9 +61,9 @@ final class StreamPrefetchCoordinator {
     private func prefetch(category: Category, contentType: XtreamContentType, catalog: Catalog) async throws {
         switch contentType {
         case .vod:
-            try await catalog.getVodStreams(in: category)
+            try await catalog.getVodStreams(in: category, policy: .cachedThenRefresh)
         case .series:
-            try await catalog.getSeriesStreams(in: category)
+            try await catalog.getSeriesStreams(in: category, policy: .cachedThenRefresh)
         case .live:
             return
         }

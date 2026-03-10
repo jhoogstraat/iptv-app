@@ -17,8 +17,7 @@ struct SearchResultRowView: View {
                 switch phase {
                 case .success(let image):
                     image
-                        .resizable()
-                        .scaledToFill()
+                        .boundedCoverArtwork()
                 case .empty:
                     ZStack {
                         Color.gray.opacity(0.25)
@@ -31,6 +30,7 @@ struct SearchResultRowView: View {
                 }
             }
             .frame(width: 60, height: 90)
+            .background(Color.secondary.opacity(0.12))
             .clipShape(.rect(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 6) {
@@ -61,4 +61,3 @@ struct SearchResultRowView: View {
         }
     }
 }
-

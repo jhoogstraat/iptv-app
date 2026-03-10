@@ -31,7 +31,7 @@ struct VideoTileRow: View {
                         Text(error.localizedDescription)
                         Text("Error loading category")
                         Button("Retry") {
-                            Task { await fetchVideos(force: true) }
+                            Task { await fetchVideos(policy: .refreshNow) }
                         }
                     }
                 } else {
@@ -70,7 +70,7 @@ struct VideoTileRow: View {
             }
         }
         .task(id: providerStore.revision) {
-            await fetchVideos()
+            await fetchVideos(policy: .cachedThenRefresh)
         }
     }
 
@@ -102,10 +102,10 @@ struct VideoTileRow: View {
         }
     }
 
-    func fetchVideos(force: Bool = false) async {
+    func fetchVideos(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         defer { isFetching = false }
 
-        guard force || (videosInCategory == nil && error == nil) else { return }
+        guard policy == .refreshNow || (videosInCategory == nil && error == nil) else { return }
 
         isFetching = true
         error = nil
@@ -113,9 +113,9 @@ struct VideoTileRow: View {
         do {
             switch contentType {
             case .vod:
-                try await catalog.getVodStreams(in: category, force: force)
+                try await catalog.getVodStreams(in: category, policy: policy)
             case .series:
-                try await catalog.getSeriesStreams(in: category, force: force)
+                try await catalog.getSeriesStreams(in: category, policy: policy)
             case .live:
                 break
             }
