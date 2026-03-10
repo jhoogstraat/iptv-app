@@ -70,6 +70,7 @@ struct ContentView: View {
                 .customizationID(Tabs.downloads.customizationID)
             }
             
+            #if !os(macOS)
             TabSection("Settings") {
                 Tab(Tabs.settings.name, systemImage: Tabs.settings.symbol, value: Tabs.settings) {
                     NavigationStack {
@@ -77,10 +78,8 @@ struct ContentView: View {
                     }
                 }
                 .customizationID(Tabs.settings.customizationID)
-//                #if !os(macOS) && !os(tvOS)
-//                .customizationBehavior(.disabled, for: .sidebar, .tabBar)
-//                #endif
             }
+            #endif
             
         }
         .tabViewStyle(.sidebarAdaptable)

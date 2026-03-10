@@ -138,6 +138,32 @@ struct CoreSpecTests {
     }
 
     @Test
+    func providerStorePersistsExcludedPrefixesPerConfiguredProvider() throws {
+        let suiteName = "iptv.tests.excluded-prefixes.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        let keychain = InMemoryKeychainStore()
+        let store = ProviderStore(defaults: defaults, keychain: keychain)
+
+        try store.save(
+            baseURL: "https://example.com",
+            username: "demo-user",
+            password: "demo-pass"
+        )
+        try store.saveExcludedCategoryPrefixes(" ar, XXX \n|multi| ")
+
+        #expect(store.excludedCategoryPrefixes() == ["AR", "XXX", "MULTI"])
+        #expect(store.excludedCategoryPrefixesInput() == "AR, XXX, MULTI")
+        #expect(store.isExcludedCategoryPrefix("ar"))
+        #expect(store.isExcludedCategoryPrefix("XXX"))
+        #expect(store.isExcludedCategoryPrefix("multi"))
+        #expect(store.isExcludedCategoryPrefix("EN") == false)
+
+        let reloaded = ProviderStore(defaults: defaults, keychain: keychain)
+        #expect(reloaded.excludedCategoryPrefixes() == ["AR", "XXX", "MULTI"])
+    }
+
+    @Test
     func mapperHandlesMissingContainerAndRatingMetadata() throws {
         let data = #"""
         {

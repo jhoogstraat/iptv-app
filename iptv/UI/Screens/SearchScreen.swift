@@ -178,11 +178,24 @@ struct SearchScreen: View {
     }
 
     private var missingProviderView: some View {
-        ContentUnavailableView(
-            "Configure Provider",
-            systemImage: "key.horizontal.fill",
-            description: Text("Add provider credentials in Settings to use search.")
-        )
+        VStack(spacing: 12) {
+            Image(systemName: "key.horizontal.fill")
+                .font(.largeTitle)
+            Text("Configure Provider")
+                .font(.title3.weight(.semibold))
+            Text("Add provider credentials in Settings to use search.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            #if os(macOS)
+            SettingsLink {
+                Text("Open Settings")
+            }
+                .buttonStyle(.borderedProminent)
+            #endif
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func ensureViewModel() {

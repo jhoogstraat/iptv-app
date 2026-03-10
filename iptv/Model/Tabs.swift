@@ -57,7 +57,7 @@ enum Tabs: Equatable, Hashable, Identifiable {
             case .favorites: "heart"
             case .downloads: "list.and.film"
             case .search: "magnifyingglass"
-            case .settings: "list.and.film"
+            case .settings: "gearshape"
         }
     }
 }

@@ -35,6 +35,14 @@ struct LanguageTaggedTextTests {
     }
 
     @Test
+    func categoryLanguageGroupingSupportsPlainThreeLetterPrefix() {
+        let category = Category(id: "1", name: "XXX Cinema")
+
+        #expect(category.languageGroupCode == "XXX")
+        #expect(category.groupedDisplayName == "Cinema")
+    }
+
+    @Test
     func categoryWithoutLanguagePrefixRemainsUngrouped() {
         let category = Category(id: "1", name: "Action")
 

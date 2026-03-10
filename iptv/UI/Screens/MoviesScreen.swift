@@ -50,6 +50,7 @@ struct MoviesScreen: View {
                     }
                 }
             }
+            #if !os(macOS)
             .sheet(isPresented: $isPresentingSettings) {
                 NavigationStack {
                     SettingsScreen()
@@ -63,6 +64,7 @@ struct MoviesScreen: View {
                 }
                 .environment(providerStore)
             }
+            #endif
         }
         .task(id: providerStore.revision) {
             ensureViewModel()
@@ -228,10 +230,17 @@ struct MoviesScreen: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
+            #if os(macOS)
+            SettingsLink {
+                Text("Open Settings")
+            }
+                .buttonStyle(.borderedProminent)
+            #else
             Button("Configure Provider") {
                 isPresentingSettings = true
             }
             .buttonStyle(.borderedProminent)
+            #endif
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -134,6 +134,7 @@ final class ProviderStore {
         static let baseURL = "provider.baseURL"
         static let username = "provider.username"
         static let password = "provider.password"
+        static let excludedCategoryPrefixes = "provider.excludedCategoryPrefixes"
     }
 
     private let defaults: UserDefaults
@@ -167,6 +168,35 @@ final class ProviderStore {
 
     func password() -> String {
         (try? keychain.get(Keys.password)) ?? ""
+    }
+
+    func excludedCategoryPrefixes() -> [String] {
+        guard let fingerprint = try? currentProviderFingerprint() else { return [] }
+        return storedExcludedCategoryPrefixes(for: fingerprint)
+    }
+
+    func excludedCategoryPrefixesInput() -> String {
+        excludedCategoryPrefixes().joined(separator: ", ")
+    }
+
+    func saveExcludedCategoryPrefixes(_ rawValue: String) throws {
+        let fingerprint = try currentProviderFingerprint()
+        let normalizedPrefixes = Self.normalizeExcludedCategoryPrefixes(rawValue)
+        let key = excludedCategoryPrefixesKey(for: fingerprint)
+
+        if normalizedPrefixes.isEmpty {
+            defaults.removeObject(forKey: key)
+        } else {
+            defaults.set(normalizedPrefixes, forKey: key)
+        }
+
+        revision += 1
+        refresh()
+    }
+
+    func isExcludedCategoryPrefix(_ prefix: String?) -> Bool {
+        guard let prefix else { return false }
+        return Set(excludedCategoryPrefixes()).contains(prefix.uppercased())
     }
 
     func save(baseURL: String, username: String, password: String) throws {
@@ -217,6 +247,40 @@ final class ProviderStore {
             throw ProviderConfigError.missingConfiguration
         }
         return config
+    }
+
+    private func currentProviderFingerprint() throws -> String {
+        ProviderCacheFingerprint.make(from: try requiredConfiguration())
+    }
+
+    private func excludedCategoryPrefixesKey(for fingerprint: String) -> String {
+        "\(Keys.excludedCategoryPrefixes).\(fingerprint)"
+    }
+
+    private func storedExcludedCategoryPrefixes(for fingerprint: String) -> [String] {
+        let key = excludedCategoryPrefixesKey(for: fingerprint)
+        if let values = defaults.stringArray(forKey: key) {
+            return Self.normalizeExcludedCategoryPrefixes(values.joined(separator: ","))
+        }
+        if let rawValue = defaults.string(forKey: key) {
+            return Self.normalizeExcludedCategoryPrefixes(rawValue)
+        }
+        return []
+    }
+
+    private static func normalizeExcludedCategoryPrefixes(_ rawValue: String) -> [String] {
+        let separators = CharacterSet(charactersIn: ",;\n\t ")
+        var seen = Set<String>()
+
+        return rawValue
+            .components(separatedBy: separators)
+            .map {
+                $0.trimmingCharacters(in: CharacterSet(charactersIn: "|:-"))
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .uppercased()
+            }
+            .filter { !$0.isEmpty }
+            .filter { seen.insert($0).inserted }
     }
 
     private func normalizeAPIURL(from raw: String) throws -> URL {

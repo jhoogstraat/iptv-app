@@ -80,13 +80,13 @@ private extension LanguageTaggedText {
         pattern: #"^\s*\|([A-Z]{2,10})\|\s*(?:[-:]\s*)?(.+?)\s*$"#
     )
     static let prefixPattern = try! NSRegularExpression(
-        pattern: #"^\s*([A-Z]{2})\s*(?:[-|:]\s*|\s+)(.+?)\s*$"#
+        pattern: #"^\s*([A-Z]{2,10})\s*(?:[-|:]\s*|\s+)(.+?)\s*$"#
     )
     static let suffixPattern = try! NSRegularExpression(
-        pattern: #"^\s*(.+?)(?:\s*[-|:]\s*|\s+)([A-Z]{2})\s*$"#
+        pattern: #"^\s*(.+?)(?:\s*[-|:]\s*|\s+)([A-Z]{2,10})\s*$"#
     )
     static let exactPattern = try! NSRegularExpression(
-        pattern: #"^\s*([A-Z]{2})\s*$"#
+        pattern: #"^\s*([A-Z]{2,10})\s*$"#
     )
 
     struct Match {

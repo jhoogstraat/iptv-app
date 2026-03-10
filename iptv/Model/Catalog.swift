@@ -117,14 +117,18 @@ final class Catalog {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         guard force || vodCategories.isEmpty else { return }
         let dto = try await self.service().getCategories(of: .vod)
-        self.vodCategories = dto.map(Category.init)
+        self.vodCategories = dto
+            .map(Category.init)
+            .filter { !providerStore.isExcludedCategoryPrefix($0.languageGroupCode) }
     }
 
     func getSeriesCategories(force: Bool = false) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         guard force || seriesCategories.isEmpty else { return }
         let dto = try await self.service().getCategories(of: .series)
-        self.seriesCategories = dto.map(Category.init)
+        self.seriesCategories = dto
+            .map(Category.init)
+            .filter { !providerStore.isExcludedCategoryPrefix($0.languageGroupCode) }
     }
 
     func getVodStreams(in category: Category, force: Bool = false) async throws {

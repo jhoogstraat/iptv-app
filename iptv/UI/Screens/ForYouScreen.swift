@@ -41,6 +41,7 @@ struct ForYouScreen: View {
                     }
                 }
             }
+            #if !os(macOS)
             .sheet(isPresented: $isPresentingSettings) {
                 NavigationStack {
                     SettingsScreen()
@@ -54,6 +55,7 @@ struct ForYouScreen: View {
                 }
                 .environment(providerStore)
             }
+            #endif
             .sheet(item: $selectedDetailVideo) { video in
                 NavigationStack {
                     destination(for: video)
@@ -170,10 +172,17 @@ struct ForYouScreen: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 420)
+            #if os(macOS)
+            SettingsLink {
+                Text("Open Settings")
+            }
+                .buttonStyle(.borderedProminent)
+            #else
             Button("Configure Provider") {
                 isPresentingSettings = true
             }
             .buttonStyle(.borderedProminent)
+            #endif
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)

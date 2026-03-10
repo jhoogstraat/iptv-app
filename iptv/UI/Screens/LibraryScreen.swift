@@ -24,11 +24,7 @@ struct LibraryScreen: View {
         NavigationStack {
             Group {
                 if !providerStore.hasConfiguration {
-                    ContentUnavailableView(
-                        "Configure Provider",
-                        systemImage: "key.horizontal.fill",
-                        description: Text("Add provider credentials in Settings to use Library.")
-                    )
+                    missingProviderView
                 } else if isLoading {
                     ProgressView()
                 } else {
@@ -40,6 +36,27 @@ struct LibraryScreen: View {
         .task(id: reloadToken) {
             await loadData()
         }
+    }
+
+    private var missingProviderView: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "key.horizontal.fill")
+                .font(.largeTitle)
+            Text("Configure Provider")
+                .font(.title3.weight(.semibold))
+            Text("Add provider credentials in Settings to use Library.")
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 420)
+            #if os(macOS)
+            SettingsLink {
+                Text("Open Settings")
+            }
+                .buttonStyle(.borderedProminent)
+            #endif
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder

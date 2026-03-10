@@ -44,6 +44,13 @@ struct IPTVApp: App {
         #if !os(tvOS)
         .windowResizability(.contentSize)
         #endif
+
+        #if os(macOS)
+        Settings {
+            SettingsScreen()
+                .environment(providerStore)
+        }
+        #endif
         
         // The video player window
         #if os(macOS)
