@@ -18,6 +18,7 @@ struct MovieDetailScreen: View {
     let video: Video
 
     @Environment(Catalog.self) private var catalog
+    @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(Player.self) private var player
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
@@ -25,9 +26,15 @@ struct MovieDetailScreen: View {
     @State private var state: MovieDetailState = .fetching
     @State private var playError: String?
     @State private var isFavorite = false
+    @State private var offlineInfo: VideoInfo?
+    @State private var offlineArtworkURL: URL?
 
     private var info: VideoInfo? {
         catalog.vodInfo[video]
+    }
+
+    private var resolvedInfo: VideoInfo? {
+        info ?? offlineInfo
     }
 
     var body: some View {
@@ -83,18 +90,22 @@ struct MovieDetailScreen: View {
                         }
                         .buttonStyle(.borderedProminent)
 
-                        Button {
-                            Task { await loadInfo(policy: .refreshNow) }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
+                        DownloadStatusBadge(selection: .movie(video), showsTitle: true)
 
                         Button {
                             Task { await toggleFavorite() }
                         } label: {
                             Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "heart.slash" : "heart")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    HStack(spacing: 12) {
+                        Button {
+                            Task { await loadInfo(policy: .refreshNow) }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
@@ -106,9 +117,9 @@ struct MovieDetailScreen: View {
                     }
                 }
 
-                section("Synopsis", text: info?.plot ?? "No synopsis available.")
-                section("Cast", text: info?.cast ?? "No cast information available.")
-                section("Director", text: info?.director ?? "No director information available.")
+                section("Synopsis", text: resolvedInfo?.plot ?? "No synopsis available.")
+                section("Cast", text: resolvedInfo?.cast ?? "No cast information available.")
+                section("Director", text: resolvedInfo?.director ?? "No director information available.")
                 section("About", text: aboutText)
             }
             .padding()
@@ -117,7 +128,7 @@ struct MovieDetailScreen: View {
 
     private var headerArtwork: some View {
         Group {
-            if let heroURL = info?.images.first ?? URL(string: video.coverImageURL ?? "") {
+            if let heroURL = offlineArtworkURL ?? resolvedInfo?.images.first ?? URL(string: video.coverImageURL ?? "") {
                 AsyncImage(url: heroURL) { phase in
                     switch phase {
                     case .success(let image):
@@ -142,10 +153,10 @@ struct MovieDetailScreen: View {
 
     private var subtitleText: String {
         [
-            info?.genre,
-            info?.releaseDate,
-            info?.durationLabel,
-            info?.ageRating
+            resolvedInfo?.genre,
+            resolvedInfo?.releaseDate,
+            resolvedInfo?.durationLabel,
+            resolvedInfo?.ageRating
         ]
         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
@@ -154,13 +165,13 @@ struct MovieDetailScreen: View {
 
     private var aboutText: String {
         var lines: [String] = []
-        if let country = info?.country, !country.isEmpty {
+        if let country = resolvedInfo?.country, !country.isEmpty {
             lines.append("Country: \(country)")
         }
-        if let runtimeMinutes = info?.runtimeMinutes {
+        if let runtimeMinutes = resolvedInfo?.runtimeMinutes {
             lines.append("Runtime: \(runtimeMinutes) min")
         }
-        if let rating = info?.rating {
+        if let rating = resolvedInfo?.rating {
             lines.append("Rating: \(rating.formatted(.number.precision(.fractionLength(1))))")
         }
         return lines.joined(separator: "\n")
@@ -177,7 +188,7 @@ struct MovieDetailScreen: View {
     }
 
     private func loadInfo(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
-        guard policy == .refreshNow || info == nil else {
+        guard policy == .refreshNow || (info == nil && offlineInfo == nil) else {
             state = .done
             return
         }
@@ -185,21 +196,36 @@ struct MovieDetailScreen: View {
         do {
             state = .fetching
             try await catalog.getVodInfo(video, policy: policy)
+            offlineArtworkURL = await downloadCenter.offlineArtworkURL(
+                for: video,
+                candidates: [info?.images.first?.absoluteString, video.coverImageURL]
+            )
             state = .done
         } catch {
-            logger.error("Failed to load movie detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            state = .error(error)
+            if let offlineInfo = await downloadCenter.offlineMovieInfo(for: video) {
+                self.offlineInfo = offlineInfo
+                offlineArtworkURL = await downloadCenter.offlineArtworkURL(
+                    for: video,
+                    candidates: [offlineInfo.images.first?.absoluteString, video.coverImageURL]
+                )
+                state = .done
+            } else {
+                logger.error("Failed to load movie detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                state = .error(error)
+            }
         }
     }
 
     private func startPlayback() {
-        do {
-            let url = try catalog.resolveURL(for: video)
-            playError = nil
-            player.load(video, url, presentation: .fullWindow)
-        } catch {
-            playError = error.localizedDescription
-            logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        Task {
+            do {
+                let source = try await downloadCenter.playbackSource(for: video)
+                playError = nil
+                player.load(video, source, presentation: .fullWindow)
+            } catch {
+                playError = error.localizedDescription
+                logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

@@ -577,6 +577,113 @@ final class Catalog {
         return service.getPlayURL(for: video.id, type: video.contentType, containerExtension: video.containerExtension)
     }
 
+    func resolveEpisodeDownloadURL(
+        seriesID: Int,
+        episodeVideoID: Int,
+        containerExtension: String,
+        directSource: String
+    ) throws -> URL {
+        let normalizedDirectSource = directSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedDirectSource.isEmpty, let directURL = URL(string: normalizedDirectSource) {
+            return directURL
+        }
+
+        let service = try self.service()
+        return service.getPlayURL(
+            for: episodeVideoID,
+            type: XtreamContentType.series.rawValue,
+            containerExtension: containerExtension
+        )
+    }
+
+    func prepareDownloadMetadata(for video: Video) async throws -> DownloadPreparedMetadata {
+        switch video.xtreamContentType {
+        case .vod:
+            try await getVodInfo(video, policy: .refreshIfStale)
+            let resolvedInfo = vodInfo[video] ?? VideoInfo(
+                images: [],
+                plot: "",
+                cast: "",
+                director: "",
+                genre: "",
+                releaseDate: "",
+                durationLabel: "",
+                runtimeMinutes: nil,
+                ageRating: "",
+                country: "",
+                rating: video.rating
+            )
+
+            let artworkURLs = Array(
+                Set(
+                    resolvedInfo.images +
+                    [video.coverImageURL].compactMap { $0 }.compactMap(URL.init(string:))
+                )
+            )
+
+            return DownloadPreparedMetadata(
+                snapshotID: DownloadIdentifiers.metadataSnapshotID(
+                    scope: DownloadScope(
+                        profileID: "primary",
+                        providerFingerprint: try currentProviderFingerprint()
+                    ),
+                    contentType: video.contentType,
+                    videoID: video.id
+                ),
+                kind: .movie,
+                videoID: video.id,
+                contentType: video.contentType,
+                title: video.name,
+                coverImageURL: video.coverImageURL,
+                artworkURLs: artworkURLs,
+                movieInfo: CachedVideoInfoDTO(resolvedInfo),
+                seriesInfo: nil
+            )
+
+        case .series:
+            let seriesInfo = try await getSeriesInfo(video, policy: .refreshIfStale)
+            let artworkURLs = Array(
+                Set(
+                    [
+                        seriesInfo.info.backdropPath.first,
+                        seriesInfo.info.cover,
+                        video.coverImageURL
+                    ]
+                    .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .compactMap(URL.init(string:)) +
+                    seriesInfo.episodes.values
+                        .flatMap { $0 }
+                        .compactMap { episode in
+                            let value = episode.info.movieImage.trimmingCharacters(in: .whitespacesAndNewlines)
+                            return value.isEmpty ? nil : URL(string: value)
+                        }
+                )
+            )
+
+            return DownloadPreparedMetadata(
+                snapshotID: DownloadIdentifiers.metadataSnapshotID(
+                    scope: DownloadScope(
+                        profileID: "primary",
+                        providerFingerprint: try currentProviderFingerprint()
+                    ),
+                    contentType: video.contentType,
+                    videoID: video.id
+                ),
+                kind: .series,
+                videoID: video.id,
+                contentType: video.contentType,
+                title: seriesInfo.info.name.isEmpty ? video.name : seriesInfo.info.name,
+                coverImageURL: video.coverImageURL,
+                artworkURLs: artworkURLs,
+                movieInfo: nil,
+                seriesInfo: seriesInfo
+            )
+
+        case .live:
+            throw DownloadRuntimeError.unsupportedContent
+        }
+    }
+
     func search(_ query: SearchQuery) async throws -> [SearchResultItem] {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         let providerFingerprint = try currentProviderFingerprint()

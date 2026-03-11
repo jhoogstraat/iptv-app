@@ -10,6 +10,17 @@ import SwiftUI
 struct VideoTile: View {
     let video: Video
 
+    private var selection: DownloadSelection? {
+        switch video.xtreamContentType {
+        case .vod:
+            return .movie(video)
+        case .series:
+            return .series(video)
+        case .live:
+            return nil
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             artwork
@@ -64,6 +75,10 @@ struct VideoTile: View {
                     .padding(4)
                     .background(.thinMaterial)
                     .clipShape(.rect(cornerRadius: 8))
+            }
+
+            if let selection {
+                DownloadStatusBadge(selection: selection)
             }
         }
         .padding(6)

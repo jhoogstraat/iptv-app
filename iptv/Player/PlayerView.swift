@@ -160,9 +160,19 @@ struct PlayerView: View {
                 Text(player.currentItem?.name ?? "No item loaded")
                     .font(.headline)
                     .lineLimit(1)
-                Text("Backend: \(player.activeBackendID?.rawValue.uppercased() ?? "N/A")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("Backend: \(player.activeBackendID?.rawValue.uppercased() ?? "N/A")")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let origin = player.currentPlaybackSource?.origin {
+                        Text(origin == .offline ? "Offline" : "Streaming")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(origin == .offline ? Color.green.opacity(0.22) : Color.secondary.opacity(0.22))
+                            .clipShape(.capsule)
+                    }
+                }
             }
 
             Spacer()

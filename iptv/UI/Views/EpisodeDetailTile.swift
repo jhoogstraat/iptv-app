@@ -12,6 +12,7 @@ struct EpisodeDetailTile: View {
     let video: Video
 
     @Environment(Catalog.self) private var catalog
+    @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(Player.self) private var player
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
@@ -23,6 +24,7 @@ struct EpisodeDetailTile: View {
     @State private var isFavorite = false
     @State private var selectedSeasonKey: String?
     @State private var selectedEpisodeID: Int?
+    @State private var offlineHeaderArtworkURL: URL?
 
     private var contentLocale: Locale {
         .autoupdatingCurrent
@@ -80,6 +82,8 @@ struct EpisodeDetailTile: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(selectedEpisode(from: seriesInfo) == nil)
 
+                        DownloadStatusBadge(selection: .series(video), showsTitle: true)
+
                         Button {
                             Task { await toggleFavorite() }
                         } label: {
@@ -87,6 +91,22 @@ struct EpisodeDetailTile: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.bordered)
+                    }
+
+                    HStack(spacing: 12) {
+                        if let seasonNumber = selectedSeasonNumber {
+                            DownloadStatusBadge(
+                                selection: .season(seriesID: video.id, seasonNumber: seasonNumber),
+                                showsTitle: true
+                            )
+                        }
+
+                        if let selectedEpisodeID {
+                            DownloadStatusBadge(
+                                selection: .episode(seriesID: video.id, episodeID: selectedEpisodeID),
+                                showsTitle: true
+                            )
+                        }
                     }
                 }
 
@@ -107,7 +127,7 @@ struct EpisodeDetailTile: View {
 
     private func headerArtwork(seriesInfo: XtreamSeries) -> some View {
         Group {
-            if let heroURL = headerArtworkURL(for: seriesInfo) {
+            if let heroURL = offlineHeaderArtworkURL ?? headerArtworkURL(for: seriesInfo) {
                 AsyncImage(url: heroURL) { phase in
                     switch phase {
                     case .success(let image):
@@ -429,6 +449,11 @@ struct EpisodeDetailTile: View {
         startPlayback(episode: episode, seriesInfo: seriesInfo)
     }
 
+    private var selectedSeasonNumber: Int? {
+        guard let selectedSeasonKey else { return nil }
+        return Int(selectedSeasonKey)
+    }
+
     private var bookmarkActionTitle: String {
         isFavorite
             ? localized("Remove Bookmark", comment: "Remove the series from bookmarks")
@@ -440,17 +465,19 @@ struct EpisodeDetailTile: View {
         let episodeID = episodeID(for: episode)
         guard let selected = candidates.first(where: { $0.id == episodeID }) else { return }
 
-        do {
-            player.configureEpisodeSwitcher(episodes: candidates) { episodeVideo in
-                try catalog.resolveURL(for: episodeVideo)
-            }
+        Task {
+            do {
+                player.configureEpisodeSwitcher(episodes: candidates) { episodeVideo in
+                    try await downloadCenter.playbackSource(for: episodeVideo)
+                }
 
-            let url = try catalog.resolveURL(for: selected)
-            playError = nil
-            player.load(selected, url, presentation: .fullWindow)
-        } catch {
-            playError = error.localizedDescription
-            logger.error("Failed to start episode playback for \(episode.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                let source = try await downloadCenter.playbackSource(for: selected)
+                playError = nil
+                player.load(selected, source, presentation: .fullWindow)
+            } catch {
+                playError = error.localizedDescription
+                logger.error("Failed to start episode playback for \(episode.title, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -461,11 +488,33 @@ struct EpisodeDetailTile: View {
         do {
             let loadedSeriesInfo = try await catalog.getSeriesInfo(video, policy: policy)
             seriesInfo = loadedSeriesInfo
+            offlineHeaderArtworkURL = await downloadCenter.offlineArtworkURL(
+                for: video,
+                candidates: [
+                    loadedSeriesInfo.info.backdropPath.first,
+                    normalizedText(loadedSeriesInfo.info.cover),
+                    video.coverImageURL
+                ]
+            )
             syncSelection(with: loadedSeriesInfo)
             loadError = nil
         } catch {
-            loadError = error
-            logger.error("Failed to load series detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            if let offlineSeriesInfo = await downloadCenter.offlineSeriesInfo(for: video) {
+                seriesInfo = offlineSeriesInfo
+                offlineHeaderArtworkURL = await downloadCenter.offlineArtworkURL(
+                    for: video,
+                    candidates: [
+                        offlineSeriesInfo.info.backdropPath.first,
+                        normalizedText(offlineSeriesInfo.info.cover),
+                        video.coverImageURL
+                    ]
+                )
+                syncSelection(with: offlineSeriesInfo)
+                loadError = nil
+            } else {
+                loadError = error
+                logger.error("Failed to load series detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 

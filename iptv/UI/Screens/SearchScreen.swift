@@ -189,7 +189,7 @@ struct SearchScreen: View {
                 .frame(maxWidth: 420)
             #if os(macOS)
             SettingsLink {
-                Text("Open Settings")
+                Text("Configure Provider")
             }
                 .buttonStyle(.borderedProminent)
             #endif

@@ -6,16 +6,15 @@
 //
 
 import Foundation
-import CryptoKit
 
-enum CatalogMetadataKind: String, Codable, Sendable {
+nonisolated enum CatalogMetadataKind: String, Codable, Sendable {
     case vodCategories
     case seriesCategories
     case vodInfo
     case seriesInfo
 }
 
-struct CatalogMetadataCacheKey: Codable, Hashable, Sendable {
+nonisolated struct CatalogMetadataCacheKey: Codable, Hashable, Sendable {
     let providerFingerprint: String
     let kind: CatalogMetadataKind
     let resourceID: String
@@ -29,7 +28,7 @@ struct CatalogMetadataCacheKey: Codable, Hashable, Sendable {
     }
 }
 
-struct CatalogMetadataCacheEntry: Codable, Sendable {
+nonisolated struct CatalogMetadataCacheEntry: Codable, Sendable {
     static let schemaVersion = 1
 
     let schemaVersion: Int
@@ -51,13 +50,13 @@ struct CatalogMetadataCacheEntry: Codable, Sendable {
     }
 }
 
-struct CatalogCachedValue<Value: Sendable>: Sendable {
+nonisolated struct CatalogCachedValue<Value: Sendable>: Sendable {
     let value: Value
     let savedAt: Date
     let isStale: Bool
 }
 
-protocol CatalogMetadataCacheStore: Sendable {
+nonisolated protocol CatalogMetadataCacheStore: Sendable {
     func load(key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry?
     func save(_ entry: CatalogMetadataCacheEntry, for key: CatalogMetadataCacheKey) async throws
     func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry]
@@ -290,7 +289,7 @@ actor CatalogMetadataCacheManager {
     }
 }
 
-struct CachedCategoryDTO: Codable, Hashable, Sendable {
+nonisolated struct CachedCategoryDTO: Codable, Hashable, Sendable {
     let id: String
     let name: String
 
@@ -310,7 +309,7 @@ struct CachedCategoryDTO: Codable, Hashable, Sendable {
     }
 }
 
-struct CachedVideoInfoDTO: Codable, Hashable, Sendable {
+nonisolated struct CachedVideoInfoDTO: Codable, Hashable, Sendable {
     let images: [URL]
     let plot: String
     let cast: String
@@ -385,12 +384,5 @@ extension VideoInfo {
             country: cached.country,
             rating: cached.rating
         )
-    }
-}
-
-private extension String {
-    var sha256Hex: String {
-        let digest = SHA256.hash(data: Data(utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -673,10 +673,12 @@ struct CoreSpecTests {
             if shouldFail && episode.id == episode2.id {
                 throw MockError.failed
             }
-            return URL(string: "https://example.com/\(episode.id).mp4")!
+            return .streaming(URL(string: "https://example.com/\(episode.id).mp4")!)
         }
 
         player.quickSwitchEpisode(id: episode2.id)
+        let failed = await waitUntil { player.canRetryEpisodeSwitch }
+        #expect(failed)
         #expect(player.currentItem?.id == episode1.id)
         #expect(player.canRetryEpisodeSwitch)
         #expect(player.controlMessage?.contains("Could not switch episode") == true)

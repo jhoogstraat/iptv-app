@@ -139,6 +139,7 @@ final class ProviderStore {
 
     private let defaults: UserDefaults
     private let keychain: KeychainStoring
+    private let forceMissingConfigurationForUITests: Bool
 
     private(set) var baseURLInput: String
     private(set) var hasConfiguration = false
@@ -148,11 +149,21 @@ final class ProviderStore {
     init(defaults: UserDefaults = .standard, keychain: KeychainStoring? = nil) {
         self.defaults = defaults
         self.keychain = keychain ?? KeychainStore()
+        let processInfo = ProcessInfo.processInfo
+        self.forceMissingConfigurationForUITests =
+            processInfo.environment["XCTestConfigurationFilePath"] != nil &&
+            processInfo.arguments.contains("--uitest-open-movies")
         self.baseURLInput = defaults.string(forKey: Keys.baseURL) ?? ""
         refresh()
     }
 
     func refresh() {
+        if forceMissingConfigurationForUITests {
+            hasConfiguration = false
+            lastValidationError = nil
+            return
+        }
+
         do {
             hasConfiguration = (try configuration()) != nil
             lastValidationError = nil
@@ -227,6 +238,10 @@ final class ProviderStore {
     }
 
     func configuration() throws -> ProviderConfig? {
+        if forceMissingConfigurationForUITests {
+            return nil
+        }
+
         let baseURL = defaults.string(forKey: Keys.baseURL)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard !baseURL.isEmpty else { return nil }
 

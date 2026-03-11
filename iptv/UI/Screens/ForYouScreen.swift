@@ -10,6 +10,7 @@ import OSLog
 
 struct ForYouScreen: View {
     @Environment(Catalog.self) private var catalog
+    @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(ProviderStore.self) private var providerStore
     @Environment(Player.self) private var player
 
@@ -174,7 +175,7 @@ struct ForYouScreen: View {
                 .frame(maxWidth: 420)
             #if os(macOS)
             SettingsLink {
-                Text("Open Settings")
+                Text("Configure Provider")
             }
                 .buttonStyle(.borderedProminent)
             #else
@@ -225,13 +226,15 @@ struct ForYouScreen: View {
     }
 
     private func startPlayback(video: Video) {
-        do {
-            let url = try catalog.resolveURL(for: video)
-            playError = nil
-            player.load(video, url, presentation: .fullWindow)
-        } catch {
-            playError = error.localizedDescription
-            logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        Task {
+            do {
+                let source = try await downloadCenter.playbackSource(for: video)
+                playError = nil
+                player.load(video, source, presentation: .fullWindow)
+            } catch {
+                playError = error.localizedDescription
+                logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 }

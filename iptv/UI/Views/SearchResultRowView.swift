@@ -11,6 +11,17 @@ struct SearchResultRowView: View {
     let item: SearchResultItem
     let isFavorite: Bool
 
+    private var selection: DownloadSelection? {
+        switch item.video.xtreamContentType {
+        case .vod:
+            return .movie(item.video)
+        case .series:
+            return .series(item.video)
+        case .live:
+            return nil
+        }
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             AsyncImage(url: URL(string: item.video.coverImageURL ?? "")) { phase in
@@ -58,6 +69,10 @@ struct SearchResultRowView: View {
             }
 
             Spacer()
+
+            if let selection {
+                DownloadStatusBadge(selection: selection)
+            }
         }
     }
 }

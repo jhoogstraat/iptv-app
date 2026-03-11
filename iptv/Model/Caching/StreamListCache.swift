@@ -6,9 +6,8 @@
 //
 
 import Foundation
-import CryptoKit
 
-struct StreamListCacheKey: Codable, Hashable, Sendable {
+nonisolated struct StreamListCacheKey: Codable, Hashable, Sendable {
     let providerFingerprint: String
     let contentType: XtreamContentType
     let categoryID: String
@@ -23,7 +22,7 @@ struct StreamListCacheKey: Codable, Hashable, Sendable {
     }
 }
 
-struct CachedVideoDTO: Codable, Hashable, Sendable {
+nonisolated struct CachedVideoDTO: Codable, Hashable, Sendable {
     let id: Int
     let name: String
     let containerExtension: String
@@ -54,7 +53,7 @@ struct CachedVideoDTO: Codable, Hashable, Sendable {
     }
 }
 
-struct StreamListCacheEntry: Codable, Sendable {
+nonisolated struct StreamListCacheEntry: Codable, Sendable {
     static let schemaVersion = 1
 
     let schemaVersion: Int
@@ -76,7 +75,7 @@ struct StreamListCacheEntry: Codable, Sendable {
     }
 }
 
-protocol StreamListCacheStore: Sendable {
+nonisolated protocol StreamListCacheStore: Sendable {
     func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry?
     func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws
     func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry]
@@ -392,19 +391,12 @@ protocol ImagePrefetching: Sendable {
     func prefetch(urls: [URL]) async
 }
 
-struct NoopImagePrefetcher: ImagePrefetching {
+nonisolated struct NoopImagePrefetcher: ImagePrefetching {
     func prefetch(urls: [URL]) async { }
 }
 
-enum ProviderCacheFingerprint {
+nonisolated enum ProviderCacheFingerprint {
     static func make(from config: ProviderConfig) -> String {
         "\(config.apiURL.absoluteString)|\(config.username)".sha256Hex
-    }
-}
-
-private extension String {
-    var sha256Hex: String {
-        let digest = SHA256.hash(data: Data(utf8))
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -20,6 +20,7 @@ struct IPTVApp: App {
     @State private var catalog: Catalog
     @State private var favoritesStore: FavoritesStore
     @State private var backgroundActivityCenter: BackgroundActivityCenter
+    @State private var downloadCenter: DownloadCenter
     
     var body: some Scene {
         WindowGroup {
@@ -29,6 +30,7 @@ struct IPTVApp: App {
                 .environment(catalog)
                 .environment(favoritesStore)
                 .environment(backgroundActivityCenter)
+                .environment(downloadCenter)
                 .modelContainer(modelContainer)
                 #if os(macOS)
                 .toolbar(removing: .title)
@@ -88,11 +90,17 @@ struct IPTVApp: App {
             self._providerStore = State(initialValue: providerStore)
             self._favoritesStore = State(initialValue: favoritesStore)
             self._backgroundActivityCenter = State(initialValue: backgroundActivityCenter)
-            self._catalog = State(initialValue: Catalog(
+            let catalog = Catalog(
                 providerStore: providerStore,
                 modelContainer: modelContainer,
                 imagePrefetcher: imagePrefetcher,
                 activityCenter: backgroundActivityCenter
+            )
+            self._catalog = State(initialValue: catalog)
+            self._downloadCenter = State(initialValue: DownloadCenter(
+                providerStore: providerStore,
+                catalog: catalog,
+                backgroundActivityCenter: backgroundActivityCenter
             ))
 
             let launchArgs = ProcessInfo.processInfo.arguments
@@ -105,7 +113,7 @@ struct IPTVApp: App {
                     guard let url = URL(string: "https://example.com/\(episode.id).mp4") else {
                         throw URLError(.badURL)
                     }
-                    return url
+                    return .streaming(url)
                 }
                 if let first = episodes.first,
                    let url = URL(string: "https://example.com/8001.mp4") {

@@ -28,6 +28,7 @@ final class Player {
     private(set) var presentation: Presentation = .inline
     private(set) var currentItem: Video?
     private(set) var currentURL: URL?
+    private(set) var currentPlaybackSource: PlaybackSource?
     private(set) var currentTime: Double = 0
     private(set) var duration: Double?
     private(set) var errorMessage: String?
@@ -110,7 +111,7 @@ final class Player {
     private var preferredSubtitleLanguageCode: String?
     private var subtitleEnabledByDefault = false
     private var didApplyTrackPreferencesForCurrentItem = false
-    private var episodeURLResolver: ((Video) throws -> URL)?
+    private var episodeSourceResolver: ((Video) async throws -> PlaybackSource)?
     private var lastEpisodeSwitchAttemptID: Int?
 
     init(
@@ -134,9 +135,10 @@ final class Player {
     }
 
     /// Loads a stream for playback in the requested presentation.
-    func load(_ video: Video, _ url: URL, presentation: Presentation, autoplay: Bool = true) {
+    func load(_ video: Video, _ source: PlaybackSource, presentation: Presentation, autoplay: Bool = true) {
         currentItem = video
-        currentURL = url
+        currentURL = source.url
+        currentPlaybackSource = source
         shouldAutoPlay = autoplay
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -160,14 +162,19 @@ final class Player {
         loadSavedPreferencesForCurrentProfile()
 
         do {
-            try activateBackend(for: video, url: url)
+            try activateBackend(for: video, url: source.url)
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            try backend?.load(url: url, autoplay: autoplay)
+            try backend?.load(url: source.url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
         } catch {
             processTerminalFailure(error)
         }
+    }
+
+    /// Loads a stream URL directly for playback in the requested presentation.
+    func load(_ video: Video, _ url: URL, presentation: Presentation, autoplay: Bool = true) {
+        load(video, .streaming(url), presentation: presentation, autoplay: autoplay)
     }
 
     /// Clears any loaded media and resets the player model to its default state.
@@ -187,6 +194,7 @@ final class Player {
 
         currentItem = nil
         currentURL = nil
+        currentPlaybackSource = nil
         shouldAutoPlay = true
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -220,7 +228,7 @@ final class Player {
         brightness = 0.5
 
         episodeOptions = []
-        episodeURLResolver = nil
+        episodeSourceResolver = nil
 
         didApplyTrackPreferencesForCurrentItem = false
         lastPersistedProgressByVideoKey.removeAll()
@@ -442,29 +450,32 @@ final class Player {
 
     func configureEpisodeSwitcher(
         episodes: [Video],
-        resolver: @escaping (Video) throws -> URL
+        resolver: @escaping (Video) async throws -> PlaybackSource
     ) {
         episodeOptions = episodes
-        episodeURLResolver = resolver
+        episodeSourceResolver = resolver
     }
 
     func quickSwitchEpisode(id: Int) {
         guard let target = episodeOptions.first(where: { $0.id == id }) else { return }
-        guard let resolver = episodeURLResolver else {
+        guard let resolver = episodeSourceResolver else {
             setUnsupportedFeatureMessage("Episode quick switch")
             return
         }
 
         lastEpisodeSwitchAttemptID = id
-        do {
-            let url = try resolver(target)
-            canRetryEpisodeSwitch = false
-            controlMessage = nil
-            load(target, url, presentation: presentation, autoplay: true)
-        } catch {
-            controlMessage = "Could not switch episode. Try again."
-            canRetryEpisodeSwitch = true
-            logger.error("Episode quick switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let source = try await resolver(target)
+                self.canRetryEpisodeSwitch = false
+                self.controlMessage = nil
+                self.load(target, source, presentation: self.presentation, autoplay: true)
+            } catch {
+                self.controlMessage = "Could not switch episode. Try again."
+                self.canRetryEpisodeSwitch = true
+                logger.error("Episode quick switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
         }
     }
 
@@ -718,7 +729,7 @@ final class Player {
         guard backendID == .vlc,
               !didFallbackForCurrentItem,
               let currentItem,
-              let currentURL
+              let currentPlaybackSource
         else {
             processTerminalFailure(error)
             return
@@ -728,10 +739,10 @@ final class Player {
         logger.info("Attempting automatic playback fallback to AV backend.")
 
         do {
-            try activateBackend(for: currentItem, url: currentURL, excluding: [.vlc])
+            try activateBackend(for: currentItem, url: currentPlaybackSource.url, excluding: [.vlc])
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            try backend?.load(url: currentURL, autoplay: shouldAutoPlay)
+            try backend?.load(url: currentPlaybackSource.url, autoplay: shouldAutoPlay)
             playbackState = .loading
             errorMessage = nil
         } catch {
