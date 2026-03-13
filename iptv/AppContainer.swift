@@ -19,6 +19,7 @@ final class AppContainer {
     let favoritesStore: FavoritesStore
     let backgroundActivityCenter: BackgroundActivityCenter
     let downloadCenter: DownloadCenter
+    let connectionMonitor: InternetConnectionMonitor
 
     private let searchService: any SearchServing
     private let searchFavoritesStore: any SearchFavoriting
@@ -38,7 +39,8 @@ final class AppContainer {
 
         let providerStore = ProviderStore()
         let favoritesStore = FavoritesStore()
-        let backgroundActivityCenter = BackgroundActivityCenter()
+        let connectionMonitor = InternetConnectionMonitor.shared
+        let backgroundActivityCenter = BackgroundActivityCenter(connectionMonitor: connectionMonitor)
         let watchActivityStore = DiskWatchActivityStore.shared
         let imagePrefetcher = URLSessionImagePrefetcher()
         let player = Player(
@@ -61,6 +63,7 @@ final class AppContainer {
         self.favoritesStore = favoritesStore
         self.backgroundActivityCenter = backgroundActivityCenter
         self.player = player
+        self.connectionMonitor = connectionMonitor
         self.downloadCenter = DownloadCenter(
             providerStore: providerStore,
             catalog: catalog,

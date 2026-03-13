@@ -40,6 +40,7 @@ struct MoviesScreen: View {
             }
             .navigationTitle(screenTitle)
             .searchable(text: queryBinding, prompt: "Search \(screenTitle)")
+            .withBackgroundActivityToolbar()
             .toolbar {
                 if providerStore.hasConfiguration, let viewModel, !viewModel.categories.isEmpty {
                     ToolbarItem(placement: .principal) {

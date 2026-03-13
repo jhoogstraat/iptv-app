@@ -62,6 +62,7 @@ struct DownloadsScreen: View {
                 }
             }
             .navigationTitle("Downloads")
+            .withBackgroundActivityToolbar()
             .toolbar {
                 if !downloadCenter.visibleGroups.isEmpty {
                     ToolbarItem(placement: .primaryAction) {

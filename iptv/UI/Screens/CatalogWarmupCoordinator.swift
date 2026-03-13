@@ -36,9 +36,9 @@ final class CatalogWarmupCoordinator {
         let activityID = "catalog-warmup:\(selectedTab.id)"
         catalog.activityCenter.start(
             id: activityID,
-            title: "Warming Library",
+            title: "Preparing Your Library",
             detail: warmupTitle(for: selectedTab),
-            source: "Startup"
+            source: "App"
         )
 
         do {
@@ -94,7 +94,7 @@ final class CatalogWarmupCoordinator {
             }
 
             try await catalog.rebuildSearchIndexFromCachedMetadata()
-            catalog.activityCenter.finish(id: activityID, detail: "Warmup complete")
+            catalog.activityCenter.finish(id: activityID, detail: "Your library is ready")
         } catch is CancellationError {
             catalog.activityCenter.cancel(id: activityID)
             return
@@ -132,7 +132,7 @@ final class CatalogWarmupCoordinator {
 
             catalog.activityCenter.update(
                 id: activityID,
-                detail: "Warming \(category.name)",
+                detail: "Loading \(category.name)",
                 progress: (completedSteps + offset + 1, max(totalSteps, 1))
             )
         }
@@ -144,15 +144,15 @@ final class CatalogWarmupCoordinator {
     private func warmupTitle(for selectedTab: Tabs) -> String {
         switch selectedTab {
         case .home:
-            return "Preparing For You recommendations"
+            return "Getting For You ready"
         case .movies:
-            return "Preparing movie rails"
+            return "Loading movie collections"
         case .series:
-            return "Preparing series rails"
+            return "Loading series collections"
         case .search:
-            return "Preparing search index"
+            return "Getting search ready"
         case .favorites, .downloads, .settings, .live:
-            return "Refreshing cached content"
+            return "Refreshing saved content"
         }
     }
 

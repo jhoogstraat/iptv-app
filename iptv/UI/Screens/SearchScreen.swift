@@ -37,6 +37,7 @@ struct SearchScreen: View {
                 }
             }
             .navigationTitle("Search")
+            .withBackgroundActivityToolbar()
             .toolbar {
                 if providerStore.hasConfiguration, let viewModel {
                     ToolbarItem(placement: .primaryAction) {

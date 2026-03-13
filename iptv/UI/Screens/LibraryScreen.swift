@@ -32,6 +32,7 @@ struct LibraryScreen: View {
                 }
             }
             .navigationTitle("Library")
+            .withBackgroundActivityToolbar()
         }
         .task(id: reloadToken) {
             await loadData()

@@ -307,9 +307,9 @@ final class Catalog {
     ) {
         runBackgroundActivity(
             id: "category-refresh:\(key.rawKey)",
-            title: "Refreshing Categories",
-            detail: "Updating \(contentType.rawValue) categories",
-            source: "Catalog"
+            title: "Refreshing Your Library",
+            detail: "Checking \(contentTypeLabel(for: contentType)) categories",
+            source: "Library"
         ) { [weak self] in
             guard let self else { return }
             _ = try await self.refreshCategories(key: key, kind: kind, contentType: contentType)
@@ -381,7 +381,7 @@ final class Catalog {
             id: "stream-refresh:\(key.rawKey)",
             title: "Refreshing Library",
             detail: "\(category.name)",
-            source: "Catalog"
+            source: "Library"
         ) { [weak self] in
             guard let self else { return }
             _ = try await self.refreshStreams(for: key, category: category, contentType: contentType, fetcher: fetcher)
@@ -718,8 +718,8 @@ final class Catalog {
                     let targets = searchCoverageTargets(for: scope)
                     activityCenter.start(
                         id: activityID,
-                        title: "Updating Search Index",
-                        detail: "Preparing categories",
+                        title: "Updating Search",
+                        detail: "Checking categories",
                         source: "Search",
                         progress: (0, max(targets.count, 1))
                     )
@@ -755,12 +755,12 @@ final class Catalog {
                     for await progress in progressStream {
                         self.activityCenter.update(
                             id: activityID,
-                            detail: "Indexed \(progress.indexedCategories) of \(progress.totalCategories) categories",
+                            detail: "Checked \(progress.indexedCategories) of \(progress.totalCategories) categories",
                             progress: (progress.indexedCategories, max(progress.totalCategories, 1))
                         )
                         continuation.yield(progress)
                     }
-                    activityCenter.finish(id: activityID, detail: "Search index is up to date")
+                    activityCenter.finish(id: activityID, detail: "Search is ready")
                 } catch is CancellationError {
                     if let providerFingerprint = try? currentProviderFingerprint() {
                         activityCenter.cancel(id: "search-coverage:\(providerFingerprint):\(scope.rawValue)")
@@ -871,8 +871,8 @@ extension Catalog {
         let entries = try await cacheManager.entries(providerFingerprint: fingerprint)
         activityCenter.start(
             id: activityID,
-            title: "Rebuilding Search Index",
-            detail: "Scanning cached catalog data",
+            title: "Refreshing Search",
+            detail: "Checking saved library data",
             source: "Search",
             progress: (0, max(entries.count, 1))
         )
@@ -892,11 +892,11 @@ extension Catalog {
                 processed += 1
                 activityCenter.update(
                     id: activityID,
-                    detail: "Processed \(processed) of \(entries.count) cached categories",
+                    detail: "Checked \(processed) of \(entries.count) saved categories",
                     progress: (processed, max(entries.count, 1))
                 )
             }
-            activityCenter.finish(id: activityID, detail: "Search index rebuilt")
+            activityCenter.finish(id: activityID, detail: "Search is ready")
         } catch is CancellationError {
             activityCenter.cancel(id: activityID)
             throw CancellationError()
@@ -919,6 +919,17 @@ extension Catalog {
             seriesCategories
         case .live:
             []
+        }
+    }
+
+    private func contentTypeLabel(for contentType: XtreamContentType) -> String {
+        switch contentType {
+        case .vod:
+            return "movie"
+        case .series:
+            return "series"
+        case .live:
+            return "live"
         }
     }
 

@@ -91,6 +91,7 @@ struct SettingsScreen: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .withBackgroundActivityToolbar()
         .onAppear(perform: loadCurrentValues)
         .sheet(isPresented: $isShowingPrefixSelector) {
             NavigationStack {

@@ -101,11 +101,13 @@ struct ContentView: View {
             }
         }
         .withVideoPlayer()
+        #if os(macOS)
         .overlay(alignment: .bottomTrailing) {
             BackgroundActivityIndicatorView(activityCenter: backgroundActivityCenter)
                 .padding(.trailing, 16)
                 .padding(.bottom, 16)
         }
+        #endif
         .task(id: "\(providerStore.revision)|\(selectedTab.id)") {
             guard providerStore.hasConfiguration else {
                 warmupCoordinator.stop()

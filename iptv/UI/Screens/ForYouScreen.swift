@@ -31,6 +31,7 @@ struct ForYouScreen: View {
                 }
             }
             .navigationTitle("For You")
+            .withBackgroundActivityToolbar()
             .toolbar {
                 if providerStore.hasConfiguration {
                     ToolbarItem(placement: .primaryAction) {

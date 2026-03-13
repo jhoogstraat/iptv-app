@@ -37,15 +37,22 @@ struct BackgroundActivity: Identifiable, Hashable, Sendable {
 @MainActor
 @Observable
 final class BackgroundActivityCenter {
+    private static let waitPollInterval = Duration.seconds(3)
+
     private(set) var activeActivities: [String: BackgroundActivity] = [:]
     private(set) var recentActivities: [BackgroundActivity] = []
     var isPaused = false
 
     private let maxRecentActivities = 12
     private let now: @Sendable () -> Date
+    private let connectionMonitor: InternetConnectionMonitor
 
-    init(now: @escaping @Sendable () -> Date = Date.init) {
+    init(
+        now: @escaping @Sendable () -> Date = Date.init,
+        connectionMonitor: InternetConnectionMonitor = .shared
+    ) {
         self.now = now
+        self.connectionMonitor = connectionMonitor
     }
 
     var activeList: [BackgroundActivity] {
@@ -69,11 +76,22 @@ final class BackgroundActivityCenter {
         recentActivities.contains(where: { $0.state == .failed })
     }
 
+    var recentFailureCount: Int {
+        recentActivities.filter { $0.state == .failed }.count
+    }
+
     var shouldShowIndicator: Bool {
         activeCount > 0 || hasFailures
     }
 
+    var isWaitingForInternet: Bool {
+        activeCount > 0 && !connectionMonitor.isConnected
+    }
+
     var summaryText: String {
+        if isWaitingForInternet {
+            return "Waiting for internet"
+        }
         if isPaused, activeCount > 0 {
             return "\(activeCount) paused"
         }
@@ -84,12 +102,12 @@ final class BackgroundActivityCenter {
             return activity.title
         }
         if activeCount > 1 {
-            return "\(activeCount) tasks"
+            return "\(activeCount) tasks in progress"
         }
         if hasFailures {
-            return "Recent issue"
+            return recentFailureCount == 1 ? "1 recent issue" : "\(recentFailureCount) recent issues"
         }
-        return "Background activity"
+        return "Background tasks"
     }
 
     func start(
@@ -155,9 +173,9 @@ final class BackgroundActivityCenter {
     }
 
     func waitIfResumed() async throws {
-        while isPaused {
+        while isPaused || !connectionMonitor.isConnected {
             try Task.checkCancellation()
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: Self.waitPollInterval)
         }
     }
 

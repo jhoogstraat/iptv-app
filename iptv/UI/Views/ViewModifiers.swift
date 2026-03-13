@@ -18,6 +18,14 @@ extension View {
         #endif
     }
     #endif
+
+    func withBackgroundActivityToolbar() -> some View {
+        #if os(macOS)
+        self
+        #else
+        modifier(BackgroundActivityToolbarModifier())
+        #endif
+    }
 }
 
 #if !os(macOS)
@@ -42,6 +50,22 @@ private struct FullScreenCoverModalModifier: ViewModifier {
             .onChange(of: player.presentation) { _, newPresentation in
                 isPresentingPlayer = newPresentation == .fullWindow
             }
+    }
+}
+#endif
+
+#if !os(macOS)
+private struct BackgroundActivityToolbarModifier: ViewModifier {
+    @Environment(BackgroundActivityCenter.self) private var backgroundActivityCenter
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if backgroundActivityCenter.shouldShowIndicator {
+                ToolbarItem(placement: .topBarTrailing) {
+                    BackgroundActivityIndicatorView(activityCenter: backgroundActivityCenter)
+                }
+            }
+        }
     }
 }
 #endif

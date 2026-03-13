@@ -62,11 +62,14 @@ struct Resource<T: Decodable> {
 struct HTTPClient: Sendable {
     static let shared = HTTPClient()
     private let session: URLSession
+    private let connectionMonitor: InternetConnectionMonitor
     
-    private init() {
+    private init(connectionMonitor: InternetConnectionMonitor = .shared) {
         let configuration = URLSessionConfiguration.default
         configuration.httpAdditionalHeaders = ["Content-Type": "application/json"]
+        configuration.waitsForConnectivity = true
         self.session = URLSession(configuration: configuration)
+        self.connectionMonitor = connectionMonitor
     }
     
     func load<T: Decodable>(_ resource: Resource<T>) async throws -> T {
@@ -84,31 +87,57 @@ struct HTTPClient: Sendable {
             case .delete:
                 break
         }
-        
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as URLError where error.code == .cancelled {
-            throw CancellationError()
-        }
 
-        guard let httpResponse = response as? HTTPURLResponse else {
+        while true {
+            try await connectionMonitor.waitUntilConnected()
+
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch let error as URLError where error.code == .cancelled {
+                throw CancellationError()
+            } catch let error as URLError where error.isConnectivityIssue {
+                try await connectionMonitor.waitUntilConnected()
+                continue
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse else {
                 throw NetworkError.invalidResponse
-        }
-        
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw NetworkError.httpError(httpResponse.statusCode)
-        }
-                
-        do {
-            let result = try JSONDecoder().decode(T.self, from: data)
-            return result
-        } catch {
-            throw NetworkError.decodingError(error)
+            }
+
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                throw NetworkError.httpError(httpResponse.statusCode)
+            }
+
+            do {
+                let result = try JSONDecoder().decode(T.self, from: data)
+                return result
+            } catch {
+                throw NetworkError.decodingError(error)
+            }
         }
     }
     
+}
+
+private extension URLError {
+    var isConnectivityIssue: Bool {
+        switch code {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .timedOut,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .internationalRoamingOff,
+             .callIsActive,
+             .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
+    }
 }
