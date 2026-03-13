@@ -50,12 +50,12 @@ enum Tabs: Equatable, Hashable, Identifiable {
 
     var symbol: String {
         switch self {
-            case .home: "play"
-            case .movies: "list.and.film"
-            case .series: "list.and.film"
-            case .live: "list.and.film"
+            case .home: "sparkles"
+            case .movies: "film"
+            case .series: "tv"
+            case .live: "dot.radiowaves.left.and.right"
             case .favorites: "heart"
-            case .downloads: "list.and.film"
+            case .downloads: "arrow.down.circle"
             case .search: "magnifyingglass"
             case .settings: "gearshape"
         }
