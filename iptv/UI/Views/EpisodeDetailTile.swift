@@ -16,6 +16,7 @@ struct EpisodeDetailTile: View {
     @Environment(Player.self) private var player
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var isLoading = true
     @State private var loadError: Error?
@@ -52,6 +53,7 @@ struct EpisodeDetailTile: View {
             }
         }
         .navigationTitle(video.name)
+        .withBackgroundActivityToolbar()
         .task {
             await loadSeriesInfo(policy: .cachedThenRefresh)
             await loadFavoriteState()
@@ -72,43 +74,10 @@ struct EpisodeDetailTile: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
-                    HStack(spacing: 12) {
-                        Button {
-                            playSelectedEpisode(from: seriesInfo)
-                        } label: {
-                            Label(primaryActionTitle(for: seriesInfo), systemImage: "play.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(selectedEpisode(from: seriesInfo) == nil)
-
-                        DownloadStatusBadge(selection: .series(video), showsTitle: true)
-
-                        Button {
-                            Task { await toggleFavorite() }
-                        } label: {
-                            Label(bookmarkActionTitle, systemImage: isFavorite ? "bookmark.fill" : "bookmark")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                    }
-
-                    HStack(spacing: 12) {
-                        if let seasonNumber = selectedSeasonNumber {
-                            DownloadStatusBadge(
-                                selection: .season(seriesID: video.id, seasonNumber: seasonNumber),
-                                showsTitle: true
-                            )
-                        }
-
-                        if let selectedEpisodeID {
-                            DownloadStatusBadge(
-                                selection: .episode(seriesID: video.id, episodeID: selectedEpisodeID),
-                                showsTitle: true
-                            )
-                        }
-                    }
+                    primaryActions(seriesInfo: seriesInfo)
+                    selectionDownloads
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let playError {
                     Text(playError)
@@ -122,6 +91,7 @@ struct EpisodeDetailTile: View {
                 section("About", text: aboutText(for: seriesInfo))
             }
             .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -161,19 +131,25 @@ struct EpisodeDetailTile: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 16) {
+                LazyHStack(alignment: .top, spacing: 0) {
                     ForEach(selectedSeasonEpisodes(from: seriesInfo), id: \.id) { episode in
                         episodeCard(episode: episode, seriesInfo: seriesInfo)
+                            .id(episodeID(for: episode))
+                            .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 0, alignment: .center)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(.vertical, 4)
             }
+            .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
+            .scrollPosition(id: $selectedEpisodeID)
         }
     }
 
     private func episodeCard(episode: XtreamEpisode, seriesInfo: XtreamSeries) -> some View {
         let isSelected = selectedEpisodeID == episodeID(for: episode)
         let artworkURL = episodeArtworkURL(for: episode, seriesInfo: seriesInfo)
+        let cardWidth: CGFloat = usesCompactDetailLayout ? 280 : 304
 
         return Button {
             selectedEpisodeID = episodeID(for: episode)
@@ -195,7 +171,7 @@ struct EpisodeDetailTile: View {
                         placeholderArtwork(systemImage: "play.rectangle")
                     }
                 }
-                .frame(width: 280, height: 158)
+                .frame(width: cardWidth - 24, height: (cardWidth - 24) * 0.564)
                 .clipShape(.rect(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -223,7 +199,7 @@ struct EpisodeDetailTile: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(12)
-            .frame(width: 304, alignment: .leading)
+            .frame(width: cardWidth, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color.secondary.opacity(0.08))
@@ -234,6 +210,101 @@ struct EpisodeDetailTile: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func primaryActions(seriesInfo: XtreamSeries) -> some View {
+        if usesCompactDetailLayout {
+            VStack(spacing: 12) {
+                playButton(seriesInfo: seriesInfo)
+
+                HStack(spacing: 12) {
+                    DownloadStatusBadge(selection: .series(video), showsTitle: true)
+                        .frame(maxWidth: .infinity)
+                    bookmarkButton
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                playButton(seriesInfo: seriesInfo)
+                DownloadStatusBadge(selection: .series(video), showsTitle: true)
+                    .frame(maxWidth: .infinity)
+                bookmarkButton
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var selectionDownloads: some View {
+        let seasonBadge = selectedSeasonDownloadBadge
+        let episodeBadge = selectedEpisodeDownloadBadge
+
+        if usesCompactDetailLayout {
+            VStack(alignment: .leading, spacing: 12) {
+                if let seasonBadge {
+                    seasonBadge
+                }
+
+                if let episodeBadge {
+                    episodeBadge
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                if let seasonBadge {
+                    seasonBadge
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let episodeBadge {
+                    episodeBadge
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private func playButton(seriesInfo: XtreamSeries) -> some View {
+        Button {
+            playSelectedEpisode(from: seriesInfo)
+        } label: {
+            Label(primaryActionTitle(for: seriesInfo), systemImage: "play.fill")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(selectedEpisode(from: seriesInfo) == nil)
+    }
+
+    private var bookmarkButton: some View {
+        Button {
+            Task { await toggleFavorite() }
+        } label: {
+            Label(bookmarkActionTitle, systemImage: isFavorite ? "bookmark.fill" : "bookmark")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private var selectedSeasonDownloadBadge: AnyView? {
+        guard let seasonNumber = selectedSeasonNumber else { return nil }
+        return AnyView(
+            DownloadStatusBadge(
+                selection: .season(seriesID: video.id, seasonNumber: seasonNumber),
+                showsTitle: true
+            )
+        )
+    }
+
+    private var selectedEpisodeDownloadBadge: AnyView? {
+        guard let selectedEpisodeID else { return nil }
+        return AnyView(
+            DownloadStatusBadge(
+                selection: .episode(seriesID: video.id, episodeID: selectedEpisodeID),
+                showsTitle: true
+            )
+        )
     }
 
     @ViewBuilder
@@ -458,6 +529,10 @@ struct EpisodeDetailTile: View {
         isFavorite
             ? localized("Remove Bookmark", comment: "Remove the series from bookmarks")
             : localized("Save Bookmark", comment: "Save the series to bookmarks")
+    }
+
+    private var usesCompactDetailLayout: Bool {
+        horizontalSizeClass == .compact
     }
 
     private func startPlayback(episode: XtreamEpisode, seriesInfo: XtreamSeries) {

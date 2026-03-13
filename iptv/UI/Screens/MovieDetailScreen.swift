@@ -22,6 +22,7 @@ struct MovieDetailScreen: View {
     @Environment(Player.self) private var player
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var state: MovieDetailState = .fetching
     @State private var playError: String?
@@ -62,6 +63,7 @@ struct MovieDetailScreen: View {
         #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
+        .withBackgroundActivityToolbar()
         .task {
             await loadInfo(policy: .cachedThenRefresh)
             await loadFavoriteState()
@@ -81,25 +83,7 @@ struct MovieDetailScreen: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
-                    HStack(spacing: 12) {
-                        Button {
-                            startPlayback()
-                        } label: {
-                            Label("Play", systemImage: "play.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-
-                        DownloadStatusBadge(selection: .movie(video), showsTitle: true)
-
-                        Button {
-                            Task { await toggleFavorite() }
-                        } label: {
-                            Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "heart.slash" : "heart")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                    }
+                    primaryActions
 
                     HStack(spacing: 12) {
                         Button {
@@ -110,12 +94,14 @@ struct MovieDetailScreen: View {
                         }
                         .buttonStyle(.bordered)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     if let playError {
                         Text(playError)
                             .foregroundStyle(.red)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 section("Synopsis", text: resolvedInfo?.plot ?? "No synopsis available.")
                 section("Cast", text: resolvedInfo?.cast ?? "No cast information available.")
@@ -123,7 +109,55 @@ struct MovieDetailScreen: View {
                 section("About", text: aboutText)
             }
             .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    @ViewBuilder
+    private var primaryActions: some View {
+        if usesCompactDetailLayout {
+            VStack(spacing: 12) {
+                playButton
+
+                HStack(spacing: 12) {
+                    downloadButton
+                    favoriteButton
+                }
+            }
+        } else {
+            HStack(spacing: 12) {
+                playButton
+                downloadButton
+                favoriteButton
+            }
+        }
+    }
+
+    private var playButton: some View {
+        Button {
+            startPlayback()
+        } label: {
+            Label("Play", systemImage: "play.fill")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+    }
+
+    private var downloadButton: some View {
+        DownloadStatusBadge(selection: .movie(video), showsTitle: true)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var favoriteButton: some View {
+        Button {
+            Task { await toggleFavorite() }
+        } label: {
+            Label(isFavorite ? "Unfavorite" : "Favorite", systemImage: isFavorite ? "heart.slash" : "heart")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
     }
 
     private var headerArtwork: some View {
@@ -175,6 +209,10 @@ struct MovieDetailScreen: View {
             lines.append("Rating: \(rating.formatted(.number.precision(.fractionLength(1))))")
         }
         return lines.joined(separator: "\n")
+    }
+
+    private var usesCompactDetailLayout: Bool {
+        horizontalSizeClass == .compact
     }
 
     @ViewBuilder
