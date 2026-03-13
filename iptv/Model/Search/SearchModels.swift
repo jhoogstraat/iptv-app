@@ -161,14 +161,80 @@ struct SearchQuery: Hashable, Sendable {
     }
 }
 
+struct SearchVideoSummary: Identifiable, Hashable, Sendable {
+    let videoID: Int
+    let name: String
+    let containerExtension: String
+    let contentType: String
+    let coverImageURL: String?
+    let artworkURL: URL?
+    let rating: Double?
+    let displayRating: String?
+    let addedAtRaw: String?
+    let language: String?
+
+    var id: String {
+        "\(contentType):\(videoID)"
+    }
+
+    var xtreamContentType: XtreamContentType {
+        switch contentType {
+        case XtreamContentType.series.rawValue:
+            .series
+        case XtreamContentType.live.rawValue:
+            .live
+        default:
+            .vod
+        }
+    }
+
+    func asVideo() -> Video {
+        Video(
+            id: videoID,
+            name: name,
+            containerExtension: containerExtension,
+            contentType: contentType,
+            coverImageURL: coverImageURL,
+            tmdbId: nil,
+            rating: rating,
+            addedAtRaw: addedAtRaw
+        )
+    }
+}
+
 struct SearchResultItem: Identifiable {
-    let video: Video
+    let summary: SearchVideoSummary
     let scope: SearchMediaScope
     let score: Double
     let matchedFields: Set<SearchMatchedField>
 
     var id: String {
-        "\(video.xtreamContentType.rawValue):\(video.id)"
+        "\(summary.xtreamContentType.rawValue):\(summary.videoID)"
+    }
+
+    var video: Video {
+        summary.asVideo()
+    }
+}
+
+struct SearchResultRowState: Identifiable {
+    let result: SearchResultItem
+    let isFavorite: Bool
+
+    var id: String {
+        result.id
+    }
+
+    var summary: SearchVideoSummary {
+        result.summary
+    }
+
+    var scope: SearchMediaScope {
+        result.scope
+    }
+
+    func updatingFavorite(_ isFavorite: Bool) -> SearchResultRowState {
+        SearchResultRowState(result: result, isFavorite: isFavorite)
     }
 }
 

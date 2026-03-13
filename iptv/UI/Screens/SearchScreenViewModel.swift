@@ -18,16 +18,16 @@ final class SearchScreenViewModel {
         case failed(Error)
     }
 
-    private let catalog: Catalog
-    private let providerStore: ProviderStore
-    private let favoritesStore: FavoritesStore
+    private let searchService: any SearchServing
+    private let providerStore: any SearchProviderConfigurationProviding
+    private let favoritesStore: any SearchFavoriting
 
     var phase: Phase = .idle
     var queryText = ""
     var scope: SearchMediaScope = .all
     var sort: SearchSort = .relevance
     var filters: SearchFilters = .default
-    var results: [SearchResultItem] = []
+    var results: [SearchResultRowState] = []
     var indexProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: .all)
     var availableGenres: [String] = []
     var availableLanguages: [String] = []
@@ -38,8 +38,14 @@ final class SearchScreenViewModel {
     private var coverageTask: Task<Void, Never>?
     private var startupTask: Task<Void, Never>?
 
-    init(catalog: Catalog, providerStore: ProviderStore, favoritesStore: FavoritesStore) {
-        self.catalog = catalog
+    private var latestSearchResults: [SearchResultItem] = []
+
+    init(
+        searchService: any SearchServing,
+        providerStore: any SearchProviderConfigurationProviding,
+        favoritesStore: any SearchFavoriting
+    ) {
+        self.searchService = searchService
         self.providerStore = providerStore
         self.favoritesStore = favoritesStore
     }
@@ -51,6 +57,7 @@ final class SearchScreenViewModel {
         guard providerStore.hasConfiguration else {
             phase = .idle
             results = []
+            latestSearchResults = []
             indexProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: scope)
             return
         }
@@ -100,12 +107,30 @@ final class SearchScreenViewModel {
     }
 
     func isFavorite(_ item: SearchResultItem) -> Bool {
-        let key = FavoriteRecord.makeKey(
-            providerFingerprint: (try? currentProviderFingerprint()) ?? "",
-            contentType: item.video.contentType,
-            videoID: item.video.id
+        favoriteIDs.contains(favoriteKey(for: item.summary))
+    }
+
+    func refreshFavoritesOnly() async {
+        await refreshFavorites(sessionID: sessionID)
+    }
+
+    func toggleFavorite(for row: SearchResultRowState) async {
+        guard let fingerprint = try? currentProviderFingerprint() else { return }
+
+        let nextIsFavorite = !row.isFavorite
+        await favoritesStore.setFavorite(
+            video: row.summary.asVideo(),
+            providerFingerprint: fingerprint,
+            isFavorite: nextIsFavorite
         )
-        return favoriteIDs.contains(key)
+
+        let key = favoriteKey(for: row.summary)
+        if nextIsFavorite {
+            favoriteIDs.insert(key)
+        } else {
+            favoriteIDs.remove(key)
+        }
+        rebuildResultRows()
     }
 
     private func runSearch(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
@@ -113,6 +138,7 @@ final class SearchScreenViewModel {
         guard providerStore.hasConfiguration else {
             phase = .idle
             results = []
+            latestSearchResults = []
             return
         }
 
@@ -126,6 +152,7 @@ final class SearchScreenViewModel {
         if !hasText && !hasFilters {
             phase = .idle
             results = []
+            latestSearchResults = []
             return
         }
 
@@ -137,9 +164,9 @@ final class SearchScreenViewModel {
                 filters: filters,
                 sort: sort
             )
-            let searchResults = try await catalog.search(query)
+            let searchResults = try await searchService.search(query)
             guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
-            results = searchResults
+            latestSearchResults = searchResults
             await refreshFavorites(sessionID: sessionID)
             guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             phase = .loaded
@@ -150,7 +177,7 @@ final class SearchScreenViewModel {
     }
 
     private func consumeCoverageStream(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
-        let stream = catalog.ensureSearchCoverage(scope: requestedScope)
+        let stream = searchService.ensureSearchCoverage(scope: requestedScope)
         for await progress in stream {
             if Task.isCancelled { return }
             guard isCurrent(sessionID, scope: requestedScope) else { return }
@@ -167,7 +194,7 @@ final class SearchScreenViewModel {
             return
         }
         do {
-            let facets = try await catalog.searchFacetValues(scope: requestedScope)
+            let facets = try await searchService.searchFacetValues(scope: requestedScope)
             guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             availableGenres = facets.genres
             availableLanguages = facets.languages
@@ -187,6 +214,7 @@ final class SearchScreenViewModel {
         let favorites = await favoritesStore.load(providerFingerprint: fingerprint)
         guard isCurrent(sessionID), !Task.isCancelled else { return }
         favoriteIDs = Set(favorites.map(\.id))
+        rebuildResultRows()
     }
 
     private func currentProviderFingerprint() throws -> String {
@@ -206,5 +234,22 @@ final class SearchScreenViewModel {
             return scope == expectedScope
         }
         return true
+    }
+
+    private func rebuildResultRows() {
+        results = latestSearchResults.map { result in
+            SearchResultRowState(
+                result: result,
+                isFavorite: favoriteIDs.contains(favoriteKey(for: result.summary))
+            )
+        }
+    }
+
+    private func favoriteKey(for summary: SearchVideoSummary) -> String {
+        FavoriteRecord.makeKey(
+            providerFingerprint: (try? currentProviderFingerprint()) ?? "",
+            contentType: summary.contentType,
+            videoID: summary.videoID
+        )
     }
 }

@@ -9,6 +9,11 @@ import SwiftUI
 import OSLog
 
 struct VideoTileRow: View {
+    private struct RowItem: Identifiable, Hashable {
+        let id: Int
+        let video: Video
+    }
+
     let category: Category
     let contentType: XtreamContentType
 
@@ -17,6 +22,7 @@ struct VideoTileRow: View {
 
     @State private var isFetching: Bool = true
     @State private var error: Error?
+    @State private var rowItems: [RowItem] = []
 
     init(category: Category, contentType: XtreamContentType = .vod) {
         self.category = category
@@ -40,12 +46,12 @@ struct VideoTileRow: View {
                             if isFetching {
                                 ProgressView()
                             } else {
-                                if let videos = videosInCategory, !videos.isEmpty {
-                                    ForEach(videos) { video in
+                                if !rowItems.isEmpty {
+                                    ForEach(rowItems) { item in
                                         NavigationLink {
-                                            destination(for: video)
+                                            destination(for: item.video)
                                         } label: {
-                                            VideoTile(video: video)
+                                            VideoTile(video: item.video)
                                                 .frame(width: 170, height: 9/6 * 170)
                                         }
                                         .buttonStyle(.plain)
@@ -91,21 +97,24 @@ struct VideoTileRow: View {
         }
     }
 
-    private var videosInCategory: [Video]? {
+    private var cachedVideos: [Video]? {
         switch contentType {
         case .vod:
-            catalog.vodCatalog[category]
+            catalog.cachedVideos(in: category, contentType: .vod)
         case .series:
-            catalog.seriesCatalog[category]
+            catalog.cachedVideos(in: category, contentType: .series)
         case .live:
-            catalog.liveCatalog[category]
+            catalog.cachedVideos(in: category, contentType: .live)
         }
     }
 
     func fetchVideos(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         defer { isFetching = false }
 
-        guard policy == .refreshNow || (videosInCategory == nil && error == nil) else { return }
+        guard policy == .refreshNow || (cachedVideos == nil && error == nil) else {
+            rowItems = (cachedVideos ?? []).map { RowItem(id: $0.id, video: $0) }
+            return
+        }
 
         isFetching = true
         error = nil
@@ -119,6 +128,7 @@ struct VideoTileRow: View {
             case .live:
                 break
             }
+            rowItems = (cachedVideos ?? []).map { RowItem(id: $0.id, video: $0) }
         } catch is CancellationError {
             return
         } catch let urlError as URLError where urlError.code == .cancelled {

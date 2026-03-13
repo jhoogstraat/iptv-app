@@ -8,15 +8,14 @@
 import SwiftUI
 
 struct SearchResultRowView: View {
-    let item: SearchResultItem
-    let isFavorite: Bool
+    let row: SearchResultRowState
 
     private var selection: DownloadSelection? {
-        switch item.video.xtreamContentType {
+        switch row.summary.xtreamContentType {
         case .vod:
-            return .movie(item.video)
+            return .movie(row.summary.asVideo())
         case .series:
-            return .series(item.video)
+            return .series(row.summary.asVideo())
         case .live:
             return nil
         }
@@ -24,7 +23,7 @@ struct SearchResultRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: URL(string: item.video.coverImageURL ?? "")) { phase in
+            AsyncImage(url: row.summary.artworkURL) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -46,21 +45,21 @@ struct SearchResultRowView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(item.video.name)
+                    Text(row.summary.name)
                         .font(.headline)
                         .lineLimit(2)
-                    if isFavorite {
+                    if row.isFavorite {
                         Image(systemName: "heart.fill")
                             .foregroundStyle(.pink)
                     }
                 }
 
                 HStack(spacing: 8) {
-                    Text(item.scope.displayName)
-                    if let rating = item.video.formattedRating {
+                    Text(row.scope.displayName)
+                    if let rating = row.summary.displayRating {
                         Text("Rating \(rating)")
                     }
-                    if let language = item.video.language {
+                    if let language = row.summary.language {
                         Text(language)
                     }
                 }

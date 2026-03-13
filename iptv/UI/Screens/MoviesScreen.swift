@@ -16,6 +16,7 @@ struct MoviesScreen: View {
 
     let contentType: XtreamContentType
 
+    @Environment(AppContainer.self) private var appContainer
     @Environment(Catalog.self) private var catalog
     @Environment(ProviderStore.self) private var providerStore
 
@@ -118,11 +119,11 @@ struct MoviesScreen: View {
                         } else {
                             ScrollView {
                                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
-                                    ForEach(viewModel.browseResults) { video in
+                                    ForEach(viewModel.browseResults) { item in
                                         NavigationLink {
-                                            destination(for: video)
+                                            destination(for: item, viewModel: viewModel)
                                         } label: {
-                                            browseTile(for: video)
+                                            browseTile(for: item)
                                         }
                                         .buttonStyle(.plain)
                                     }
@@ -224,20 +225,33 @@ struct MoviesScreen: View {
         .help("Sort: \(viewModel.browseSort.displayName)")
     }
 
-    @ViewBuilder
-    private func destination(for video: Video) -> some View {
+    private func destination(for item: MoviesBrowseItem, viewModel: MoviesScreenViewModel) -> some View {
+        guard let video = viewModel.video(for: item) else {
+            return AnyView(
+                ScopedPlaceholderView(
+                    title: "Title Unavailable",
+                    message: "The selected item is no longer available in the current category."
+                )
+                .navigationTitle(item.title)
+            )
+        }
+
         switch contentType {
         case .vod:
-            MovieDetailScreen(video: video)
+            return AnyView(MovieDetailScreen(video: video))
         case .series:
-            EpisodeDetailTile(video: video)
-                .navigationTitle(video.name)
-        case .live:
-            ScopedPlaceholderView(
-                title: "Live Episodes Are Unavailable",
-                message: "Episode detail only applies to series content."
+            return AnyView(
+                EpisodeDetailTile(video: video)
+                    .navigationTitle(video.name)
             )
+        case .live:
+            return AnyView(
+                ScopedPlaceholderView(
+                    title: "Live Episodes Are Unavailable",
+                    message: "Episode detail only applies to series content."
+                )
                 .navigationTitle(video.name)
+            )
         }
     }
 
@@ -267,13 +281,13 @@ struct MoviesScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func browseTile(for video: Video) -> some View {
+    private func browseTile(for item: MoviesBrowseItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            VideoTile(video: video)
+            BrowsePosterTile(item: item)
                 .aspectRatio(BrowseLayout.posterAspectRatio, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 8))
 
-            Text(video.name)
+            Text(item.title)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
@@ -283,7 +297,7 @@ struct MoviesScreen: View {
 
     private func ensureViewModel() {
         if viewModel == nil {
-            viewModel = MoviesScreenViewModel(contentType: contentType, catalog: catalog)
+            viewModel = appContainer.makeMoviesViewModel(contentType: contentType)
         }
     }
 
@@ -384,6 +398,71 @@ struct MoviesScreen: View {
         case .live:
             "No channels were returned by the provider."
         }
+    }
+}
+
+private struct BrowsePosterTile: View {
+    let item: MoviesBrowseItem
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            artwork
+            badgeRow
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.secondary.opacity(0.12))
+        .clipShape(.rect(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var artwork: some View {
+        AsyncImage(url: item.artworkURL) { phase in
+            if let image = phase.image {
+                image.boundedCoverArtwork()
+            } else if phase.error != nil {
+                VStack {
+                    Spacer()
+                    Text(item.title)
+                        .multilineTextAlignment(.center)
+                    Spacer()
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    private var badgeRow: some View {
+        HStack {
+            if let ratingText = item.ratingText {
+                HStack(alignment: .firstTextBaseline, spacing: 3) {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.orange)
+                    Text(ratingText)
+                        .fontWeight(.semibold)
+                }
+                .font(.footnote)
+                .padding(.horizontal, 2)
+                .padding(4)
+                .background(.thinMaterial)
+                .clipShape(.rect(cornerRadius: 8))
+            }
+
+            Spacer()
+
+            if let languageText = item.languageText {
+                Text(languageText)
+                    .font(.footnote.weight(.semibold))
+                    .padding(.horizontal, 2)
+                    .padding(4)
+                    .background(.thinMaterial)
+                    .clipShape(.rect(cornerRadius: 8))
+            }
+        }
+        .padding(6)
     }
 }
 

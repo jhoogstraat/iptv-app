@@ -23,12 +23,15 @@ struct PreviewData: PreviewModifier {
     }
     
     func body(content: Content, context: ModelContainer) -> some View {
-        let providerStore = ProviderStore()
+        let appContainer = try! AppContainer(modelContainer: context)
         content.modelContainer(context)
-            .environment(providerStore)
-            .environment(Catalog(providerStore: providerStore, modelContainer: context))
-            .environment(Player())
-            .environment(FavoritesStore())
+            .environment(appContainer)
+            .environment(appContainer.providerStore)
+            .environment(appContainer.catalog)
+            .environment(appContainer.player)
+            .environment(appContainer.favoritesStore)
+            .environment(appContainer.backgroundActivityCenter)
+            .environment(appContainer.downloadCenter)
             #if os(visionOS)
             .environment(ImmersiveEnvironment())
             #endif

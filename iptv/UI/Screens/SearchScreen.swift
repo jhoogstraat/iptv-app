@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct SearchScreen: View {
-    @Environment(Catalog.self) private var catalog
+    @Environment(AppContainer.self) private var appContainer
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
 
@@ -69,6 +69,10 @@ struct SearchScreen: View {
             .task(id: providerStore.revision) {
                 ensureViewModel()
                 viewModel?.start()
+            }
+            .task(id: favoritesStore.revision) {
+                guard providerStore.hasConfiguration else { return }
+                await viewModel?.refreshFavoritesOnly()
             }
         }
     }
@@ -141,19 +145,19 @@ struct SearchScreen: View {
 
     private func resultsList(_ viewModel: SearchScreenViewModel) -> some View {
         List {
-            ForEach(viewModel.results) { item in
+            ForEach(viewModel.results) { row in
                 NavigationLink {
-                    destination(for: item.video)
+                    destination(for: row.summary)
                 } label: {
-                    SearchResultRowView(item: item, isFavorite: viewModel.isFavorite(item))
+                    SearchResultRowView(row: row)
                 }
                 .swipeActions(edge: .trailing) {
                     Button {
-                        Task { await toggleFavorite(video: item.video, currentlyFavorite: viewModel.isFavorite(item), viewModel: viewModel) }
+                        Task { await viewModel.toggleFavorite(for: row) }
                     } label: {
-                        Label(viewModel.isFavorite(item) ? "Unfavorite" : "Favorite", systemImage: viewModel.isFavorite(item) ? "heart.slash" : "heart")
+                        Label(row.isFavorite ? "Unfavorite" : "Favorite", systemImage: row.isFavorite ? "heart.slash" : "heart")
                     }
-                    .tint(viewModel.isFavorite(item) ? .gray : .pink)
+                    .tint(row.isFavorite ? .gray : .pink)
                 }
             }
         }
@@ -161,8 +165,9 @@ struct SearchScreen: View {
     }
 
     @ViewBuilder
-    private func destination(for video: Video) -> some View {
-        switch video.xtreamContentType {
+    private func destination(for summary: SearchVideoSummary) -> some View {
+        let video = summary.asVideo()
+        switch summary.xtreamContentType {
         case .vod:
             MovieDetailScreen(video: video)
         case .series:
@@ -200,11 +205,7 @@ struct SearchScreen: View {
 
     private func ensureViewModel() {
         if viewModel == nil {
-            viewModel = SearchScreenViewModel(
-                catalog: catalog,
-                providerStore: providerStore,
-                favoritesStore: favoritesStore
-            )
+            viewModel = appContainer.makeSearchViewModel()
         }
     }
 
@@ -236,14 +237,6 @@ struct SearchScreen: View {
         return labels
     }
 
-    private func toggleFavorite(video: Video, currentlyFavorite: Bool, viewModel: SearchScreenViewModel) async {
-        guard let config = try? providerStore.requiredConfiguration() else { return }
-        let fingerprint = ProviderCacheFingerprint.make(from: config)
-        await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: !currentlyFavorite)
-        await MainActor.run {
-            viewModel.start()
-        }
-    }
 }
 
 private struct SearchFiltersSheet: View {

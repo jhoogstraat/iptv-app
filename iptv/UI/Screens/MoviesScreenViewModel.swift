@@ -18,9 +18,32 @@ protocol MoviesBrowsingCatalog: AnyObject {
 
 extension Catalog: MoviesBrowsingCatalog {}
 
+struct MoviesBrowseItem: Identifiable, Hashable, Sendable {
+    let id: Int
+    let title: String
+    let artworkURL: URL?
+    let ratingText: String?
+    let languageText: String?
+}
+
+private struct MoviesBrowseSourceItem: Identifiable, Hashable, Sendable {
+    let id: Int
+    let title: String
+    let normalizedTitle: String
+    let artworkURL: URL?
+    let ratingText: String?
+    let languageText: String?
+    let ratingValue: Double
+    let addedAtReferenceDate: Double
+}
+
 @MainActor
 @Observable
 final class MoviesScreenViewModel {
+    private enum DerivationPolicy {
+        static let synchronousThreshold = 250
+    }
+
     struct CategoryMenuSection: Identifiable {
         let title: String?
         let items: [CategoryMenuItem]
@@ -50,15 +73,19 @@ final class MoviesScreenViewModel {
 
     var phase: Phase = .idle
     var queryText = "" {
-        didSet { refreshBrowseResults() }
+        didSet { scheduleBrowseResultsRefresh() }
     }
     var selectedCategoryID: String?
     var browseSort: BrowseSort = .title {
-        didSet { refreshBrowseResults() }
+        didSet { scheduleBrowseResultsRefresh() }
     }
-    var browseResults: [Video] = []
+    var browseResults: [MoviesBrowseItem] = []
 
     private let catalog: MoviesBrowsingCatalog
+    private var sourceItems: [MoviesBrowseSourceItem] = []
+    private var videosByID: [Int: Video] = [:]
+    private var browseResultsTask: Task<Void, Never>?
+    private var browseResultsRevision = UUID()
 
     init(contentType: XtreamContentType, catalog: MoviesBrowsingCatalog) {
         self.contentType = contentType
@@ -107,8 +134,12 @@ final class MoviesScreenViewModel {
     }
 
     func reset() {
+        browseResultsTask?.cancel()
+        browseResultsRevision = UUID()
         phase = .idle
         selectedCategoryID = nil
+        sourceItems = []
+        videosByID = [:]
         browseResults = []
     }
 
@@ -133,32 +164,32 @@ final class MoviesScreenViewModel {
 
     func selectCategory(id: String?) async {
         guard selectedCategoryID != id else {
-            refreshBrowseResults()
+            await refreshBrowseResultsNow()
             return
         }
 
         selectedCategoryID = id
-        await loadSelectedCategory(policy: .cachedThenRefresh)
-    }
 
-    func refreshBrowseResults() {
-        guard let category = selectedCategory,
-              let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType) else {
+        guard let category = selectedCategory else {
+            sourceItems = []
+            videosByID = [:]
             browseResults = []
+            phase = .done
             return
         }
 
-        let trimmedQuery = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let filteredVideos: [Video]
-        if trimmedQuery.isEmpty {
-            filteredVideos = cachedVideos
-        } else {
-            filteredVideos = cachedVideos.filter { video in
-                video.name.localizedCaseInsensitiveContains(trimmedQuery)
-            }
+        if let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType) {
+            applySourceVideos(cachedVideos)
+            await refreshBrowseResultsNow()
+            phase = .done
+            return
         }
 
-        browseResults = sort(filteredVideos)
+        await loadSelectedCategory(policy: .cachedThenRefresh)
+    }
+
+    func video(for item: MoviesBrowseItem) -> Video? {
+        videosByID[item.id]
     }
 
     private func reconcileSelection() {
@@ -177,14 +208,17 @@ final class MoviesScreenViewModel {
 
     private func loadSelectedCategory(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
         guard let category = selectedCategory else {
+            sourceItems = []
+            videosByID = [:]
             browseResults = []
             phase = .done
             return
         }
 
         if policy != .refreshNow,
-           catalog.cachedVideos(in: category, contentType: contentType) != nil {
-            refreshBrowseResults()
+           let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType) {
+            applySourceVideos(cachedVideos)
+            await refreshBrowseResultsNow()
             phase = .done
         }
 
@@ -197,63 +231,159 @@ final class MoviesScreenViewModel {
 
         do {
             try await catalog.getStreams(in: category, contentType: contentType, policy: policy)
-            refreshBrowseResults()
+            let resolvedVideos = catalog.cachedVideos(in: category, contentType: contentType) ?? []
+            applySourceVideos(resolvedVideos)
+            await refreshBrowseResultsNow()
             phase = .done
         } catch {
             phase = .error(error)
         }
     }
 
-    private func sort(_ videos: [Video]) -> [Video] {
+    private func applySourceVideos(_ videos: [Video]) {
+        videosByID = Dictionary(uniqueKeysWithValues: videos.map { ($0.id, $0) })
+        sourceItems = videos.map(Self.makeSourceItem)
+    }
+
+    private func scheduleBrowseResultsRefresh() {
+        browseResultsTask?.cancel()
+        let revision = UUID()
+        browseResultsRevision = revision
+        let queryText = queryText
+        let browseSort = browseSort
+        let sourceItems = sourceItems
+
+        if sourceItems.count <= DerivationPolicy.synchronousThreshold {
+            browseResults = Self.deriveBrowseResults(
+                from: sourceItems,
+                queryText: queryText,
+                browseSort: browseSort
+            )
+            return
+        }
+
+        browseResultsTask = Task { [weak self] in
+            guard let self else { return }
+            let results = await Self.deriveBrowseResultsAsync(
+                from: sourceItems,
+                queryText: queryText,
+                browseSort: browseSort
+            )
+            guard !Task.isCancelled, self.browseResultsRevision == revision else { return }
+            self.browseResults = results
+        }
+    }
+
+    private func refreshBrowseResultsNow() async {
+        browseResultsTask?.cancel()
+        let revision = UUID()
+        browseResultsRevision = revision
+        let results = await Self.deriveBrowseResultsAsync(
+            from: sourceItems,
+            queryText: queryText,
+            browseSort: browseSort
+        )
+        guard browseResultsRevision == revision else { return }
+        browseResults = results
+    }
+
+    nonisolated private static func deriveBrowseResultsAsync(
+        from sourceItems: [MoviesBrowseSourceItem],
+        queryText: String,
+        browseSort: BrowseSort
+    ) async -> [MoviesBrowseItem] {
+        await Task.detached(priority: .userInitiated) {
+            deriveBrowseResults(
+                from: sourceItems,
+                queryText: queryText,
+                browseSort: browseSort
+            )
+        }.value
+    }
+
+    nonisolated private static func deriveBrowseResults(
+        from sourceItems: [MoviesBrowseSourceItem],
+        queryText: String,
+        browseSort: BrowseSort
+    ) -> [MoviesBrowseItem] {
+        let trimmedQuery = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedQuery = trimmedQuery.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        let filteredItems: [MoviesBrowseSourceItem]
+        if normalizedQuery.isEmpty {
+            filteredItems = sourceItems
+        } else {
+            filteredItems = sourceItems.filter { $0.normalizedTitle.localizedCaseInsensitiveContains(normalizedQuery) }
+        }
+
+        let sortedItems: [MoviesBrowseSourceItem]
         switch browseSort {
         case .title:
-            return videos.sorted { lhs, rhs in
-                let titleOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            sortedItems = filteredItems.sorted { lhs, rhs in
+                let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
                 if titleOrder != .orderedSame {
                     return titleOrder == .orderedAscending
                 }
                 return lhs.id < rhs.id
             }
         case .newest:
-            return videos.sorted { lhs, rhs in
-                compare(
-                    lhs,
-                    rhs,
-                    primary: { Self.parseDate($0.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude }
-                )
+            sortedItems = filteredItems.sorted { lhs, rhs in
+                if lhs.addedAtReferenceDate != rhs.addedAtReferenceDate {
+                    return lhs.addedAtReferenceDate > rhs.addedAtReferenceDate
+                }
+                if lhs.ratingValue != rhs.ratingValue {
+                    return lhs.ratingValue > rhs.ratingValue
+                }
+                let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if titleOrder != .orderedSame {
+                    return titleOrder == .orderedAscending
+                }
+                return lhs.id < rhs.id
             }
         case .rating:
-            return videos.sorted { lhs, rhs in
-                compare(lhs, rhs, primary: { $0.rating ?? .leastNormalMagnitude })
+            sortedItems = filteredItems.sorted { lhs, rhs in
+                if lhs.ratingValue != rhs.ratingValue {
+                    return lhs.ratingValue > rhs.ratingValue
+                }
+                if lhs.addedAtReferenceDate != rhs.addedAtReferenceDate {
+                    return lhs.addedAtReferenceDate > rhs.addedAtReferenceDate
+                }
+                let titleOrder = lhs.title.localizedCaseInsensitiveCompare(rhs.title)
+                if titleOrder != .orderedSame {
+                    return titleOrder == .orderedAscending
+                }
+                return lhs.id < rhs.id
             }
+        }
+
+        return sortedItems.map {
+            MoviesBrowseItem(
+                id: $0.id,
+                title: $0.title,
+                artworkURL: $0.artworkURL,
+                ratingText: $0.ratingText,
+                languageText: $0.languageText,
+            )
         }
     }
 
-    private func compare(_ lhs: Video, _ rhs: Video, primary: (Video) -> Double) -> Bool {
-        let leftPrimary = primary(lhs)
-        let rightPrimary = primary(rhs)
-        if leftPrimary != rightPrimary {
-            return leftPrimary > rightPrimary
+    private static func makeSourceItem(from video: Video) -> MoviesBrowseSourceItem {
+        let languageText = LanguageTaggedText(video.name).languageCode
+        let ratingText = video.rating.map {
+            $0.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US")))
         }
+        let normalizedTitle = video.name.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
 
-        let leftRating = lhs.rating ?? .leastNormalMagnitude
-        let rightRating = rhs.rating ?? .leastNormalMagnitude
-        if leftRating != rightRating {
-            return leftRating > rightRating
-        }
-
-        let leftAdded = Self.parseDate(lhs.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
-        let rightAdded = Self.parseDate(rhs.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
-        if leftAdded != rightAdded {
-            return leftAdded > rightAdded
-        }
-
-        let titleOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-        if titleOrder != .orderedSame {
-            return titleOrder == .orderedAscending
-        }
-
-        return lhs.id < rhs.id
+        return MoviesBrowseSourceItem(
+            id: video.id,
+            title: video.name,
+            normalizedTitle: normalizedTitle,
+            artworkURL: video.coverImageURL.flatMap(URL.init(string:)),
+            ratingText: ratingText,
+            languageText: languageText,
+            ratingValue: video.rating ?? .leastNormalMagnitude,
+            addedAtReferenceDate: parseDate(video.addedAtRaw)?.timeIntervalSinceReferenceDate ?? .leastNormalMagnitude
+        )
     }
 
     private static func parseDate(_ rawValue: String?) -> Date? {

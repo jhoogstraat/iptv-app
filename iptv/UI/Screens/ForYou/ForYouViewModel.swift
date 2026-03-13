@@ -24,8 +24,9 @@ final class ForYouViewModel {
         case failed(Error)
     }
 
-    private let catalog: Catalog
-    private let providerStore: ProviderStore
+    private let providerConfigurationProvider: any ProviderConfigurationProviding
+    private let categoryRepository: any CategoryRepository
+    private let streamRepository: any StreamRepository
     private let watchActivityStore: any WatchActivityStoring
     private let recommendationProvider: any RecommendationProviding
 
@@ -38,23 +39,21 @@ final class ForYouViewModel {
     var lastRefresh: Date?
 
     init(
-        catalog: Catalog,
-        providerStore: ProviderStore,
-        watchActivityStore: (any WatchActivityStoring)? = nil,
-        recommendationProvider: (any RecommendationProviding)? = nil,
+        dependencies: ForYouDependencies,
         vodCategoryLimit: Int = 8,
         seriesCategoryLimit: Int = 6
     ) {
-        self.catalog = catalog
-        self.providerStore = providerStore
-        self.watchActivityStore = watchActivityStore ?? DiskWatchActivityStore.shared
-        self.recommendationProvider = recommendationProvider ?? LocalRecommendationProvider()
+        self.providerConfigurationProvider = dependencies.providerConfigurationProvider
+        self.categoryRepository = dependencies.categoryRepository
+        self.streamRepository = dependencies.streamRepository
+        self.watchActivityStore = dependencies.watchActivityStore
+        self.recommendationProvider = dependencies.recommendationProvider
         self.vodCategoryLimit = vodCategoryLimit
         self.seriesCategoryLimit = seriesCategoryLimit
     }
 
     func load(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
-        guard providerStore.hasConfiguration else {
+        guard providerConfigurationProvider.hasProviderConfiguration else {
             phase = .idle
             hero = nil
             sections = []
@@ -88,7 +87,7 @@ final class ForYouViewModel {
 
             for category in selectedVodCategories {
                 do {
-                    try await catalog.getVodStreams(in: category, policy: policy)
+                    try await streamRepository.loadStreams(in: category, contentType: .vod, policy: policy)
                 } catch {
                     logger.debug("ForYou VOD prefetch failed for category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
@@ -96,7 +95,7 @@ final class ForYouViewModel {
 
             for category in selectedSeriesCategories {
                 do {
-                    try await catalog.getSeriesStreams(in: category, policy: policy)
+                    try await streamRepository.loadStreams(in: category, contentType: .series, policy: policy)
                 } catch {
                     logger.debug("ForYou series prefetch failed for category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 }
@@ -112,10 +111,10 @@ final class ForYouViewModel {
                 vodCategories: selectedVodCategories,
                 seriesCategories: selectedSeriesCategories,
                 vodCatalog: selectedVodCategories.reduce(into: [:]) { partialResult, category in
-                    partialResult[category] = catalog.vodCatalog[category] ?? []
+                    partialResult[category] = streamRepository.videos(in: category, contentType: .vod)
                 },
                 seriesCatalog: selectedSeriesCategories.reduce(into: [:]) { partialResult, category in
-                    partialResult[category] = catalog.seriesCatalog[category] ?? []
+                    partialResult[category] = streamRepository.videos(in: category, contentType: .series)
                 }
             )
 
@@ -138,7 +137,7 @@ final class ForYouViewModel {
     }
 
     private func currentProviderFingerprint() throws -> String {
-        let config = try providerStore.requiredConfiguration()
+        let config = try providerConfigurationProvider.requiredConfiguration()
         return ProviderCacheFingerprint.make(from: config)
     }
 
@@ -158,7 +157,7 @@ final class ForYouViewModel {
             logger.debug("ForYou \(contentType.rawValue, privacy: .public) categories failed: \(error.localizedDescription, privacy: .public)")
         }
 
-        let categories = Array(catalog.categories(for: contentType).prefix(limit))
+        let categories = Array(categoryRepository.categories(for: contentType).prefix(limit))
         return CategoryLoadOutcome(categories: categories, error: categories.isEmpty ? loadError : nil)
     }
 
@@ -171,7 +170,7 @@ final class ForYouViewModel {
 
         while true {
             do {
-                try await catalog.getCategories(for: contentType, policy: policy)
+                try await categoryRepository.loadCategories(for: contentType, policy: policy)
                 return
             } catch is CancellationError {
                 throw CancellationError()

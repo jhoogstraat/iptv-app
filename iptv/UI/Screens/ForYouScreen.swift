@@ -9,7 +9,7 @@ import SwiftUI
 import OSLog
 
 struct ForYouScreen: View {
-    @Environment(Catalog.self) private var catalog
+    @Environment(AppContainer.self) private var appContainer
     @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(ProviderStore.self) private var providerStore
     @Environment(Player.self) private var player
@@ -191,12 +191,7 @@ struct ForYouScreen: View {
 
     private func ensureViewModel() {
         if viewModel == nil {
-            viewModel = ForYouViewModel(
-                catalog: catalog,
-                providerStore: providerStore,
-                watchActivityStore: DiskWatchActivityStore.shared,
-                recommendationProvider: LocalRecommendationProvider()
-            )
+            viewModel = appContainer.makeForYouViewModel()
         }
     }
 

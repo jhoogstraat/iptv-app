@@ -201,23 +201,13 @@ final class Catalog {
 
     private func fetchVodStreamDTOs(inCategoryID categoryID: String) async throws -> [CachedVideoDTO] {
         let service = try self.service()
-        var streams = try await service.getStreams(of: .vod, in: categoryID)
-        if streams.isEmpty {
-            let allStreams = try await service.getStreams(of: .vod)
-            let filtered = allStreams.filter { $0.belongs(to: categoryID) }
-            streams = filtered.isEmpty ? allStreams : filtered
-        }
+        let streams = try await service.getStreams(of: .vod, in: categoryID)
         return streams.map(CachedVideoDTO.init)
     }
 
     private func fetchSeriesStreamDTOs(inCategoryID categoryID: String) async throws -> [CachedVideoDTO] {
         let service = try self.service()
-        var series = try await service.getSeries(in: categoryID)
-        if series.isEmpty {
-            let allSeries = try await service.getSeries()
-            let filtered = allSeries.filter { $0.belongs(to: categoryID) }
-            series = filtered.isEmpty ? allSeries : filtered
-        }
+        let series = try await service.getSeries(in: categoryID)
         return series.map(CachedVideoDTO.init)
     }
 

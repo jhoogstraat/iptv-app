@@ -323,19 +323,19 @@ actor SearchIndexStore {
 
         return sort(rankedDocuments, using: query.sort).map { item in
             let doc = item.document
-            let video = Video(
-                id: doc.videoID,
-                name: doc.title,
-                containerExtension: doc.containerExtension,
-                contentType: doc.playbackContentType,
-                coverImageURL: doc.coverImageURL,
-                tmdbId: nil,
-                rating: doc.rating,
-                addedAtRaw: doc.addedAtRaw
-            )
-
             return SearchResultItem(
-                video: video,
+                summary: SearchVideoSummary(
+                    videoID: doc.videoID,
+                    name: doc.title,
+                    containerExtension: doc.containerExtension,
+                    contentType: doc.playbackContentType,
+                    coverImageURL: doc.coverImageURL,
+                    artworkURL: doc.coverImageURL.flatMap(URL.init(string:)),
+                    rating: doc.rating,
+                    displayRating: Self.formatRating(doc.rating),
+                    addedAtRaw: doc.addedAtRaw,
+                    language: doc.language
+                ),
                 scope: doc.scope,
                 score: item.score,
                 matchedFields: item.matchedFields
@@ -409,6 +409,11 @@ actor SearchIndexStore {
         guard !hydratedProviders.contains(providerFingerprint) else { return }
         hydratedProviders.insert(providerFingerprint)
         indexesByProvider[providerFingerprint] = try? await snapshotStore.load(providerFingerprint: providerFingerprint)
+    }
+
+    private static func formatRating(_ rating: Double?) -> String? {
+        guard let rating else { return nil }
+        return rating.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US")))
     }
 
     private func matchesFilters(
