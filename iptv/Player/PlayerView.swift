@@ -348,6 +348,12 @@ struct PlayerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            ForEach(player.unavailableFeatureMessages, id: \.self) { message in
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -368,17 +374,17 @@ struct PlayerView: View {
                     controlChip("Media", icon: "music.note.list") {
                         mobileSheet = .media
                     }
-                    .disabled(!mediaControlsSupported)
+                    .opacity(mediaControlsSupported ? 1 : 0.65)
                     .accessibilityIdentifier("player.chip.media")
                     controlChip("Quality", icon: "dial.medium") {
                         mobileSheet = .quality
                     }
-                    .disabled(!qualityControlsSupported)
+                    .opacity(qualityControlsSupported ? 1 : 0.65)
                     .accessibilityIdentifier("player.chip.quality")
                     controlChip("Chapters", icon: "list.bullet.rectangle") {
                         mobileSheet = .chapters
                     }
-                    .disabled(!chapterControlsSupported)
+                    .opacity(chapterControlsSupported ? 1 : 0.65)
                     .accessibilityIdentifier("player.chip.chapters")
                     controlChip("Settings", icon: "slider.horizontal.3") {
                         mobileSheet = .settings
@@ -424,27 +430,27 @@ struct PlayerView: View {
                 Menu("Audio") {
                     audioTrackMenuContent
                 }
-                .disabled(!player.capabilities.supportsAudioTracks)
+                .disabled(player.currentItem == nil)
 
                 Menu("Subtitles") {
                     subtitleMenuContent
                 }
-                .disabled(!player.capabilities.supportsSubtitles)
+                .disabled(player.currentItem == nil)
 
                 Menu("Quality") {
                     qualityMenuContent
                 }
-                .disabled(!player.capabilities.supportsQualitySelection)
+                .disabled(player.currentItem == nil)
 
                 Menu("Chapters") {
                     chapterMenuContent
                 }
-                .disabled(!player.capabilities.supportsChapterMarkers)
+                .disabled(player.currentItem == nil)
 
                 Menu("Output") {
                     outputRouteMenuContent
                 }
-                .disabled(!player.capabilities.supportsOutputRouteSelection || player.outputRoutes.isEmpty)
+                .disabled(player.currentItem == nil)
 
                 Menu("Aspect") {
                     aspectRatioMenuContent
@@ -543,19 +549,19 @@ struct PlayerView: View {
                         tvPanel = .media
                     }
                     .focused($focusedControl, equals: .media)
-                    .disabled(!mediaControlsSupported)
+                    .opacity(mediaControlsSupported ? 1 : 0.65)
 
                     Button("Quality") {
                         tvPanel = .quality
                     }
                     .focused($focusedControl, equals: .quality)
-                    .disabled(!qualityControlsSupported)
+                    .opacity(qualityControlsSupported ? 1 : 0.65)
 
                     Button("Chapters") {
                         tvPanel = .chapters
                     }
                     .focused($focusedControl, equals: .chapters)
-                    .disabled(!chapterControlsSupported)
+                    .opacity(chapterControlsSupported ? 1 : 0.65)
 
                     Button("Settings") {
                         tvPanel = .settings
@@ -746,7 +752,7 @@ struct PlayerView: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            Text("Unsupported by current backend")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Audio:") }) ?? "Unsupported by current backend")
                 .foregroundStyle(.secondary)
         }
     }
@@ -785,7 +791,7 @@ struct PlayerView: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            Text("Unsupported by current backend")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Subtitles:") }) ?? "Unsupported by current backend")
                 .foregroundStyle(.secondary)
         }
     }
@@ -807,7 +813,7 @@ struct PlayerView: View {
                 }
             }
         } else {
-            Text("Quality switching unavailable for this stream")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Quality:") }) ?? "Quality switching unavailable for this stream")
                 .foregroundStyle(.secondary)
         }
     }
@@ -833,7 +839,7 @@ struct PlayerView: View {
                     .foregroundStyle(.secondary)
             }
         } else {
-            Text("Chapter navigation unavailable")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Chapters:") }) ?? "Chapter navigation unavailable")
                 .foregroundStyle(.secondary)
         }
     }
@@ -1035,7 +1041,7 @@ struct PlayerView: View {
                 }
             }
         } else {
-            Text("Unsupported")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Audio:") }) ?? "Unsupported")
         }
     }
 
@@ -1052,7 +1058,7 @@ struct PlayerView: View {
                 }
             }
         } else {
-            Text("Unsupported")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Subtitles:") }) ?? "Unsupported")
         }
     }
 
@@ -1065,7 +1071,7 @@ struct PlayerView: View {
                 }
             }
         } else {
-            Text("Unsupported")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Quality:") }) ?? "Unsupported")
         }
     }
 
@@ -1078,7 +1084,7 @@ struct PlayerView: View {
                 }
             }
         } else {
-            Text("Unsupported")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Chapters:") }) ?? "Unsupported")
         }
     }
 
@@ -1095,7 +1101,7 @@ struct PlayerView: View {
                 }
             }
         } else {
-            Text("Unsupported")
+            Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Output device:") }) ?? "Unsupported")
         }
     }
 

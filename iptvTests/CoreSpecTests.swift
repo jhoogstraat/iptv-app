@@ -502,6 +502,55 @@ struct CoreSpecTests {
     }
 
     @Test
+    func advancedStateRefreshUpdatesPlayerWhenBackendLearnsNewMetadataLater() async {
+        let backend = MockBackend(id: .av, canPlayResult: true)
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "m3u8"), URL(string: "https://example.com/live.m3u8")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 180))
+        _ = await waitUntil { player.duration == 180 }
+
+        #expect(player.capabilities.supportsAudioTracks == false)
+        #expect(player.capabilities.supportsQualitySelection == false)
+
+        backend.setCapabilities(
+            PlaybackCapabilities(
+                supportsAudioTracks: true,
+                supportsSubtitles: true,
+                supportsQualitySelection: true,
+                supportsChapterMarkers: false,
+                supportsOutputRouteSelection: false,
+                supportsAudioDelay: false,
+                supportsBrightness: false
+            )
+        )
+        backend.setAudioTracks([
+            MediaTrack(id: "aud-en", kind: .audio, languageCode: "en", label: "English", isDefault: true, isForced: false)
+        ])
+        backend.setSubtitleTracks([
+            MediaTrack(id: "sub-en", kind: .subtitle, languageCode: "en", label: "English", isDefault: true, isForced: false)
+        ])
+        backend.setQualityVariants([
+            QualityVariant.auto,
+            QualityVariant(id: "q-720", label: "720p", bitrate: 3_000_000, resolution: "1280x720", frameRate: 30, isAuto: false)
+        ])
+        backend.emit(.advancedStateChanged)
+
+        let refreshed = await waitUntil {
+            player.capabilities.supportsAudioTracks &&
+            player.capabilities.supportsQualitySelection &&
+            player.audioTracks.count == 1 &&
+            player.subtitleTracks.count == 1 &&
+            player.qualityVariants.count == 2
+        }
+
+        #expect(refreshed)
+        #expect(player.selectedAudioTrackID == "aud-en")
+        #expect(player.selectedSubtitleTrackID == MediaTrack.subtitleOffID)
+    }
+
+    @Test
     func qualitySelectionFailureRevertsToPreviousVariant() async {
         let qualities = [
             QualityVariant.auto,
@@ -806,6 +855,34 @@ struct CoreSpecTests {
         #expect(backend.selectedOutputRouteIDs == ["airplay"])
     }
 
+    @Test
+    func unavailableFeatureMessagesExplainFixedStreamAndBackendLimits() async {
+        let caps = PlaybackCapabilities(
+            supportsAudioTracks: false,
+            supportsSubtitles: false,
+            supportsQualitySelection: false,
+            supportsChapterMarkers: false,
+            supportsOutputRouteSelection: false,
+            supportsAudioDelay: false,
+            supportsBrightness: false
+        )
+        let backend = MockBackend(
+            id: .av,
+            canPlayResult: true,
+            capabilities: caps
+        )
+        let factory = PlaybackBackendFactory(builders: [{ backend }])
+        let player = Player(backendFactory: factory)
+
+        player.load(makeVideo(containerExtension: "mp4"), URL(string: "https://example.com/movie.mp4")!, presentation: .fullWindow, autoplay: false)
+        backend.emit(.ready(duration: 120))
+        _ = await waitUntil { player.duration == 120 }
+
+        #expect(player.unavailableFeatureMessages.contains(where: { $0.contains("AVPlayer can only switch variants on adaptive manifests such as HLS") }))
+        #expect(player.unavailableFeatureMessages.contains(where: { $0.contains("AVPlayer has no public API for per-item audio offset adjustment") }))
+        #expect(player.unavailableFeatureMessages.contains(where: { $0.contains("does not expose alternate audio renditions") }))
+    }
+
     private func makeVideo(containerExtension: String) -> Video {
         Video(
             id: 1,
@@ -845,11 +922,11 @@ private final class MockBackend: PlaybackBackend {
     let id: PlaybackBackendID
     let isAvailable: Bool
     private let canPlayResult: Bool
-    private let mockedCapabilities: PlaybackCapabilities
-    private let mockedAudioTracks: [MediaTrack]
-    private let mockedSubtitleTracks: [MediaTrack]
-    private let mockedQualityVariants: [QualityVariant]
-    private let mockedChapterMarkers: [ChapterMarker]
+    private var mockedCapabilities: PlaybackCapabilities
+    private var mockedAudioTracks: [MediaTrack]
+    private var mockedSubtitleTracks: [MediaTrack]
+    private var mockedQualityVariants: [QualityVariant]
+    private var mockedChapterMarkers: [ChapterMarker]
     private var mockedOutputRoutes: [OutputRoute]
 
     private let stream: AsyncStream<PlaybackEvent>
@@ -998,6 +1075,22 @@ private final class MockBackend: PlaybackBackend {
 
     func setOutputRoutes(_ routes: [OutputRoute]) {
         mockedOutputRoutes = routes
+    }
+
+    func setCapabilities(_ capabilities: PlaybackCapabilities) {
+        mockedCapabilities = capabilities
+    }
+
+    func setAudioTracks(_ tracks: [MediaTrack]) {
+        mockedAudioTracks = tracks
+    }
+
+    func setSubtitleTracks(_ tracks: [MediaTrack]) {
+        mockedSubtitleTracks = tracks
+    }
+
+    func setQualityVariants(_ variants: [QualityVariant]) {
+        mockedQualityVariants = variants
     }
 
     func setVolume(_ value: Double) {

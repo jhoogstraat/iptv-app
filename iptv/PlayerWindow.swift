@@ -100,7 +100,7 @@ struct PlayerWindow: Scene {
                             }
                         }
                     } else {
-                        Text("Unsupported")
+                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Audio:") }) ?? "Unsupported")
                     }
                 }
                 .disabled(player.currentItem == nil)
@@ -116,7 +116,7 @@ struct PlayerWindow: Scene {
                             }
                         }
                     } else {
-                        Text("Unsupported")
+                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Subtitles:") }) ?? "Unsupported")
                     }
                 }
                 .disabled(player.currentItem == nil)
@@ -129,7 +129,7 @@ struct PlayerWindow: Scene {
                             }
                         }
                     } else {
-                        Text("Unsupported")
+                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Quality:") }) ?? "Unsupported")
                     }
                 }
                 .disabled(player.currentItem == nil)
@@ -146,7 +146,7 @@ struct PlayerWindow: Scene {
                             }
                         }
                     } else {
-                        Text("Unsupported")
+                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Chapters:") }) ?? "Unsupported")
                     }
                 }
                 .disabled(player.currentItem == nil)
@@ -159,7 +159,7 @@ struct PlayerWindow: Scene {
                             }
                         }
                     } else {
-                        Text("Unsupported")
+                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Output device:") }) ?? "Unsupported")
                     }
                 }
                 .disabled(player.currentItem == nil)

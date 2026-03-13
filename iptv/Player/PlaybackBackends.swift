@@ -133,6 +133,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     private let stream: AsyncStream<PlaybackEvent>
     private let continuation: AsyncStream<PlaybackEvent>.Continuation
     private var progressTask: Task<Void, Never>?
+    private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
     private var automaticQualityTrackID: String?
 
@@ -153,6 +154,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         automaticQualityTrackID = nil
         player.media = VLCMedia(url: url)
         continuation.yield(.ready(duration: mediaDuration()))
+        startMetadataProbe()
         if autoplay {
             play()
         }
@@ -173,6 +175,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
 
     func stop() {
         stopProgressTimer()
+        stopMetadataProbe()
         player.stop()
     }
 
@@ -396,6 +399,23 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         progressTask = nil
     }
 
+    private func startMetadataProbe() {
+        stopMetadataProbe()
+        metadataProbeTask = Task { @MainActor [weak self] in
+            let probeDelays: [Duration] = [.milliseconds(250), .seconds(1), .seconds(3)]
+            for delay in probeDelays {
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled else { return }
+                self.continuation.yield(.advancedStateChanged)
+            }
+        }
+    }
+
+    private func stopMetadataProbe() {
+        metadataProbeTask?.cancel()
+        metadataProbeTask = nil
+    }
+
     private func mediaTrackID(for track: VLCMediaPlayer.Track, kind: MediaTrackKind) -> String {
         let prefix: String
         switch kind {
@@ -474,6 +494,7 @@ extension VLCPlaybackBackend: VLCMediaPlayerDelegate {
         case .buffering:
             continuation.yield(.buffering(true))
         case .playing:
+            continuation.yield(.advancedStateChanged)
             continuation.yield(.buffering(false))
             continuation.yield(.playing)
         case .paused:
@@ -536,6 +557,8 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     private var itemStatusObservation: NSKeyValueObservation?
     private var failedObserver: NSObjectProtocol?
     private var endedObserver: NSObjectProtocol?
+    private var accessLogObserver: NSObjectProtocol?
+    private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
 
     private struct QualityVariantDescriptor {
@@ -566,6 +589,13 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             NotificationCenter.default.removeObserver(endedObserver)
             self.endedObserver = nil
         }
+        if let accessLogObserver {
+            NotificationCenter.default.removeObserver(accessLogObserver)
+            self.accessLogObserver = nil
+        }
+
+        metadataProbeTask?.cancel()
+        metadataProbeTask = nil
 
         playerStateObservation?.invalidate()
         playerStateObservation = nil
@@ -768,6 +798,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
                 switch item.status {
                 case .readyToPlay:
                     self.continuation.yield(.ready(duration: self.currentDuration()))
+                    self.startMetadataProbe()
                 case .failed:
                     self.continuation.yield(.failed(item.error ?? PlaybackRuntimeError.backendFailure("AVPlayer failed to load this stream.")))
                 case .unknown:
@@ -797,6 +828,14 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             queue: .main
         ) { [weak self] _ in
             self?.continuation.yield(.ended)
+        }
+
+        accessLogObserver = center.addObserver(
+            forName: .AVPlayerItemNewAccessLogEntry,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            self?.continuation.yield(.advancedStateChanged)
         }
     }
 
@@ -961,6 +1000,18 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         return "Variant"
     }
 
+    private func startMetadataProbe() {
+        metadataProbeTask?.cancel()
+        metadataProbeTask = Task { @MainActor [weak self] in
+            let probeDelays: [Duration] = [.milliseconds(250), .seconds(1), .seconds(3)]
+            for delay in probeDelays {
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled else { return }
+                self.continuation.yield(.advancedStateChanged)
+            }
+        }
+    }
+
     private func cleanupItemObservers() {
         itemStatusObservation?.invalidate()
         itemStatusObservation = nil
@@ -973,6 +1024,12 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             NotificationCenter.default.removeObserver(endedObserver)
             self.endedObserver = nil
         }
+        if let accessLogObserver {
+            NotificationCenter.default.removeObserver(accessLogObserver)
+            self.accessLogObserver = nil
+        }
+        metadataProbeTask?.cancel()
+        metadataProbeTask = nil
     }
 
     private func cleanupObservers() {

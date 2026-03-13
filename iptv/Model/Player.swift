@@ -18,6 +18,16 @@ enum Presentation {
     case fullWindow
 }
 
+private enum PlayerFeature: CaseIterable {
+    case audioTracks
+    case subtitles
+    case quality
+    case chapters
+    case outputRoute
+    case audioDelay
+    case brightness
+}
+
 @MainActor
 @Observable
 final class Player {
@@ -96,6 +106,11 @@ final class Player {
 
         guard !features.isEmpty else { return nil }
         return "Unavailable for current stream/backend: \(features.joined(separator: ", "))."
+    }
+
+    var unavailableFeatureMessages: [String] {
+        guard currentItem != nil else { return [] }
+        return PlayerFeature.allCases.compactMap(unavailableReason(for:))
     }
 
     private let backendFactory: PlaybackBackendFactory
@@ -552,6 +567,10 @@ final class Player {
             }
             persistProgressIfNeeded()
 
+        case .advancedStateChanged:
+            refreshAdvancedStateFromBackend()
+            applySavedPreferencesIfPossible()
+
         case .ended:
             isPlaying = false
             isBuffering = false
@@ -648,6 +667,59 @@ final class Player {
         }
     }
 
+    private func unavailableReason(for feature: PlayerFeature) -> String? {
+        switch feature {
+        case .audioTracks:
+            guard !capabilities.supportsAudioTracks else { return nil }
+            return "Audio: the current source does not expose alternate audio renditions, so the player cannot offer language or commentary switching."
+
+        case .subtitles:
+            guard !capabilities.supportsSubtitles else { return nil }
+            return "Subtitles: no selectable subtitle tracks are advertised by the current source."
+
+        case .quality:
+            guard !capabilities.supportsQualitySelection else { return nil }
+
+            if currentPlaybackSource?.origin == .offline {
+                return "Quality: offline downloads are single local files, so adaptive quality variants are no longer available."
+            }
+
+            if activeBackendID == .av, !isAdaptiveStream {
+                let descriptor = currentStreamDescriptor
+                return "Quality: AVPlayer can only switch variants on adaptive manifests such as HLS. The current source is \(descriptor), so there is only one playable rendition."
+            }
+
+            return "Quality: the current stream/backend does not expose multiple selectable video variants."
+
+        case .chapters:
+            guard !capabilities.supportsChapterMarkers else { return nil }
+            return "Chapters: no chapter metadata is present in the current asset."
+
+        case .outputRoute:
+            guard !capabilities.supportsOutputRouteSelection else { return nil }
+            #if os(macOS)
+            return "Output device: the current macOS player path does not implement programmatic route switching. Device changes still have to happen through the system."
+            #else
+            return "Output device: route selection is not available from the current backend."
+            #endif
+
+        case .audioDelay:
+            guard !capabilities.supportsAudioDelay else { return nil }
+            if activeBackendID == .av {
+                return "Audio delay: AVPlayer has no public API for per-item audio offset adjustment, so this control is only available through the VLC backend."
+            }
+            return "Audio delay: the current backend does not expose adjustable audio offset control."
+
+        case .brightness:
+            guard !capabilities.supportsBrightness else { return nil }
+            #if os(macOS)
+            return "Brightness: macOS does not provide safe per-window playback brightness controls like iOS/tvOS, so changing this from the app is not currently supported."
+            #else
+            return "Brightness: the current backend does not expose brightness control."
+            #endif
+        }
+    }
+
     private func loadSavedPreferencesForCurrentProfile() {
         let keyPrefix = profilePreferencePrefix()
 
@@ -703,6 +775,28 @@ final class Player {
         let lhsPrimary = normalizedLHS.split(separator: "-").first.map(String.init)
         let rhsPrimary = normalizedRHS.split(separator: "-").first.map(String.init)
         return lhsPrimary == rhsPrimary
+    }
+
+    private var isAdaptiveStream: Bool {
+        let itemExtension = currentItem?.containerExtension.lowercased()
+        let urlExtension = currentURL?.pathExtension.lowercased()
+        return itemExtension == "m3u8" || urlExtension == "m3u8"
+    }
+
+    private var currentStreamDescriptor: String {
+        if currentPlaybackSource?.origin == .offline {
+            return "an offline file"
+        }
+
+        if let ext = currentItem?.containerExtension.lowercased(), !ext.isEmpty {
+            return "a fixed \(ext.uppercased()) stream"
+        }
+
+        if let ext = currentURL?.pathExtension.lowercased(), !ext.isEmpty {
+            return "a fixed \(ext.uppercased()) stream"
+        }
+
+        return "a fixed direct stream"
     }
 
     private func setUnsupportedFeatureMessage(_ feature: String) {

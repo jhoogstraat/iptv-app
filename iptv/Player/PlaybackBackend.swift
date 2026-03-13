@@ -28,6 +28,7 @@ enum PlaybackEvent {
     case paused
     case buffering(Bool)
     case progress(currentTime: Double, duration: Double?)
+    case advancedStateChanged
     case ended
     case failed(Error)
 }
