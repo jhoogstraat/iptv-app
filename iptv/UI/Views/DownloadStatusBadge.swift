@@ -10,13 +10,19 @@ import SwiftUI
 struct DownloadStatusBadge: View {
     let selection: DownloadSelection
     let showsTitle: Bool
+    let presentation: DownloadStatusBadgePresentation
 
     @Environment(DownloadCenter.self) private var downloadCenter
     @State private var isWorking = false
 
-    init(selection: DownloadSelection, showsTitle: Bool = false) {
+    init(
+        selection: DownloadSelection,
+        showsTitle: Bool = false,
+        presentation: DownloadStatusBadgePresentation = .capsule
+    ) {
         self.selection = selection
         self.showsTitle = showsTitle
+        self.presentation = presentation
     }
 
     private var state: DownloadBadgeState {
@@ -24,29 +30,24 @@ struct DownloadStatusBadge: View {
     }
 
     var body: some View {
-        Button {
-            performPrimaryAction()
-        } label: {
-            HStack(spacing: 8) {
-                if case .downloading(let progress) = state, let progress {
-                    ProgressView(value: progress)
-                        .frame(width: 18)
-                } else {
-                    Image(systemName: state.symbolName)
+        Group {
+            switch presentation {
+            case .capsule:
+                Button {
+                    performPrimaryAction()
+                } label: {
+                    badgeLabel
                 }
-
-                if showsTitle {
-                    Text(primaryLabel)
-                        .lineLimit(1)
+                .buttonStyle(.plain)
+            case .detailAction(let variant):
+                Button {
+                    performPrimaryAction()
+                } label: {
+                    badgeLabel
                 }
+                .buttonStyle(DetailActionStyle(variant: variant))
             }
-            .font(.subheadline.weight(.semibold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.thinMaterial)
-            .clipShape(.capsule)
         }
-        .buttonStyle(.plain)
         .disabled(isWorking)
         .contextMenu {
             if state != .completed {
@@ -80,6 +81,36 @@ struct DownloadStatusBadge: View {
             }
         }
         .accessibilityLabel(state.accessibilityLabel)
+    }
+
+    @ViewBuilder
+    private var badgeLabel: some View {
+        let content = HStack(spacing: 8) {
+            if case .downloading(let progress) = state, let progress {
+                ProgressView(value: progress)
+                    .frame(width: 18)
+            } else {
+                Image(systemName: state.symbolName)
+            }
+
+            if showsTitle {
+                Text(primaryLabel)
+                    .lineLimit(1)
+            }
+        }
+
+        switch presentation {
+        case .capsule:
+            content
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.thinMaterial)
+                .clipShape(.capsule)
+        case .detailAction(let variant):
+            content
+                .frame(maxWidth: variant.fillsWidth ? .infinity : nil, alignment: .center)
+        }
     }
 
     private var isDownloading: Bool {
@@ -179,4 +210,3 @@ struct DownloadStatusBadge: View {
         }
     }
 }
-

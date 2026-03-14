@@ -26,6 +26,7 @@ struct EpisodeDetailTile: View {
     @State private var selectedSeasonKey: String?
     @State private var selectedEpisodeID: Int?
     @State private var offlineHeaderArtworkURL: URL?
+    @State private var heroCollapseProgress: CGFloat = 0
 
     private var contentLocale: Locale {
         .autoupdatingCurrent
@@ -42,7 +43,7 @@ struct EpisodeDetailTile: View {
                     Button("Retry") {
                         Task { await loadSeriesInfo(policy: .refreshNow) }
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(DetailActionStyle(variant: .primary))
                 }
                 .padding()
             } else if let seriesInfo {
@@ -53,6 +54,12 @@ struct EpisodeDetailTile: View {
             }
         }
         .navigationTitle(video.name)
+        #if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.hidden, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+        .preferredColorScheme(.dark)
+        #endif
         .withBackgroundActivityToolbar()
         .task {
             await loadSeriesInfo(policy: .cachedThenRefresh)
@@ -62,64 +69,73 @@ struct EpisodeDetailTile: View {
 
     @ViewBuilder
     private func detailContent(seriesInfo: XtreamSeries) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                headerArtwork(seriesInfo: seriesInfo)
+        GeometryReader { proxy in
+            let topInset = proxy.safeAreaInsets.top
 
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(video.name)
-                        .font(.title.weight(.semibold))
+            ZStack(alignment: .top) {
+                heroBackground(seriesInfo: seriesInfo, topInset: topInset)
 
-                    Text(subtitleText(for: seriesInfo))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        heroForeground(seriesInfo: seriesInfo, topInset: topInset)
+                            .background(
+                                GeometryReader { geometry in
+                                    Color.clear.preference(
+                                        key: DetailHeroProgressPreferenceKey.self,
+                                        value: geometry.frame(in: .named("seriesDetailScroll")).minY
+                                    )
+                                }
+                            )
 
-                    primaryActions(seriesInfo: seriesInfo)
-                    selectionDownloads
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                        DetailContentLayout(
+                            isCompact: usesCompactDetailLayout,
+                            availableWidth: usesCompactDetailLayout ? proxy.size.width : nil
+                        ) {
+                            primaryActions(seriesInfo: seriesInfo)
 
-                if let playError {
-                    Text(playError)
-                        .foregroundStyle(.red)
-                }
+                            if let playError {
+                                Text(playError)
+                                    .foregroundStyle(.red)
+                            }
 
-                section("Synopsis", text: seriesInfo.info.plot)
-                episodeBrowser(seriesInfo: seriesInfo)
-                section("Cast", text: seriesInfo.info.cast)
-                section("Director", text: seriesInfo.info.director)
-                section("About", text: aboutText(for: seriesInfo))
-            }
-            .padding()
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
+                            overviewText(seriesInfo: seriesInfo)
 
-    private func headerArtwork(seriesInfo: XtreamSeries) -> some View {
-        Group {
-            if let heroURL = offlineHeaderArtworkURL ?? headerArtworkURL(for: seriesInfo) {
-                AsyncImage(url: heroURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .boundedFillArtwork()
-                    default:
-                        placeholderArtwork(systemImage: "tv")
+                            if !scoreBadges(for: seriesInfo).isEmpty {
+                                ratingSection(seriesInfo: seriesInfo)
+                            }
+
+                            episodeBrowser(seriesInfo: seriesInfo)
+                            selectionDownloads
+                            section("Cast", text: seriesInfo.info.cast)
+                            section("Director", text: seriesInfo.info.director)
+                            section("About", text: aboutText(for: seriesInfo))
+                        }
+                        .background(Color.black)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-            } else {
-                placeholderArtwork(systemImage: "tv")
+                .coordinateSpace(name: "seriesDetailScroll")
+                .scrollIndicators(.hidden)
+                .onPreferenceChange(DetailHeroProgressPreferenceKey.self) { minY in
+                    heroCollapseProgress = heroProgress(for: minY)
+                }
+
+                DetailCollapsedHeaderBar(
+                    title: video.name,
+                    artworkURL: collapsedArtworkURL(for: seriesInfo),
+                    titleArtworkURL: heroTitleArtworkURL(for: seriesInfo),
+                    progress: heroCollapseProgress
+                )
+                .padding(.top, topInset + 8)
             }
+            .background(Color.black.ignoresSafeArea())
         }
-        .frame(height: 260)
-        .clipShape(.rect(cornerRadius: 12))
     }
 
     @ViewBuilder
     private func episodeBrowser(seriesInfo: XtreamSeries) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(localized("Episodes", comment: "Episodes section title"))
-                .font(.title3.weight(.semibold))
+        VStack(alignment: .leading, spacing: 16) {
+            DetailSectionHeader(title: "Episodes")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
@@ -129,27 +145,35 @@ struct EpisodeDetailTile: View {
                 }
                 .padding(.vertical, 2)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             ScrollView(.horizontal, showsIndicators: false) {
-                LazyHStack(alignment: .top, spacing: 0) {
+                LazyHStack(alignment: .top, spacing: 14) {
                     ForEach(selectedSeasonEpisodes(from: seriesInfo), id: \.id) { episode in
-                        episodeCard(episode: episode, seriesInfo: seriesInfo)
-                            .id(episodeID(for: episode))
-                            .containerRelativeFrame(.horizontal, count: 1, span: 1, spacing: 0, alignment: .center)
+                        if usesCompactDetailLayout {
+                            episodeCard(episode: episode, seriesInfo: seriesInfo)
+                                .id(episodeID(for: episode))
+                                .containerRelativeFrame(.horizontal, count: 7, span: 5, spacing: 14, alignment: .leading)
+                        } else {
+                            episodeCard(episode: episode, seriesInfo: seriesInfo)
+                                .id(episodeID(for: episode))
+                                .frame(width: 288)
+                        }
                     }
                 }
                 .scrollTargetLayout()
                 .padding(.vertical, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
             .scrollPosition(id: $selectedEpisodeID)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     private func episodeCard(episode: XtreamEpisode, seriesInfo: XtreamSeries) -> some View {
         let isSelected = selectedEpisodeID == episodeID(for: episode)
         let artworkURL = episodeArtworkURL(for: episode, seriesInfo: seriesInfo)
-        let cardWidth: CGFloat = usesCompactDetailLayout ? 280 : 304
 
         return Button {
             selectedEpisodeID = episodeID(for: episode)
@@ -171,42 +195,52 @@ struct EpisodeDetailTile: View {
                         placeholderArtwork(systemImage: "play.rectangle")
                     }
                 }
-                .frame(width: cardWidth - 24, height: (cardWidth - 24) * 0.564)
+                .frame(maxWidth: .infinity)
+                .aspectRatio(16.0 / 9.0, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 12))
 
                 VStack(alignment: .leading, spacing: 6) {
                     Text(episodeBadgeText(for: episode))
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.72))
 
                     Text(episode.title)
-                        .font(.headline)
+                        .font(.title3.weight(.semibold))
                         .lineLimit(2)
+                        .foregroundStyle(.white)
 
                     Text(episodeMetaText(for: episode))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.7))
                         .lineLimit(2)
 
                     HStack(spacing: 6) {
                         Image(systemName: "play.fill")
                             .font(.caption.weight(.semibold))
                         Text(localized("Play Episode", comment: "Play a specific episode action"))
-                            .font(.subheadline.weight(.semibold))
+                            .font(.subheadline.weight(.medium))
                     }
                     .padding(.top, 4)
+                    .foregroundStyle(.white.opacity(0.88))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(12)
-            .frame(width: cardWidth, alignment: .leading)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.secondary.opacity(0.08))
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.white.opacity(0.12)
+                            : Color.white.opacity(0.06)
+                    )
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.16), lineWidth: isSelected ? 2 : 1)
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.white.opacity(0.18) : Color.white.opacity(0.10),
+                        lineWidth: isSelected ? 1.25 : 1
+                    )
             )
         }
         .buttonStyle(.plain)
@@ -214,22 +248,17 @@ struct EpisodeDetailTile: View {
 
     @ViewBuilder
     private func primaryActions(seriesInfo: XtreamSeries) -> some View {
-        if usesCompactDetailLayout {
-            VStack(spacing: 12) {
-                playButton(seriesInfo: seriesInfo)
+        VStack(spacing: 12) {
+            playButton(seriesInfo: seriesInfo)
 
-                HStack(spacing: 12) {
-                    DownloadStatusBadge(selection: .series(video), showsTitle: true)
-                        .frame(maxWidth: .infinity)
-                    bookmarkButton
-                }
-            }
-        } else {
             HStack(spacing: 12) {
-                playButton(seriesInfo: seriesInfo)
-                DownloadStatusBadge(selection: .series(video), showsTitle: true)
-                    .frame(maxWidth: .infinity)
                 bookmarkButton
+                DownloadStatusBadge(
+                    selection: .series(video),
+                    showsTitle: false,
+                    presentation: .detailAction(.icon)
+                )
+                refreshButton
             }
         }
     }
@@ -272,7 +301,7 @@ struct EpisodeDetailTile: View {
                 .lineLimit(1)
                 .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(DetailActionStyle(variant: .primary))
         .disabled(selectedEpisode(from: seriesInfo) == nil)
     }
 
@@ -280,11 +309,18 @@ struct EpisodeDetailTile: View {
         Button {
             Task { await toggleFavorite() }
         } label: {
-            Label(bookmarkActionTitle, systemImage: isFavorite ? "bookmark.fill" : "bookmark")
-                .lineLimit(1)
-                .frame(maxWidth: .infinity)
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
         }
-        .buttonStyle(.bordered)
+        .buttonStyle(DetailActionStyle(variant: .icon))
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await loadSeriesInfo(policy: .refreshNow) }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+        }
+        .buttonStyle(DetailActionStyle(variant: .icon))
     }
 
     private var selectedSeasonDownloadBadge: AnyView? {
@@ -292,7 +328,8 @@ struct EpisodeDetailTile: View {
         return AnyView(
             DownloadStatusBadge(
                 selection: .season(seriesID: video.id, seasonNumber: seasonNumber),
-                showsTitle: true
+                showsTitle: true,
+                presentation: .detailAction(.secondary)
             )
         )
     }
@@ -302,7 +339,8 @@ struct EpisodeDetailTile: View {
         return AnyView(
             DownloadStatusBadge(
                 selection: .episode(seriesID: video.id, episodeID: selectedEpisodeID),
-                showsTitle: true
+                showsTitle: true,
+                presentation: .detailAction(.secondary)
             )
         )
     }
@@ -311,24 +349,18 @@ struct EpisodeDetailTile: View {
     private func seasonButton(for seasonKey: String, in seriesInfo: XtreamSeries) -> some View {
         let isSelected = seasonKey == selectedSeasonKey
 
-        let button = Button {
+        Button {
             selectedSeasonKey = seasonKey
             selectedEpisodeID = episodes(in: seasonKey, from: seriesInfo).first.map(episodeID(for:))
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(seasonTitle(for: seasonKey, in: seriesInfo))
                 Text(episodeCountText(episodes(in: seasonKey, from: seriesInfo).count))
-                    .foregroundStyle(.secondary)
+                    .opacity(isSelected ? 0.78 : 0.72)
             }
-            .frame(minWidth: 150, alignment: .leading)
+            .frame(minWidth: 132, alignment: .leading)
         }
-        .controlSize(.large)
-
-        if isSelected {
-            button.buttonStyle(.borderedProminent)
-        } else {
-            button.buttonStyle(.bordered)
-        }
+        .buttonStyle(DetailActionStyle(variant: .chip(selected: isSelected)))
     }
 
     private func placeholderArtwork(systemImage: String) -> some View {
@@ -347,22 +379,9 @@ struct EpisodeDetailTile: View {
             }
     }
 
-    private func subtitleText(for seriesInfo: XtreamSeries) -> String {
-        [
-            normalizedText(seriesInfo.info.genre),
-            normalizedText(seriesInfo.info.releaseDate),
-            seasonCountText(for: seriesInfo)
-        ]
-        .compactMap { $0 }
-        .joined(separator: " • ")
-    }
-
     private func aboutText(for seriesInfo: XtreamSeries) -> String {
         var lines: [String] = []
 
-        if let rating = normalizedText(seriesInfo.info.rating) {
-            lines.append("Rating: \(rating)")
-        }
         if let tmdb = normalizedText(seriesInfo.info.tmdb) {
             lines.append("TMDB: \(tmdb)")
         }
@@ -375,10 +394,11 @@ struct EpisodeDetailTile: View {
     @ViewBuilder
     private func section(_ title: String, text: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(localized(title, comment: "Series detail section title"))
-                .font(.title3.weight(.semibold))
+            DetailSectionHeader(title: title)
             Text(normalizedText(text) ?? localized("Not available.", comment: "Fallback when metadata is missing"))
-                .foregroundStyle(.secondary)
+                .font(.body)
+                .lineSpacing(5)
+                .foregroundStyle(.white.opacity(0.9))
         }
     }
 
@@ -446,14 +466,6 @@ struct EpisodeDetailTile: View {
         )
     }
 
-    private func seasonCountText(for seriesInfo: XtreamSeries) -> String? {
-        let count = seriesInfo.seasons.count
-        guard count > 0 else { return nil }
-        return count == 1
-            ? localized("1 season", comment: "Single season count")
-            : String(localized: "\(count) seasons", locale: contentLocale, comment: "Plural season count")
-    }
-
     private func episodeMetaText(for episode: XtreamEpisode) -> String {
         [
             episodeShortLabel(for: episode),
@@ -462,6 +474,199 @@ struct EpisodeDetailTile: View {
         ]
         .compactMap { $0 }
         .joined(separator: " • ")
+    }
+
+    private func scoreBadges(for seriesInfo: XtreamSeries) -> [DetailScoreBadgeModel] {
+        [
+            DetailScoreSource.catalog.badgeModel(text: normalizedText(seriesInfo.info.rating))
+        ]
+        .compactMap { $0 }
+    }
+
+    private var heroHeight: CGFloat {
+        usesCompactDetailLayout ? 430 : 520
+    }
+
+    private func heroArtworkURL(for seriesInfo: XtreamSeries) -> URL? {
+        offlineHeaderArtworkURL ?? headerArtworkURL(for: seriesInfo)
+    }
+
+    private func collapsedArtworkURL(for seriesInfo: XtreamSeries) -> URL? {
+        URL(string: video.coverImageURL ?? "") ?? heroArtworkURL(for: seriesInfo)
+    }
+
+    private func heroTitleArtworkURL(for seriesInfo: XtreamSeries) -> URL? {
+        guard let coverURL = URL(string: normalizedText(seriesInfo.info.cover) ?? video.coverImageURL ?? ""),
+              coverURL != heroArtworkURL(for: seriesInfo) else {
+            return nil
+        }
+        return coverURL
+    }
+
+    private func heroGenreText(for seriesInfo: XtreamSeries) -> String? {
+        let genres = normalizedText(seriesInfo.info.genre)?
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard let genres, !genres.isEmpty else { return nil }
+        return genres.joined(separator: " / ")
+    }
+
+    private func heroYearText(for seriesInfo: XtreamSeries) -> String? {
+        yearText(from: normalizedText(seriesInfo.info.releaseDate))
+    }
+
+    private func heroRuntimeText(for seriesInfo: XtreamSeries) -> String? {
+        if let selectedDuration = normalizedText(selectedEpisode(from: seriesInfo)?.info.duration) {
+            return selectedDuration
+        }
+        if let episodeRuntime = normalizedText(seriesInfo.info.episodeRunTime) {
+            return "\(episodeRuntime) min"
+        }
+        return nil
+    }
+
+    private func heroScoreText(for seriesInfo: XtreamSeries) -> String? {
+        scoreBadges(for: seriesInfo).first?.value
+    }
+
+    private func overviewText(seriesInfo: XtreamSeries) -> some View {
+        Text(normalizedText(seriesInfo.info.plot) ?? localized("Not available.", comment: "Fallback when metadata is missing"))
+            .font(.title3.weight(.regular))
+            .lineSpacing(6)
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func ratingSection(seriesInfo: XtreamSeries) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DetailSectionHeader(title: "Ratings")
+            DetailScoreBadgeRow(badges: scoreBadges(for: seriesInfo))
+        }
+    }
+
+    @ViewBuilder
+    private func heroBackground(seriesInfo: XtreamSeries, topInset: CGFloat) -> some View {
+        ZStack(alignment: .bottom) {
+            if let heroArtworkURL = heroArtworkURL(for: seriesInfo) {
+                AsyncImage(url: heroArtworkURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    default:
+                        Color.white.opacity(0.05)
+                    }
+                }
+            } else {
+                Color.white.opacity(0.05)
+            }
+
+            LinearGradient(
+                colors: [
+                    Color.black.opacity(0.12),
+                    Color.black.opacity(0.28),
+                    Color.black.opacity(0.68),
+                    Color.black
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        }
+        .frame(height: heroHeight + topInset)
+        .frame(maxWidth: .infinity)
+        .clipped()
+        .overlay {
+            Color.black.opacity(Double(heroCollapseProgress) * 0.36)
+        }
+        .opacity(1.0 - (Double(heroCollapseProgress) * 0.92))
+        .ignoresSafeArea(edges: .top)
+    }
+
+    private func heroForeground(seriesInfo: XtreamSeries, topInset: CGFloat) -> some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            if let heroTitleArtworkURL = heroTitleArtworkURL(for: seriesInfo) {
+                AsyncImage(url: heroTitleArtworkURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .interpolation(.high)
+                            .aspectRatio(contentMode: .fit)
+                    default:
+                        EmptyView()
+                    }
+                }
+                .frame(maxWidth: 240, maxHeight: 96)
+                .shadow(color: Color.black.opacity(0.28), radius: 20, y: 10)
+            }
+
+            Text(video.name)
+                .font(.system(size: usesCompactDetailLayout ? 42 : 56, weight: .heavy, design: .rounded))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white)
+                .shadow(color: Color.black.opacity(0.24), radius: 14, y: 8)
+
+            heroMetaRow(seriesInfo: seriesInfo)
+
+            if let heroGenreText = heroGenreText(for: seriesInfo) {
+                Text(heroGenreText)
+                    .font(.title3.weight(.medium))
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white.opacity(0.92))
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: heroHeight + topInset, alignment: .bottom)
+        .padding(.horizontal, usesCompactDetailLayout ? 24 : 32)
+        .padding(.top, topInset + 24)
+        .padding(.bottom, 28)
+        .opacity(1.0 - (Double(heroCollapseProgress) * 0.94))
+        .offset(y: -(heroCollapseProgress * 18))
+    }
+
+    @ViewBuilder
+    private func heroMetaRow(seriesInfo: XtreamSeries) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 14) {
+                heroMetaItems(seriesInfo: seriesInfo)
+            }
+            VStack(spacing: 10) {
+                heroMetaItems(seriesInfo: seriesInfo)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func heroMetaItems(seriesInfo: XtreamSeries) -> some View {
+        if let heroScoreText = heroScoreText(for: seriesInfo) {
+            DetailMetaPill(heroScoreText, systemImage: "star.fill")
+        }
+        if let heroYearText = heroYearText(for: seriesInfo) {
+            Text(heroYearText)
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.white)
+        }
+        if let heroRuntimeText = heroRuntimeText(for: seriesInfo) {
+            Text(heroRuntimeText)
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.88))
+        }
+    }
+
+    private func heroProgress(for minY: CGFloat) -> CGFloat {
+        let distance = max(heroHeight - 140, 1)
+        return min(max(-minY / distance, 0), 1)
+    }
+
+    private func yearText(from rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let digits = rawValue.filter(\.isNumber)
+        guard digits.count >= 4 else { return nil }
+        return String(digits.prefix(4))
     }
 
     private func headerArtworkURL(for seriesInfo: XtreamSeries) -> URL? {
@@ -523,12 +728,6 @@ struct EpisodeDetailTile: View {
     private var selectedSeasonNumber: Int? {
         guard let selectedSeasonKey else { return nil }
         return Int(selectedSeasonKey)
-    }
-
-    private var bookmarkActionTitle: String {
-        isFavorite
-            ? localized("Remove Bookmark", comment: "Remove the series from bookmarks")
-            : localized("Save Bookmark", comment: "Save the series to bookmarks")
     }
 
     private var usesCompactDetailLayout: Bool {
@@ -632,5 +831,8 @@ struct EpisodeDetailTile: View {
 }
 
 #Preview {
-    EpisodeDetailTile(video: .init(id: 10, name: "Example Series", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil))
+    NavigationStack {
+        EpisodeDetailTile(video: .init(id: 10, name: "Example Series", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil))
+    }
+    .frame(width: 390, height: 844)
 }
