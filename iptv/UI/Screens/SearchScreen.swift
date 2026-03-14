@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct SearchScreen: View {
+    let isActive: Bool
+
     @Environment(AppContainer.self) private var appContainer
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
@@ -23,6 +25,10 @@ struct SearchScreen: View {
                 viewModel?.scheduleSearch()
             }
         )
+    }
+
+    init(isActive: Bool = true) {
+        self.isActive = isActive
     }
 
     var body: some View {
@@ -65,14 +71,18 @@ struct SearchScreen: View {
             .sheet(isPresented: $isShowingFilters) {
                 if let viewModel {
                     SearchFiltersSheet(viewModel: viewModel)
+                        .task {
+                            await viewModel.loadFacetsIfNeeded()
+                        }
                 }
             }
-            .task(id: providerStore.revision) {
+            .task(id: "\(providerStore.revision)|\(isActive)") {
                 ensureViewModel()
+                guard isActive else { return }
                 viewModel?.start()
             }
             .task(id: favoritesStore.revision) {
-                guard providerStore.hasConfiguration else { return }
+                guard isActive, providerStore.hasConfiguration else { return }
                 await viewModel?.refreshFavoritesOnly()
             }
         }
@@ -81,8 +91,8 @@ struct SearchScreen: View {
     @ViewBuilder
     private func content(for viewModel: SearchScreenViewModel) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if viewModel.indexProgress.totalCategories > 0 && !viewModel.indexProgress.isComplete {
-                Text("Indexing \(viewModel.indexProgress.indexedCategories)/\(viewModel.indexProgress.totalCategories) categories")
+            if viewModel.syncProgress.totalCategories > 0 && !viewModel.syncProgress.isComplete {
+                Text("Syncing \(viewModel.syncProgress.syncedCategories)/\(viewModel.syncProgress.totalCategories) categories")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal)

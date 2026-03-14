@@ -221,7 +221,7 @@ struct DetailAlternativeSourcesSheet<Destination: View>: View {
                     VStack(spacing: 12) {
                         Text("No other sources found.")
                             .font(.headline)
-                        Text("Try again after more categories have been indexed.")
+                        Text("Try again after more categories have been synced.")
                             .font(.body)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -357,8 +357,7 @@ func loadDetailAlternativeSources(
     let contentType = referenceVideo.xtreamContentType
     guard contentType == .vod || contentType == .series else { return [] }
 
-    let scope: SearchMediaScope = contentType == .series ? .series : .movies
-    for await _ in catalog.ensureSearchCoverage(scope: scope) {}
+    try await catalog.ensureBootstrapLoaded()
 
     let referenceTitleKey = detailAlternativeSourceTitleKey(preferredTitle)
     let referenceTMDBID = detailAlternativeSourceID(referenceVideo.tmdbId)

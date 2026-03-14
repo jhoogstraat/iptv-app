@@ -36,7 +36,6 @@ final class AppContainer {
         } else {
             resolvedModelContainer = try AppPersistence.makeModelContainer()
         }
-        Self.clearLegacySearchSnapshots(in: resolvedModelContainer)
 
         let providerStore = ProviderStore()
         let favoritesStore = FavoritesStore(
@@ -155,19 +154,5 @@ final class AppContainer {
             )
             player.load(video, url, presentation: .fullWindow, autoplay: false)
         }
-    }
-
-    private static func clearLegacySearchSnapshots(in modelContainer: ModelContainer) {
-        let context = ModelContext(modelContainer)
-
-        for record in (try? context.fetch(FetchDescriptor<PersistedSearchDocumentRecord>())) ?? [] {
-            context.delete(record)
-        }
-
-        for record in (try? context.fetch(FetchDescriptor<PersistedSearchIndexedCategoryRecord>())) ?? [] {
-            context.delete(record)
-        }
-
-        try? context.save()
     }
 }

@@ -28,7 +28,7 @@ final class SearchScreenViewModel {
     var sort: SearchSort = .relevance
     var filters: SearchFilters = .default
     var results: [SearchResultRowState] = []
-    var indexProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: .all)
+    var syncProgress = CatalogueSyncProgress(syncedCategories: 0, totalCategories: 0, scope: .all)
     var availableGenres: [String] = []
     var availableLanguages: [String] = []
     var favoriteIDs: Set<String> = []
@@ -39,6 +39,7 @@ final class SearchScreenViewModel {
     private var startupTask: Task<Void, Never>?
 
     private var latestSearchResults: [SearchResultItem] = []
+    private var loadedFacetScope: SearchMediaScope?
 
     init(
         searchService: any SearchServing,
@@ -58,7 +59,7 @@ final class SearchScreenViewModel {
             phase = .idle
             results = []
             latestSearchResults = []
-            indexProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: scope)
+            syncProgress = CatalogueSyncProgress(syncedCategories: 0, totalCategories: 0, scope: scope)
             return
         }
 
@@ -72,9 +73,7 @@ final class SearchScreenViewModel {
 
         startupTask = Task { [weak self] in
             guard let self else { return }
-            await self.refreshFacets(scope: activeScope, sessionID: activeSession)
             await self.refreshFavorites(sessionID: activeSession)
-            await self.runSearch(scope: activeScope, sessionID: activeSession)
         }
     }
 
@@ -83,7 +82,10 @@ final class SearchScreenViewModel {
         scope = newScope
         filters.genres.removeAll()
         filters.languages.removeAll()
-        indexProgress = SearchIndexProgress(indexedCategories: 0, totalCategories: 0, scope: newScope)
+        availableGenres = []
+        availableLanguages = []
+        loadedFacetScope = nil
+        syncProgress = CatalogueSyncProgress(syncedCategories: 0, totalCategories: 0, scope: newScope)
         start()
     }
 
@@ -177,13 +179,17 @@ final class SearchScreenViewModel {
     }
 
     private func consumeCoverageStream(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
-        let stream = searchService.ensureSearchCoverage(scope: requestedScope)
+        let stream = searchService.observeSyncProgress(scope: requestedScope)
         for await progress in stream {
             if Task.isCancelled { return }
             guard isCurrent(sessionID, scope: requestedScope) else { return }
-            indexProgress = progress
+            syncProgress = progress
         }
-        await refreshFacets(scope: requestedScope, sessionID: sessionID)
+    }
+
+    func loadFacetsIfNeeded() async {
+        guard loadedFacetScope != scope else { return }
+        await refreshFacets(scope: scope, sessionID: sessionID)
     }
 
     private func refreshFacets(scope requestedScope: SearchMediaScope, sessionID: UUID) async {
@@ -198,6 +204,7 @@ final class SearchScreenViewModel {
             guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             availableGenres = facets.genres
             availableLanguages = facets.languages
+            loadedFacetScope = requestedScope
         } catch {
             guard isCurrent(sessionID, scope: requestedScope), !Task.isCancelled else { return }
             availableGenres = []

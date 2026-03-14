@@ -99,6 +99,84 @@ struct SwiftDataPersistenceTests {
     }
 
     @Test
+    func searchIndexRefreshStatePersistsPerProviderAcrossInstances() async throws {
+        let container = try makeInMemoryContainer()
+        let store = SearchIndexStore(modelContainer: container)
+
+        await store.replaceCategory(
+            videos: [makeSearchSnapshot(id: 11, name: "Alpha Movie", contentType: XtreamContentType.vod.rawValue)],
+            contentType: .vod,
+            categoryID: "featured",
+            categoryName: "Featured",
+            providerFingerprint: "provider-a"
+        )
+        await store.replaceCategory(
+            videos: [makeSearchSnapshot(id: 12, name: "Beta Movie", contentType: XtreamContentType.vod.rawValue)],
+            contentType: .vod,
+            categoryID: "trending",
+            categoryName: "Trending",
+            providerFingerprint: "provider-a"
+        )
+        await store.replaceCategory(
+            videos: [makeSearchSnapshot(id: 21, name: "Gamma Movie", contentType: XtreamContentType.vod.rawValue)],
+            contentType: .vod,
+            categoryID: "featured",
+            categoryName: "Featured",
+            providerFingerprint: "provider-b"
+        )
+
+        let reloaded = SearchIndexStore(modelContainer: container)
+
+        let providerAProgress = await reloaded.progress(
+            scope: .movies,
+            providerFingerprint: "provider-a",
+            totalCategories: 3
+        )
+        let providerBProgress = await reloaded.progress(
+            scope: .movies,
+            providerFingerprint: "provider-b",
+            totalCategories: 2
+        )
+        let providerAResults = await reloaded.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider-a"
+        )
+        let providerBResults = await reloaded.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider-b"
+        )
+
+        #expect(providerAProgress.indexedCategories == 2)
+        #expect(providerBProgress.indexedCategories == 1)
+        #expect(providerAResults.map(\.video.id) == [11, 12])
+        #expect(providerBResults.map(\.video.id) == [21])
+
+        await reloaded.removeCategory(
+            contentType: .vod,
+            categoryID: "trending",
+            providerFingerprint: "provider-a"
+        )
+
+        let refreshedProviderAProgress = await store.progress(
+            scope: .movies,
+            providerFingerprint: "provider-a",
+            totalCategories: 3
+        )
+        let refreshedProviderAResults = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider-a"
+        )
+        let untouchedProviderBResults = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider-b"
+        )
+
+        #expect(refreshedProviderAProgress.indexedCategories == 1)
+        #expect(refreshedProviderAResults.map(\.video.id) == [11])
+        #expect(untouchedProviderBResults.map(\.video.id) == [21])
+    }
+
+    @Test
     func downloadsAndOfflineMetadataPersistAcrossInstances() async throws {
         let container = try makeInMemoryContainer()
         let downloadStore = DownloadStore(modelContainer: container)

@@ -289,15 +289,15 @@ struct SettingsScreen: View {
 
     private var movieCountSubtitle: String {
         guard let catalogueSummary else {
-            return providerStore.hasConfiguration ? "Counting titles while your provider is being indexed." : "Configure a provider to show catalogue size."
+            return providerStore.hasConfiguration ? "Counting titles while your provider is being synced." : "Configure a provider to show catalogue size."
         }
 
         if catalogueSummary.totalMovieCategories == 0 {
             return "No movie categories found yet."
         }
 
-        if catalogueSummary.indexedMovieCategories < catalogueSummary.totalMovieCategories {
-            return "\(catalogueSummary.indexedMovieCategories) of \(catalogueSummary.totalMovieCategories) movie categories indexed so far"
+        if catalogueSummary.syncedMovieCategories < catalogueSummary.totalMovieCategories {
+            return "\(catalogueSummary.syncedMovieCategories) of \(catalogueSummary.totalMovieCategories) movie categories synced so far"
         }
 
         return "Included in your provider"
@@ -305,15 +305,15 @@ struct SettingsScreen: View {
 
     private var seriesCountSubtitle: String {
         guard let catalogueSummary else {
-            return providerStore.hasConfiguration ? "Counting titles while your provider is being indexed." : "Configure a provider to show catalogue size."
+            return providerStore.hasConfiguration ? "Counting titles while your provider is being synced." : "Configure a provider to show catalogue size."
         }
 
         if catalogueSummary.totalSeriesCategories == 0 {
             return "No series categories found yet."
         }
 
-        if catalogueSummary.indexedSeriesCategories < catalogueSummary.totalSeriesCategories {
-            return "\(catalogueSummary.indexedSeriesCategories) of \(catalogueSummary.totalSeriesCategories) series categories indexed so far"
+        if catalogueSummary.syncedSeriesCategories < catalogueSummary.totalSeriesCategories {
+            return "\(catalogueSummary.syncedSeriesCategories) of \(catalogueSummary.totalSeriesCategories) series categories synced so far"
         }
 
         return "Included in your provider"
@@ -402,7 +402,7 @@ struct SettingsScreen: View {
         } header: {
             Text("Library Organization")
         } footer: {
-            Text("All detected prefixes start visible. Deselect a prefix to hide matching categories across browse, search indexing, and recommendations.")
+            Text("All detected prefixes start visible. Deselect a prefix to hide matching categories across browse, search, and recommendations.")
         }
     }
 

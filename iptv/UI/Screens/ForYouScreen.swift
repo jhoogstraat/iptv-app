@@ -9,6 +9,8 @@ import SwiftUI
 import OSLog
 
 struct ForYouScreen: View {
+    let isActive: Bool
+
     @Environment(AppContainer.self) private var appContainer
     @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(ProviderStore.self) private var providerStore
@@ -18,6 +20,10 @@ struct ForYouScreen: View {
     @State private var isPresentingSettings = false
     @State private var selectedDetailVideo: Video?
     @State private var playError: String?
+
+    init(isActive: Bool = true) {
+        self.isActive = isActive
+    }
 
     var body: some View {
         NavigationStack {
@@ -64,8 +70,9 @@ struct ForYouScreen: View {
                 }
             }
         }
-        .task(id: providerStore.revision) {
+        .task(id: "\(providerStore.revision)|\(isActive)") {
             ensureViewModel()
+            guard isActive else { return }
 
             guard providerStore.hasConfiguration else {
                 await MainActor.run {

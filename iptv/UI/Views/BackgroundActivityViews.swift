@@ -28,11 +28,11 @@ private enum CatalogueArea: String, CaseIterable, Identifiable {
     var idleSubtitle: String {
         switch self {
         case .movies:
-            return "Waiting to index your movie catalogue."
+            return "Waiting to sync your movie catalogue."
         case .series:
-            return "Waiting to index your series catalogue and episodes."
+            return "Waiting to sync your series catalogue and episodes."
         case .liveTV:
-            return "Live TV indexing is not available in this version."
+            return "Live TV sync is not available in this version."
         }
     }
 }
@@ -99,12 +99,12 @@ private struct CatalogueStatusSnapshot {
             return "Waiting for internet"
         }
         if hasPausedWork {
-            return "Catalogue indexing paused"
+            return "Catalogue sync paused"
         }
         if hasFailure && !hasActiveWork {
-            return "Catalogue indexing needs attention"
+            return "Catalogue sync needs attention"
         }
-        return "Catalogue indexing in progress"
+        return "Catalogue sync in progress"
     }
 
     var accessibilityValue: String {
@@ -114,7 +114,7 @@ private struct CatalogueStatusSnapshot {
         if let failureRow = rows.first(where: { $0.status == .failure }) {
             return "\(failureRow.title): \(failureRow.subtitle)"
         }
-        return "No catalogue indexing in progress"
+        return "No catalogue sync in progress"
     }
 
     private static func makeRow(
@@ -175,12 +175,14 @@ private struct CatalogueStatusSnapshot {
         let id = activity.id.lowercased()
         var result = Set<CatalogueArea>()
 
-        if id.hasPrefix("background-index:movies") {
+        if id.hasPrefix("background-refresh:movies") {
             result.insert(.movies)
-        } else if id.hasPrefix("background-index:series") {
+        } else if id.hasPrefix("background-refresh:series") {
             result.insert(.series)
-        } else if id.hasPrefix("background-index:live") {
+        } else if id.hasPrefix("background-refresh:live") {
             result.insert(.liveTV)
+        } else if id.hasPrefix("background-refresh:") {
+            result.formUnion([.movies, .series])
         }
 
         return result
@@ -251,7 +253,7 @@ private struct CatalogueStatusSnapshot {
             return progressText
         }
 
-        return "Indexing your provider"
+        return "Syncing your provider"
     }
 
     private static func terminalSubtitle(
@@ -296,6 +298,7 @@ private struct CatalogueStatusSnapshot {
             lowercased.hasPrefix("updating ") ||
             lowercased.hasPrefix("organising ") ||
             lowercased.hasPrefix("indexing ") ||
+            lowercased.hasPrefix("syncing ") ||
             lowercased.hasPrefix("processing ") ||
             lowercased.hasPrefix("waiting ") ||
             lowercased == "up to date" {
@@ -386,7 +389,7 @@ struct BackgroundActivityDetailsScreen: View {
 
             controlsSection
         }
-        .navigationTitle("Catalogue Indexing")
+        .navigationTitle("Catalogue Sync")
         #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -401,11 +404,11 @@ struct BackgroundActivityDetailsScreen: View {
 
     private var controlsSection: some View {
         Section("Controls") {
-            Button(activityCenter.isPaused ? "Resume catalogue indexing" : "Pause catalogue indexing") {
+            Button(activityCenter.isPaused ? "Resume catalogue sync" : "Pause catalogue sync") {
                 activityCenter.isPaused.toggle()
             }
 
-            Button(isRestarting ? "Restarting catalogue indexing..." : "Restart catalogue indexing") {
+            Button(isRestarting ? "Restarting catalogue sync..." : "Restart catalogue sync") {
                 Task { await restartCatalogueUpdate() }
             }
             .disabled(isRestarting)

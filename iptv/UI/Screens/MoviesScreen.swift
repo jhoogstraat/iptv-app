@@ -15,6 +15,7 @@ struct MoviesScreen: View {
     }
 
     let contentType: XtreamContentType
+    let isActive: Bool
 
     @Environment(AppContainer.self) private var appContainer
     @Environment(Catalog.self) private var catalog
@@ -23,8 +24,9 @@ struct MoviesScreen: View {
     @State private var viewModel: MoviesScreenViewModel?
     @State private var isPresentingSettings = false
 
-    init(contentType: XtreamContentType = .vod) {
+    init(contentType: XtreamContentType = .vod, isActive: Bool = true) {
         self.contentType = contentType
+        self.isActive = isActive
     }
 
     var body: some View {
@@ -68,8 +70,9 @@ struct MoviesScreen: View {
             }
             #endif
         }
-        .task(id: providerStore.revision) {
+        .task(id: "\(providerStore.revision)|\(contentType.rawValue)|\(isActive)") {
             ensureViewModel()
+            guard isActive else { return }
 
             guard providerStore.hasConfiguration else {
                 viewModel?.reset()

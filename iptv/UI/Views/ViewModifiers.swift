@@ -77,9 +77,7 @@ private struct BackgroundActivityToolbarModifier: ViewModifier {
 
     private func isCatalogueIndexActivity(_ activity: BackgroundActivity) -> Bool {
         let id = activity.id.lowercased()
-        return id.hasPrefix("background-index:movies")
-            || id.hasPrefix("background-index:series")
-            || id.hasPrefix("background-index:live")
+        return id.hasPrefix("background-refresh:")
     }
 }
 #endif

@@ -78,37 +78,68 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
                 }
             )
         )
-        for record in existing {
-            context.delete(record)
-        }
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        var retainedRecordIDs = Set<String>()
 
         for (index, video) in entry.videos.enumerated() {
-            context.insert(
-                PersistedStreamRecord(
-                    id: Self.recordID(for: key, videoID: video.id),
-                    providerFingerprint: key.providerFingerprint,
-                    contentType: key.contentType.rawValue,
-                    categoryID: key.categoryID,
-                    categoryName: categoryName,
-                    normalizedCategoryName: normalizedCategoryName,
-                    pageToken: key.pageToken,
-                    videoID: video.id,
-                    sortIndex: index,
-                    name: video.name,
-                    normalizedTitle: Self.normalize(video.name),
-                    language: Self.languageCode(from: video.name),
-                    normalizedLanguage: Self.languageCode(from: video.name).map(Self.normalize),
-                    containerExtension: video.containerExtension,
-                    playbackContentType: video.contentType,
-                    coverImageURL: video.coverImageURL,
-                    tmdbId: video.tmdbId,
-                    rating: video.rating,
-                    addedAtRaw: video.added,
-                    addedAt: Self.parseDate(video.added),
-                    savedAt: entry.savedAt,
-                    lastAccessAt: entry.lastAccessAt
+            let recordID = Self.recordID(for: key, videoID: video.id)
+            retainedRecordIDs.insert(recordID)
+
+            let language = Self.languageCode(from: video.name)
+            if let record = existingByID[recordID] {
+                record.providerFingerprint = key.providerFingerprint
+                record.contentType = key.contentType.rawValue
+                record.categoryID = key.categoryID
+                record.categoryName = categoryName
+                record.normalizedCategoryName = normalizedCategoryName
+                record.pageToken = key.pageToken
+                record.videoID = video.id
+                record.sortIndex = index
+                record.name = video.name
+                record.normalizedTitle = Self.normalize(video.name)
+                record.language = language
+                record.normalizedLanguage = language.map(Self.normalize)
+                record.containerExtension = video.containerExtension
+                record.playbackContentType = video.contentType
+                record.coverImageURL = video.coverImageURL
+                record.tmdbId = video.tmdbId
+                record.rating = video.rating
+                record.addedAtRaw = video.added
+                record.addedAt = Self.parseDate(video.added)
+                record.savedAt = entry.savedAt
+                record.lastAccessAt = entry.lastAccessAt
+            } else {
+                context.insert(
+                    PersistedStreamRecord(
+                        id: recordID,
+                        providerFingerprint: key.providerFingerprint,
+                        contentType: key.contentType.rawValue,
+                        categoryID: key.categoryID,
+                        categoryName: categoryName,
+                        normalizedCategoryName: normalizedCategoryName,
+                        pageToken: key.pageToken,
+                        videoID: video.id,
+                        sortIndex: index,
+                        name: video.name,
+                        normalizedTitle: Self.normalize(video.name),
+                        language: language,
+                        normalizedLanguage: language.map(Self.normalize),
+                        containerExtension: video.containerExtension,
+                        playbackContentType: video.contentType,
+                        coverImageURL: video.coverImageURL,
+                        tmdbId: video.tmdbId,
+                        rating: video.rating,
+                        addedAtRaw: video.added,
+                        addedAt: Self.parseDate(video.added),
+                        savedAt: entry.savedAt,
+                        lastAccessAt: entry.lastAccessAt
+                    )
                 )
-            )
+            }
+        }
+
+        for record in existing where !retainedRecordIDs.contains(record.id) {
+            context.delete(record)
         }
 
         try context.save()
@@ -351,28 +382,43 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
                     }
                 )
             )
-            for record in existing {
+            let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+            let categories = try JSONDecoder().decode([CachedCategoryDTO].self, from: entry.payload)
+            var retainedRecordIDs = Set<String>()
+            for (index, category) in categories.enumerated() {
+                let recordID = Self.categoryRecordID(
+                    providerFingerprint: providerFingerprint,
+                    contentType: contentType,
+                    categoryID: category.id
+                )
+                retainedRecordIDs.insert(recordID)
+
+                if let record = existingByID[recordID] {
+                    record.providerFingerprint = providerFingerprint
+                    record.contentType = contentType
+                    record.categoryID = category.id
+                    record.name = category.name
+                    record.sortIndex = index
+                    record.updatedAt = entry.savedAt
+                } else {
+                    context.insert(
+                        PersistedCategoryRecord(
+                            id: recordID,
+                            providerFingerprint: providerFingerprint,
+                            contentType: contentType,
+                            categoryID: category.id,
+                            name: category.name,
+                            sortIndex: index,
+                            updatedAt: entry.savedAt
+                        )
+                    )
+                }
+            }
+
+            for record in existing where !retainedRecordIDs.contains(record.id) {
                 context.delete(record)
             }
 
-            let categories = try JSONDecoder().decode([CachedCategoryDTO].self, from: entry.payload)
-            for (index, category) in categories.enumerated() {
-                context.insert(
-                    PersistedCategoryRecord(
-                        id: Self.categoryRecordID(
-                            providerFingerprint: providerFingerprint,
-                            contentType: contentType,
-                            categoryID: category.id
-                        ),
-                        providerFingerprint: providerFingerprint,
-                        contentType: contentType,
-                        categoryID: category.id,
-                        name: category.name,
-                        sortIndex: index,
-                        updatedAt: entry.savedAt
-                    )
-                )
-            }
             try updateStreamCategoryMetadata(
                 providerFingerprint: providerFingerprint,
                 contentType: contentType,

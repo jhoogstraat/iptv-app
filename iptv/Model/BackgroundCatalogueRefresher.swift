@@ -18,7 +18,7 @@ struct BackgroundCatalogueRefreshTarget: Hashable, Sendable {
 actor BackgroundCatalogueRefresher {
     private struct Observer {
         let scope: SearchMediaScope
-        let continuation: AsyncStream<SearchIndexProgress>.Continuation
+        let continuation: AsyncStream<CatalogueSyncProgress>.Continuation
     }
 
     private let startupDelay: Duration
@@ -30,8 +30,8 @@ actor BackgroundCatalogueRefresher {
     private var observers: [UUID: Observer] = [:]
 
     init(
-        startupDelay: Duration = .seconds(5),
-        interRequestDelay: Duration = .seconds(2),
+        startupDelay: Duration = .seconds(20),
+        interRequestDelay: Duration = .seconds(30),
         idleDelay: Duration = .seconds(30)
     ) {
         self.startupDelay = startupDelay
@@ -41,10 +41,10 @@ actor BackgroundCatalogueRefresher {
 
     func start(
         providerFingerprint: String,
-        ensureBootstrap: @escaping @MainActor () async throws -> Void,
-        nextTargets: @escaping @MainActor (String) async -> [BackgroundCatalogueRefreshTarget],
-        refresh: @escaping @MainActor (BackgroundCatalogueRefreshTarget) async throws -> Void,
-        progress: @escaping @MainActor (SearchMediaScope, String) async -> SearchIndexProgress
+        ensureBootstrap: @escaping @Sendable () async throws -> Void,
+        nextTarget: @escaping @Sendable () async throws -> BackgroundCatalogueRefreshTarget?,
+        refresh: @escaping @Sendable (BackgroundCatalogueRefreshTarget) async throws -> Void,
+        progress: @escaping @Sendable (SearchMediaScope, String) async -> CatalogueSyncProgress
     ) {
         guard currentProviderFingerprint != providerFingerprint || loopTask == nil else { return }
 
@@ -59,18 +59,15 @@ actor BackgroundCatalogueRefresher {
                     try await ensureBootstrap()
                     await emitProgress(providerFingerprint: providerFingerprint, provider: progress)
 
-                    let targets = await nextTargets(providerFingerprint)
-                    guard !targets.isEmpty else {
+                    guard let target = try await nextTarget() else {
                         try await Task.sleep(for: idleDelay)
                         continue
                     }
 
-                    for target in targets {
-                        try Task.checkCancellation()
-                        try await refresh(target)
-                        await emitProgress(providerFingerprint: providerFingerprint, provider: progress)
-                        try await Task.sleep(for: interRequestDelay)
-                    }
+                    try Task.checkCancellation()
+                    try await refresh(target)
+                    await emitProgress(providerFingerprint: providerFingerprint, provider: progress)
+                    try await Task.sleep(for: interRequestDelay)
                 } catch is CancellationError {
                     return
                 } catch {
@@ -90,8 +87,8 @@ actor BackgroundCatalogueRefresher {
     func observeProgress(
         scope: SearchMediaScope,
         providerFingerprint: String,
-        progress: @escaping @MainActor (SearchMediaScope, String) async -> SearchIndexProgress
-    ) -> AsyncStream<SearchIndexProgress> {
+        progress: @escaping @Sendable (SearchMediaScope, String) async -> CatalogueSyncProgress
+    ) -> AsyncStream<CatalogueSyncProgress> {
         AsyncStream { continuation in
             let id = UUID()
             observers[id] = Observer(scope: scope, continuation: continuation)
@@ -114,7 +111,7 @@ actor BackgroundCatalogueRefresher {
 
     private func emitProgress(
         providerFingerprint: String,
-        provider: @escaping @MainActor (SearchMediaScope, String) async -> SearchIndexProgress
+        provider: @escaping @Sendable (SearchMediaScope, String) async -> CatalogueSyncProgress
     ) async {
         for observer in observers.values {
             let value = await provider(observer.scope, providerFingerprint)

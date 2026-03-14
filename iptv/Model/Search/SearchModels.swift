@@ -23,7 +23,7 @@ enum SearchMediaScope: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    var acceptedContentTypes: Set<XtreamContentType> {
+    nonisolated var acceptedContentTypes: Set<XtreamContentType> {
         switch self {
         case .all:
             [.vod, .series]
@@ -238,20 +238,36 @@ struct SearchResultRowState: Identifiable {
     }
 }
 
-struct SearchIndexProgress: Hashable, Sendable {
-    let indexedCategories: Int
+struct CatalogueSyncProgress: Hashable, Sendable {
+    let syncedCategories: Int
     let totalCategories: Int
     let scope: SearchMediaScope
 
+    nonisolated init(syncedCategories: Int, totalCategories: Int, scope: SearchMediaScope) {
+        self.syncedCategories = syncedCategories
+        self.totalCategories = totalCategories
+        self.scope = scope
+    }
+
+    nonisolated init(indexedCategories: Int, totalCategories: Int, scope: SearchMediaScope) {
+        self.init(syncedCategories: indexedCategories, totalCategories: totalCategories, scope: scope)
+    }
+
     var fractionComplete: Double {
         guard totalCategories > 0 else { return 1 }
-        return min(max(Double(indexedCategories) / Double(totalCategories), 0), 1)
+        return min(max(Double(syncedCategories) / Double(totalCategories), 0), 1)
+    }
+
+    nonisolated var indexedCategories: Int {
+        syncedCategories
     }
 
     var isComplete: Bool {
-        totalCategories > 0 && indexedCategories >= totalCategories
+        totalCategories > 0 && syncedCategories >= totalCategories
     }
 }
+
+typealias SearchIndexProgress = CatalogueSyncProgress
 
 struct SearchFacetValues: Hashable, Sendable {
     let genres: [String]
@@ -261,15 +277,57 @@ struct SearchFacetValues: Hashable, Sendable {
 struct ProviderCatalogueSummary: Hashable, Sendable {
     let movieCount: Int
     let seriesCount: Int
-    let indexedMovieCategories: Int
+    let syncedMovieCategories: Int
     let totalMovieCategories: Int
-    let indexedSeriesCategories: Int
+    let syncedSeriesCategories: Int
     let totalSeriesCategories: Int
 
+    nonisolated init(
+        movieCount: Int,
+        seriesCount: Int,
+        syncedMovieCategories: Int,
+        totalMovieCategories: Int,
+        syncedSeriesCategories: Int,
+        totalSeriesCategories: Int
+    ) {
+        self.movieCount = movieCount
+        self.seriesCount = seriesCount
+        self.syncedMovieCategories = syncedMovieCategories
+        self.totalMovieCategories = totalMovieCategories
+        self.syncedSeriesCategories = syncedSeriesCategories
+        self.totalSeriesCategories = totalSeriesCategories
+    }
+
+    nonisolated init(
+        movieCount: Int,
+        seriesCount: Int,
+        indexedMovieCategories: Int,
+        totalMovieCategories: Int,
+        indexedSeriesCategories: Int,
+        totalSeriesCategories: Int
+    ) {
+        self.init(
+            movieCount: movieCount,
+            seriesCount: seriesCount,
+            syncedMovieCategories: indexedMovieCategories,
+            totalMovieCategories: totalMovieCategories,
+            syncedSeriesCategories: indexedSeriesCategories,
+            totalSeriesCategories: totalSeriesCategories
+        )
+    }
+
     var isComplete: Bool {
-        indexedMovieCategories >= totalMovieCategories &&
-        indexedSeriesCategories >= totalSeriesCategories &&
+        syncedMovieCategories >= totalMovieCategories &&
+        syncedSeriesCategories >= totalSeriesCategories &&
         totalMovieCategories > 0 &&
         totalSeriesCategories > 0
+    }
+
+    nonisolated var indexedMovieCategories: Int {
+        syncedMovieCategories
+    }
+
+    nonisolated var indexedSeriesCategories: Int {
+        syncedSeriesCategories
     }
 }

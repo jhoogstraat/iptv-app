@@ -11,7 +11,8 @@ import Foundation
 protocol SearchServing: AnyObject {
     func search(_ query: SearchQuery) async throws -> [SearchResultItem]
     func searchFacetValues(scope: SearchMediaScope) async throws -> SearchFacetValues
-    func ensureSearchCoverage(scope: SearchMediaScope) -> AsyncStream<SearchIndexProgress>
+    func observeSyncProgress(scope: SearchMediaScope) -> AsyncStream<CatalogueSyncProgress>
+    func ensureBootstrapLoaded() async throws
 }
 
 extension Catalog: SearchServing {}

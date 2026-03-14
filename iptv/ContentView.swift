@@ -35,7 +35,7 @@ struct ContentView: View {
             } else {
                 TabView(selection: $selectedTab) {
                     Tab(Tabs.home.name, systemImage: Tabs.home.symbol, value: .home) {
-                        ForYouScreen()
+                        ForYouScreen(isActive: selectedTab == .home)
                     }
                     .customizationID(Tabs.home.customizationID)
                     #if !os(macOS) && !os(tvOS)
@@ -43,7 +43,7 @@ struct ContentView: View {
                     #endif
 
                     Tab(value: Tabs.search, role: .search) {
-                        SearchScreen()
+                        SearchScreen(isActive: selectedTab == .search)
                     }
                     .customizationID(Tabs.search.customizationID)
                     #if !os(macOS) && !os(tvOS)
@@ -52,12 +52,12 @@ struct ContentView: View {
 
                     TabSection("Watch") {
                         Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
-                            MoviesScreen()
+                            MoviesScreen(isActive: selectedTab == .movies)
                         }
                         .customizationID(Tabs.movies.customizationID)
 
                         Tab(Tabs.series.name, systemImage: Tabs.series.symbol, value: Tabs.series) {
-                            MoviesScreen(contentType: .series)
+                            MoviesScreen(contentType: .series, isActive: selectedTab == .series)
                         }
                         .customizationID(Tabs.series.customizationID)
 

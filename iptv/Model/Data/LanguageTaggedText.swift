@@ -16,7 +16,7 @@ struct LanguageTaggedText {
 
     private let trailingLanguageCode: String?
 
-    init(_ rawValue: String) {
+    nonisolated init(_ rawValue: String) {
         self.rawValue = rawValue
         self.trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -62,15 +62,15 @@ struct LanguageTaggedText {
         }
     }
 
-    var languageCode: String? {
+    nonisolated var languageCode: String? {
         prefixLanguageCode ?? trailingLanguageCode
     }
 
-    var groupedDisplayName: String {
+    nonisolated var groupedDisplayName: String {
         strippedPrefixValue ?? trimmedValue
     }
 
-    var displayName: String {
+    nonisolated var displayName: String {
         strippedPrefixValue ?? strippedSuffixValue ?? trimmedValue
     }
 }
