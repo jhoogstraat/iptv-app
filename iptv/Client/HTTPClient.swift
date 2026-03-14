@@ -30,8 +30,8 @@ extension NetworkError: LocalizedError {
                 return NSLocalizedString("Invalid response", comment: "invalidResponse")
             case .invalidURL:
                 return NSLocalizedString("Invalid URL", comment: "invalidURL")
-            case .httpError(_):
-                return NSLocalizedString("Bad request", comment: "badRequest")
+            case .httpError(let code):
+                return NSLocalizedString("Bad request (code \(code))", comment: "badRequest")
         }
     }
     
