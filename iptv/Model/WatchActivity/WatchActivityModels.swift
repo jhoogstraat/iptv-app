@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct WatchActivityInput: Hashable, Sendable {
+nonisolated struct WatchActivityInput: Hashable, Sendable {
     let videoID: Int
     let contentType: String
     let title: String
@@ -16,7 +16,7 @@ struct WatchActivityInput: Hashable, Sendable {
     let rating: Double?
 }
 
-struct WatchProgressSnapshot: Hashable, Sendable {
+nonisolated struct WatchProgressSnapshot: Hashable, Sendable {
     let lastPositionSeconds: Double
     let durationSeconds: Double?
     let progressFraction: Double
@@ -29,7 +29,7 @@ struct WatchProgressSnapshot: Hashable, Sendable {
     }
 }
 
-struct WatchActivityRecord: Codable, Hashable, Sendable {
+nonisolated struct WatchActivityRecord: Codable, Hashable, Sendable {
     let providerFingerprint: String
     let videoID: Int
     let contentType: String

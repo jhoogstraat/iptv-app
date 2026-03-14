@@ -359,7 +359,7 @@ final class Catalog {
 
     private func loadCategories(
         contentType: XtreamContentType,
-        kind _: CatalogMetadataKind,
+        kind: CatalogMetadataKind,
         policy: CatalogLoadPolicy
     ) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }

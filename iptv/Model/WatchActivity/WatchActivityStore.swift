@@ -8,7 +8,7 @@
 import Foundation
 import OSLog
 
-protocol WatchActivityStoring: Sendable {
+nonisolated protocol WatchActivityStoring: Sendable {
     func loadAll() async -> [WatchActivityRecord]
     func recordProgress(input: WatchActivityInput, providerFingerprint: String, currentTime: Double, duration: Double?) async
     func markCompleted(input: WatchActivityInput, providerFingerprint: String) async

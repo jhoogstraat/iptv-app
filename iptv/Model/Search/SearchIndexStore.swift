@@ -8,7 +8,7 @@
 import Foundation
 import SwiftData
 
-protocol SearchIndexSnapshotStore: Sendable {
+nonisolated protocol SearchIndexSnapshotStore: Sendable {
     func load(providerFingerprint: String) async throws -> SearchIndexStore.ProviderIndex?
     func save(_ index: SearchIndexStore.ProviderIndex, providerFingerprint: String) async throws
     func remove(providerFingerprint: String) async throws
@@ -239,7 +239,7 @@ actor SearchIndexStore {
             self.directoryURL = baseDirectory.appending(path: "SearchIndexSnapshots", directoryHint: .isDirectory)
         }
 
-        fileprivate func load(providerFingerprint: String) async throws -> ProviderIndex? {
+        func load(providerFingerprint: String) async throws -> ProviderIndex? {
             try ensureDirectoryExists()
 
             let fileURL = fileURL(for: providerFingerprint)
@@ -260,20 +260,20 @@ actor SearchIndexStore {
             }
         }
 
-        fileprivate func save(_ index: ProviderIndex, providerFingerprint: String) async throws {
+        func save(_ index: ProviderIndex, providerFingerprint: String) async throws {
             try ensureDirectoryExists()
             let snapshot = ProviderIndexSnapshot(providerFingerprint: providerFingerprint, index: index)
             let data = try encoder.encode(snapshot)
             try data.write(to: fileURL(for: providerFingerprint), options: [.atomic])
         }
 
-        fileprivate func remove(providerFingerprint: String) async throws {
+        func remove(providerFingerprint: String) async throws {
             let fileURL = fileURL(for: providerFingerprint)
             guard fileManager.fileExists(atPath: fileURL.path()) else { return }
             try? fileManager.removeItem(at: fileURL)
         }
 
-        fileprivate func removeAll() async throws {
+        func removeAll() async throws {
             guard fileManager.fileExists(atPath: directoryURL.path()) else { return }
             let files = try fileManager.contentsOfDirectory(
                 at: directoryURL,
