@@ -338,6 +338,9 @@ struct BackgroundActivityIndicatorView: View {
                 NavigationStack {
                     BackgroundActivityDetailsScreen(activityCenter: activityCenter)
                 }
+                #if os(macOS)
+                .frame(minWidth: 440, idealWidth: 480, minHeight: 320, idealHeight: 380)
+                #endif
             }
         }
     }
