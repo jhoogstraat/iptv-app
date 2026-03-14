@@ -770,6 +770,8 @@ private enum DetailActionSize: Equatable {
         switch self {
         case .regular:
             0
+        case .compact:
+            0
         case .icon:
             0
         case .chip:

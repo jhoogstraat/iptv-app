@@ -523,16 +523,6 @@ struct EpisodeDetailTile: View {
         )
     }
 
-    private func episodeMetaText(for episode: XtreamEpisode) -> String {
-        [
-            episodeShortLabel(for: episode),
-            normalizedText(episode.info.duration),
-            normalizedText(episode.info.airDate)
-        ]
-        .compactMap { $0 }
-        .joined(separator: " • ")
-    }
-
     private func scoreBadges(for seriesInfo: XtreamSeries) -> [DetailScoreBadgeModel] {
         [
             DetailScoreSource.catalog.badgeModel(text: normalizedText(seriesInfo.info.rating))
@@ -753,6 +743,78 @@ struct EpisodeDetailTile: View {
         String(localized: "Episode \(episode.episodeNum)", locale: contentLocale, comment: "Episode card title label")
     }
 
+    private func episodeRuntimeText(for episode: XtreamEpisode, seriesInfo: XtreamSeries) -> String? {
+        if let durationSeconds = episode.info.durationSecs {
+            return friendlyDurationText(seconds: Double(durationSeconds))
+        }
+
+        if let duration = normalizedText(episode.info.duration),
+           let parsedSeconds = parseDurationSeconds(duration) {
+            return friendlyDurationText(seconds: parsedSeconds)
+        }
+
+        if let fallbackMinutes = Int(normalizedText(seriesInfo.info.episodeRunTime) ?? "") {
+            return friendlyDurationText(seconds: Double(fallbackMinutes * 60))
+        }
+
+        return nil
+    }
+
+    private func episodeAirDateText(for episode: XtreamEpisode) -> String? {
+        yearText(from: normalizedText(episode.info.airDate))
+    }
+
+    private func episodeProgress(for episode: XtreamEpisode) -> WatchProgressSnapshot? {
+        episodeProgressByID[episodeID(for: episode)]
+    }
+
+    private func progressStatusText(_ progress: WatchProgressSnapshot?) -> String {
+        guard let progress else {
+            return "Not started"
+        }
+
+        if progress.isCompleted {
+            return "Completed"
+        }
+
+        if let remaining = progress.remainingSeconds {
+            return "\(friendlyDurationText(seconds: remaining)) left"
+        }
+
+        return "\(Int(progress.progressFraction * 100))% watched"
+    }
+
+    private func friendlyDurationText(seconds: Double) -> String {
+        let totalMinutes = max(Int(seconds / 60), 1)
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+
+        if hours > 0 {
+            return minutes == 0 ? "\(hours)h" : "\(hours)h \(minutes)min"
+        }
+
+        return "\(totalMinutes)min"
+    }
+
+    private func parseDurationSeconds(_ duration: String) -> Double? {
+        let components = duration
+            .split(separator: ":")
+            .compactMap { Int($0) }
+
+        guard !components.isEmpty else { return nil }
+
+        switch components.count {
+        case 3:
+            return Double((components[0] * 3600) + (components[1] * 60) + components[2])
+        case 2:
+            return Double((components[0] * 60) + components[1])
+        case 1:
+            return Double(components[0] * 60)
+        default:
+            return nil
+        }
+    }
+
     private func playSelectedEpisode(from seriesInfo: XtreamSeries) {
         guard let episode = selectedEpisode(from: seriesInfo) else { return }
         selectedEpisodeID = episodeID(for: episode)
@@ -861,6 +923,24 @@ struct EpisodeDetailTile: View {
         let targetState = !isFavorite
         await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: targetState)
         isFavorite = targetState
+    }
+
+    private func loadEpisodeProgressState() async {
+        guard let config = try? providerStore.requiredConfiguration() else {
+            episodeProgressByID = [:]
+            return
+        }
+
+        let providerFingerprint = ProviderCacheFingerprint.make(from: config)
+        let records = await DiskWatchActivityStore.shared.loadAll()
+        let relevantRecords = records.filter {
+            $0.providerFingerprint == providerFingerprint
+                && $0.contentType == XtreamContentType.series.rawValue
+        }
+
+        episodeProgressByID = Dictionary(
+            uniqueKeysWithValues: relevantRecords.map { ($0.videoID, $0.progress) }
+        )
     }
 
     private func triggerOtherSourcesLookup() {
