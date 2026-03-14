@@ -13,11 +13,7 @@ import SwiftUI
 /// A modifier that creates the a model container for the preview data.
 struct PreviewData: PreviewModifier {
     static func makeSharedContext() throws -> ModelContainer {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        let container = try ModelContainer(
-            for: Video.self, Category.self,
-            configurations: config
-        )
+        let container = try AppPersistence.makeModelContainer(isStoredInMemoryOnly: true)
 //        try Importer.importVideoMetadata(into: container.mainContext, isPreview: true)
         return container
     }

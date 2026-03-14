@@ -7,10 +7,192 @@
 
 import Foundation
 import OSLog
+import SwiftData
 
 private struct DownloadStoreSnapshot: Codable {
     let groups: [DownloadGroupRecord]
     let assets: [DownloadAssetRecord]
+}
+
+private protocol DownloadStorePersistence: Sendable {
+    func load() async throws -> DownloadStoreSnapshot?
+    func save(_ snapshot: DownloadStoreSnapshot) async throws
+}
+
+private actor FileDownloadStorePersistence: DownloadStorePersistence {
+    private let fileURL: URL
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    func load() async throws -> DownloadStoreSnapshot? {
+        let directoryURL = fileURL.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: directoryURL.path()) {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        }
+
+        guard FileManager.default.fileExists(atPath: fileURL.path()) else {
+            return nil
+        }
+
+        let data = try Data(contentsOf: fileURL)
+        return try JSONDecoder().decode(DownloadStoreSnapshot.self, from: data)
+    }
+
+    func save(_ snapshot: DownloadStoreSnapshot) async throws {
+        let directoryURL = fileURL.deletingLastPathComponent()
+        if !FileManager.default.fileExists(atPath: directoryURL.path()) {
+            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        }
+
+        let data = try JSONEncoder().encode(snapshot)
+        try data.write(to: fileURL, options: [.atomic])
+    }
+}
+
+private actor SwiftDataDownloadStorePersistence: DownloadStorePersistence {
+    private let modelContainer: ModelContainer
+
+    init(modelContainer: ModelContainer) {
+        self.modelContainer = modelContainer
+    }
+
+    func load() async throws -> DownloadStoreSnapshot? {
+        let context = ModelContext(modelContainer)
+        let groups = try context.fetch(
+            FetchDescriptor<PersistedDownloadGroupStoreRecord>(
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        ).compactMap(Self.groupRecord(from:))
+
+        let assets = try context.fetch(
+            FetchDescriptor<PersistedDownloadAssetStoreRecord>(
+                sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+            )
+        ).compactMap(Self.assetRecord(from:))
+
+        guard !groups.isEmpty || !assets.isEmpty else { return nil }
+        return DownloadStoreSnapshot(groups: groups, assets: assets)
+    }
+
+    func save(_ snapshot: DownloadStoreSnapshot) async throws {
+        let context = ModelContext(modelContainer)
+        for record in try context.fetch(FetchDescriptor<PersistedDownloadGroupStoreRecord>()) {
+            context.delete(record)
+        }
+        for record in try context.fetch(FetchDescriptor<PersistedDownloadAssetStoreRecord>()) {
+            context.delete(record)
+        }
+
+        for group in snapshot.groups {
+            context.insert(
+                PersistedDownloadGroupStoreRecord(
+                    id: group.id,
+                    scopeProfileID: group.scope.profileID,
+                    scopeProviderFingerprint: group.scope.providerFingerprint,
+                    kind: group.kind.rawValue,
+                    title: group.title,
+                    parentVideoID: group.parentVideoID,
+                    contentType: group.contentType,
+                    coverImageURL: group.coverImageURL,
+                    childAssetIDs: group.childAssetIDs,
+                    status: group.status.rawValue,
+                    completedAssetCount: group.completedAssetCount,
+                    totalAssetCount: group.totalAssetCount,
+                    bytesWritten: group.bytesWritten,
+                    expectedBytes: group.expectedBytes,
+                    createdAt: group.createdAt,
+                    updatedAt: group.updatedAt
+                )
+            )
+        }
+
+        for asset in snapshot.assets {
+            context.insert(
+                PersistedDownloadAssetStoreRecord(
+                    id: asset.id,
+                    scopeProfileID: asset.scope.profileID,
+                    scopeProviderFingerprint: asset.scope.providerFingerprint,
+                    videoID: asset.videoID,
+                    contentType: asset.contentType,
+                    title: asset.title,
+                    coverImageURL: asset.coverImageURL,
+                    containerExtension: asset.containerExtension,
+                    seriesID: asset.seriesID,
+                    seasonNumber: asset.seasonNumber,
+                    remoteURL: asset.remoteURL.absoluteString,
+                    localURL: asset.localURL?.absoluteString,
+                    resumeDataURL: asset.resumeDataURL?.absoluteString,
+                    status: asset.status.rawValue,
+                    bytesWritten: asset.bytesWritten,
+                    expectedBytes: asset.expectedBytes,
+                    attemptCount: asset.attemptCount,
+                    lastError: asset.lastError,
+                    metadataSnapshotID: asset.metadataSnapshotID,
+                    createdAt: asset.createdAt,
+                    updatedAt: asset.updatedAt
+                )
+            )
+        }
+
+        try context.save()
+    }
+
+    private static func groupRecord(from entity: PersistedDownloadGroupStoreRecord) -> DownloadGroupRecord? {
+        guard let kind = DownloadGroupKind(rawValue: entity.kind),
+              let status = DownloadStatus(rawValue: entity.status) else {
+            return nil
+        }
+
+        return DownloadGroupRecord(
+            id: entity.id,
+            scope: DownloadScope(profileID: entity.scopeProfileID, providerFingerprint: entity.scopeProviderFingerprint),
+            kind: kind,
+            title: entity.title,
+            parentVideoID: entity.parentVideoID,
+            contentType: entity.contentType,
+            coverImageURL: entity.coverImageURL,
+            childAssetIDs: entity.childAssetIDs,
+            status: status,
+            completedAssetCount: entity.completedAssetCount,
+            totalAssetCount: entity.totalAssetCount,
+            bytesWritten: entity.bytesWritten,
+            expectedBytes: entity.expectedBytes,
+            createdAt: entity.createdAt,
+            updatedAt: entity.updatedAt
+        )
+    }
+
+    private static func assetRecord(from entity: PersistedDownloadAssetStoreRecord) -> DownloadAssetRecord? {
+        guard let remoteURL = URL(string: entity.remoteURL),
+              let status = DownloadStatus(rawValue: entity.status) else {
+            return nil
+        }
+
+        return DownloadAssetRecord(
+            id: entity.id,
+            scope: DownloadScope(profileID: entity.scopeProfileID, providerFingerprint: entity.scopeProviderFingerprint),
+            videoID: entity.videoID,
+            contentType: entity.contentType,
+            title: entity.title,
+            coverImageURL: entity.coverImageURL,
+            containerExtension: entity.containerExtension,
+            seriesID: entity.seriesID,
+            seasonNumber: entity.seasonNumber,
+            remoteURL: remoteURL,
+            localURL: entity.localURL.flatMap(URL.init(string:)),
+            resumeDataURL: entity.resumeDataURL.flatMap(URL.init(string:)),
+            status: status,
+            bytesWritten: entity.bytesWritten,
+            expectedBytes: entity.expectedBytes,
+            attemptCount: entity.attemptCount,
+            lastError: entity.lastError,
+            metadataSnapshotID: entity.metadataSnapshotID,
+            createdAt: entity.createdAt,
+            updatedAt: entity.updatedAt
+        )
+    }
 }
 
 struct DownloadStoreView: Sendable {
@@ -25,7 +207,7 @@ struct DownloadRemovalPlan: Sendable {
 }
 
 actor DownloadStore {
-    private let fileURL: URL
+    private let persistence: any DownloadStorePersistence
     private let now: @Sendable () -> Date
 
     private var groupsByID: [String: DownloadGroupRecord] = [:]
@@ -35,14 +217,19 @@ actor DownloadStore {
 
     init(
         fileURL: URL? = nil,
+        modelContainer: ModelContainer? = nil,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        let defaultURL = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!
-            .appending(path: "Downloads", directoryHint: .isDirectory)
-            .appending(path: "downloads.json")
-        self.fileURL = fileURL ?? defaultURL
+        if let modelContainer {
+            self.persistence = SwiftDataDownloadStorePersistence(modelContainer: modelContainer)
+        } else {
+            let defaultURL = FileManager.default
+                .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first!
+                .appending(path: "Downloads", directoryHint: .isDirectory)
+                .appending(path: "downloads.json")
+            self.persistence = FileDownloadStorePersistence(fileURL: fileURL ?? defaultURL)
+        }
         self.now = now
     }
 
@@ -279,19 +466,11 @@ actor DownloadStore {
         didLoad = true
 
         do {
-            let directoryURL = fileURL.deletingLastPathComponent()
-            if !FileManager.default.fileExists(atPath: directoryURL.path()) {
-                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-            }
-
-            guard FileManager.default.fileExists(atPath: fileURL.path()) else {
+            guard let snapshot = try await persistence.load() else {
                 groupsByID = [:]
                 assetsByID = [:]
                 return
             }
-
-            let data = try Data(contentsOf: fileURL)
-            let snapshot = try JSONDecoder().decode(DownloadStoreSnapshot.self, from: data)
             groupsByID = Dictionary(uniqueKeysWithValues: snapshot.groups.map { ($0.id, $0) })
             assetsByID = Dictionary(uniqueKeysWithValues: snapshot.assets.map { ($0.id, $0) })
             recomputeAllGroups()
@@ -299,7 +478,6 @@ actor DownloadStore {
             groupsByID = [:]
             assetsByID = [:]
             logger.error("Downloads manifest load failed, resetting state: \(error.localizedDescription, privacy: .public)")
-            try? FileManager.default.removeItem(at: fileURL)
         }
     }
 
@@ -348,17 +526,11 @@ actor DownloadStore {
 
     private func persist() async {
         do {
-            let directoryURL = fileURL.deletingLastPathComponent()
-            if !FileManager.default.fileExists(atPath: directoryURL.path()) {
-                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-            }
-
             let snapshot = DownloadStoreSnapshot(
                 groups: groupsByID.values.sorted { $0.updatedAt > $1.updatedAt },
                 assets: assetsByID.values.sorted { $0.updatedAt > $1.updatedAt }
             )
-            let data = try JSONEncoder().encode(snapshot)
-            try data.write(to: fileURL, options: [.atomic])
+            try await persistence.save(snapshot)
         } catch {
             logger.error("Downloads manifest persist failed: \(error.localizedDescription, privacy: .public)")
         }

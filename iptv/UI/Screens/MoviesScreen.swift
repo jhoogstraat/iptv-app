@@ -84,7 +84,7 @@ struct MoviesScreen: View {
     @ViewBuilder
     private func contentForState(_ viewModel: MoviesScreenViewModel) -> some View {
         switch viewModel.phase {
-            case .idle, .fetching:
+            case .idle, .loadingCatalog:
                 ProgressView()
 
             case .error(let error):
@@ -109,32 +109,55 @@ struct MoviesScreen: View {
                     }
                     .padding()
                 } else {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if viewModel.browseResults.isEmpty {
-                            ContentUnavailableView(
-                                "No Results",
-                                systemImage: "film",
-                                description: Text(emptyBrowseMessage(for: viewModel))
-                            )
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        } else {
-                            ScrollView {
-                                LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
-                                    ForEach(viewModel.browseResults) { item in
-                                        NavigationLink {
-                                            destination(for: item, viewModel: viewModel)
-                                        } label: {
-                                            browseTile(for: item)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.bottom, 20)
+                    browseContent(viewModel)
+                }
+        }
+    }
+
+    @ViewBuilder
+    private func browseContent(_ viewModel: MoviesScreenViewModel) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let error = viewModel.selectedCategoryError {
+                VStack(spacing: 12) {
+                    Text(error.localizedDescription)
+                        .multilineTextAlignment(.center)
+                    Button("Retry Category") {
+                        Task { await viewModel.refreshSelectedCategory() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else if viewModel.isSelectedCategoryLoading {
+                ScrollView {
+                    BrowseSkeletonGrid(columns: gridColumns)
+                        .padding(.horizontal)
+                        .padding(.bottom, 20)
+                }
+                .scrollIndicators(.hidden)
+            } else if viewModel.browseResults.isEmpty {
+                ContentUnavailableView(
+                    "No Results",
+                    systemImage: "film",
+                    description: Text(emptyBrowseMessage(for: viewModel))
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
+                        ForEach(viewModel.browseResults) { item in
+                            NavigationLink {
+                                destination(for: item, viewModel: viewModel)
+                            } label: {
+                                browseTile(for: item)
                             }
+                            .buttonStyle(.plain)
                         }
                     }
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
                 }
+            }
         }
     }
 
@@ -464,6 +487,74 @@ private struct BrowsePosterTile: View {
             }
         }
         .padding(6)
+    }
+}
+
+private struct BrowseSkeletonGrid: View {
+    let columns: [GridItem]
+    private let itemCount = 12
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+            ForEach(0..<itemCount, id: \.self) { _ in
+                BrowseSkeletonTile()
+            }
+        }
+    }
+}
+
+private struct BrowseSkeletonTile: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 8, style: .continuous)
+            .fill(Color.secondary.opacity(0.12))
+            .overlay {
+                VStack(alignment: .leading, spacing: 10) {
+                    Spacer()
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.white.opacity(0.35))
+                        .frame(height: 12)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
+                        .fill(Color.white.opacity(0.24))
+                        .frame(width: 72, height: 10)
+                }
+                .padding(12)
+            }
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .modifier(ShimmerEffect())
+            .accessibilityHidden(true)
+    }
+}
+
+private struct ShimmerEffect: ViewModifier {
+    @State private var phase: CGFloat = -1
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                GeometryReader { proxy in
+                    let width = proxy.size.width
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            Color.white.opacity(0.18),
+                            .clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(width: max(width * 0.45, 1))
+                    .rotationEffect(.degrees(18))
+                    .offset(x: phase * width * 1.6)
+                }
+                .allowsHitTesting(false)
+                .clipShape(.rect(cornerRadius: 8))
+            }
+            .onAppear {
+                guard phase < 0 else { return }
+                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                    phase = 1.1
+                }
+            }
     }
 }
 

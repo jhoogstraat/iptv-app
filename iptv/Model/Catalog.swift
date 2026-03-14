@@ -57,13 +57,16 @@ final class Catalog {
         activityCenter: BackgroundActivityCenter? = nil
     ) {
         self.providerStore = providerStore
-        self.cacheManager = cacheManager ?? CatalogCacheManager()
-        self.metadataCacheManager = metadataCacheManager ?? CatalogMetadataCacheManager()
+        self.cacheManager = cacheManager ?? CatalogCacheManager(
+            diskStore: SwiftDataStreamListCacheStore(modelContainer: modelContainer)
+        )
+        self.metadataCacheManager = metadataCacheManager ?? CatalogMetadataCacheManager(
+            diskStore: SwiftDataCatalogMetadataCacheStore(modelContainer: modelContainer)
+        )
         self.imagePrefetcher = imagePrefetcher ?? NoopImagePrefetcher()
-        self.searchIndexStore = searchIndexStore ?? SearchIndexStore()
+        self.searchIndexStore = searchIndexStore ?? SearchIndexStore(modelContainer: modelContainer)
         self.searchOrchestrator = searchOrchestrator ?? SearchOrchestrator()
         self.activityCenter = activityCenter ?? BackgroundActivityCenter()
-        _ = modelContainer
         self.providerRevision = providerStore.revision
     }
 
@@ -163,8 +166,10 @@ final class Catalog {
         switch contentType {
         case .vod:
             vodCategories = visible
+            vodCatalog = reboundCatalogStorage(vodCatalog, to: visible)
         case .series:
             seriesCategories = visible
+            seriesCatalog = reboundCatalogStorage(seriesCatalog, to: visible)
         case .live:
             break
         }
@@ -174,28 +179,70 @@ final class Catalog {
         let mapped = videos.map(Video.init)
         switch contentType {
         case .vod:
+            removeCachedStreams(categoryID: category.id, contentType: .vod)
             vodCatalog[category] = mapped
         case .series:
+            removeCachedStreams(categoryID: category.id, contentType: .series)
             seriesCatalog[category] = mapped
         case .live:
+            removeCachedStreams(categoryID: category.id, contentType: .live)
             liveCatalog[category] = mapped
         }
     }
 
-    private func storeSearchSnapshots(
+    private func replaceSearchSnapshots(
         from videos: [CachedVideoDTO],
         contentType: XtreamContentType,
         category: Category,
         providerFingerprint: String
     ) async {
         let snapshots = videos.map(SearchVideoSnapshot.init(cachedVideo:))
-        await searchIndexStore.upsert(
+        await searchIndexStore.replaceCategory(
             videos: snapshots,
             contentType: contentType,
             categoryID: category.id,
             categoryName: category.name,
             providerFingerprint: providerFingerprint
         )
+    }
+
+    private func reboundCatalogStorage(
+        _ storage: [Category: [Video]],
+        to categories: [Category]
+    ) -> [Category: [Video]] {
+        var rebound: [Category: [Video]] = [:]
+
+        for category in categories {
+            guard let entry = storage.first(where: { $0.key.id == category.id }) else { continue }
+            rebound[category] = entry.value
+        }
+
+        return rebound
+    }
+
+    private func removeCachedStreams(categoryID: String, contentType: XtreamContentType) {
+        switch contentType {
+        case .vod:
+            vodCatalog = vodCatalog.filter { $0.key.id != categoryID }
+        case .series:
+            seriesCatalog = seriesCatalog.filter { $0.key.id != categoryID }
+        case .live:
+            liveCatalog = liveCatalog.filter { $0.key.id != categoryID }
+        }
+    }
+
+    private func cachedVideosByID(
+        categoryID: String,
+        contentType: XtreamContentType
+    ) -> [Video]? {
+        switch contentType {
+        case .vod:
+            return vodCatalog.first { $0.key.id == categoryID }?.value
+        case .series:
+            return seriesCatalog.first { $0.key.id == categoryID }?.value
+        case .live:
+            return liveCatalog.first { $0.key.id == categoryID }?.value
+        }
     }
 
     private func fetchCategoryDTOs(for contentType: XtreamContentType) async throws -> [CachedCategoryDTO] {
@@ -213,6 +260,77 @@ final class Catalog {
         let service = try self.service()
         let series = try await service.getSeries(in: categoryID)
         return series.map(CachedVideoDTO.init)
+    }
+
+    private func cachedCategoryDTOs(
+        for key: CatalogMetadataCacheKey
+    ) async throws -> [CachedCategoryDTO] {
+        guard let cached = try await metadataCacheManager.cachedPayload(for: key) else { return [] }
+        return try decodeCachedValue([CachedCategoryDTO].self, from: cached.value)
+    }
+
+    private func reconcileCategoryRefresh(
+        oldCategories: [CachedCategoryDTO],
+        freshCategories: [CachedCategoryDTO],
+        contentType: XtreamContentType,
+        providerFingerprint: String
+    ) async throws {
+        let freshIDs = Set(freshCategories.map(\.id))
+        let removedCategories = oldCategories.filter { !freshIDs.contains($0.id) }
+
+        for removedCategory in removedCategories {
+            let key = StreamListCacheKey(
+                providerFingerprint: providerFingerprint,
+                contentType: contentType,
+                categoryID: removedCategory.id,
+                pageToken: nil
+            )
+            let removedVideos = try await cacheManager.entry(for: key)?.videos ?? []
+            try await cacheManager.removeValue(for: key)
+            removeCachedStreams(categoryID: removedCategory.id, contentType: contentType)
+            await searchIndexStore.removeCategory(
+                contentType: contentType,
+                categoryID: removedCategory.id,
+                providerFingerprint: providerFingerprint
+            )
+            await pruneOrphanedDetailMetadata(
+                videoIDs: Set(removedVideos.map(\.id)),
+                contentType: contentType,
+                providerFingerprint: providerFingerprint
+            )
+        }
+    }
+
+    private func pruneOrphanedDetailMetadata(
+        videoIDs: Set<Int>,
+        contentType: XtreamContentType,
+        providerFingerprint: String
+    ) async {
+        guard contentType == .vod || contentType == .series else { return }
+
+        let entries = (try? await cacheManager.entries(providerFingerprint: providerFingerprint)) ?? []
+        let referencedIDs = Set(
+            entries
+                .filter { $0.key.contentType == contentType }
+                .flatMap { $0.videos.map(\.id) }
+        )
+
+        for videoID in videoIDs where !referencedIDs.contains(videoID) {
+            switch contentType {
+            case .vod:
+                vodInfo = vodInfo.filter { $0.key.id != videoID }
+                if let key = try? metadataKey(kind: .vodInfo, resourceID: String(videoID)) {
+                    try? await metadataCacheManager.removeValue(for: key)
+                }
+            case .series:
+                seriesInfoBySeriesID[videoID] = nil
+                if let key = try? metadataKey(kind: .seriesInfo, resourceID: String(videoID)) {
+                    try? await metadataCacheManager.removeValue(for: key)
+                }
+            case .live:
+                break
+            }
+        }
     }
 
     private func runBackgroundActivity(
@@ -241,21 +359,17 @@ final class Catalog {
 
     private func loadCategories(
         contentType: XtreamContentType,
-        kind: CatalogMetadataKind,
+        kind _: CatalogMetadataKind,
         policy: CatalogLoadPolicy
     ) async throws {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
 
         let key = try metadataKey(kind: kind, resourceID: "all")
-        let cachedPayload = try await metadataCacheManager.cachedPayload(
-            for: key,
-            ttl: CatalogCacheTTL.categories
-        )
+        let cachedPayload = try await metadataCacheManager.cachedPayload(for: key)
         let cached = try cachedPayload.map {
             CatalogCachedValue(
                 value: try decodeCachedValue([CachedCategoryDTO].self, from: $0.value),
-                savedAt: $0.savedAt,
-                isStale: $0.isStale
+                savedAt: $0.savedAt
             )
         }
 
@@ -266,32 +380,22 @@ final class Catalog {
         case .cachedThenRefresh:
             if let cached {
                 applyCategories(cached.value, for: contentType)
-                scheduleCategoryRefresh(key: key, kind: kind, contentType: contentType)
+                scheduleCategoryRefresh(key: key, contentType: contentType)
             } else {
-                let fresh = try await refreshCategories(key: key, kind: kind, contentType: contentType)
-                applyCategories(fresh, for: contentType)
-            }
-        case .refreshIfStale:
-            if let cached {
-                applyCategories(cached.value, for: contentType)
-                if cached.isStale {
-                    scheduleCategoryRefresh(key: key, kind: kind, contentType: contentType)
-                }
-            } else {
-                let fresh = try await refreshCategories(key: key, kind: kind, contentType: contentType)
+                let fresh = try await refreshCategories(key: key, contentType: contentType)
                 applyCategories(fresh, for: contentType)
             }
         case .refreshNow:
-            let fresh = try await refreshCategories(key: key, kind: kind, contentType: contentType)
+            let fresh = try await refreshCategories(key: key, contentType: contentType)
             applyCategories(fresh, for: contentType)
         }
     }
 
     private func refreshCategories(
         key: CatalogMetadataCacheKey,
-        kind: CatalogMetadataKind,
         contentType: XtreamContentType
     ) async throws -> [CachedCategoryDTO] {
+        let previous = try await cachedCategoryDTOs(for: key)
         let fresh = try await metadataCacheManager.refreshPayload(
             for: key
         ) { [weak self] in
@@ -300,15 +404,17 @@ final class Catalog {
             return try JSONEncoder().encode(value)
         }
         let decoded = try decodeCachedValue([CachedCategoryDTO].self, from: fresh)
+        try await reconcileCategoryRefresh(
+            oldCategories: previous,
+            freshCategories: decoded,
+            contentType: contentType,
+            providerFingerprint: key.providerFingerprint
+        )
         applyCategories(decoded, for: contentType)
         return decoded
     }
 
-    private func scheduleCategoryRefresh(
-        key: CatalogMetadataCacheKey,
-        kind: CatalogMetadataKind,
-        contentType: XtreamContentType
-    ) {
+    private func scheduleCategoryRefresh(key: CatalogMetadataCacheKey, contentType: XtreamContentType) {
         runBackgroundActivity(
             id: "category-refresh:\(key.rawKey)",
             title: "Refreshing Your Library",
@@ -316,7 +422,7 @@ final class Catalog {
             source: "Library"
         ) { [weak self] in
             guard let self else { return }
-            _ = try await self.refreshCategories(key: key, kind: kind, contentType: contentType)
+            _ = try await self.refreshCategories(key: key, contentType: contentType)
         }
     }
 
@@ -330,29 +436,18 @@ final class Catalog {
 
         let key = try cacheKey(for: category, contentType: contentType)
         let providerFingerprint = key.providerFingerprint
-        let cached = try await cacheManager.cachedValue(for: key, ttl: CatalogCacheTTL.streams)
+        let cached = try await cacheManager.cachedValue(for: key)
 
         switch policy {
         case .cachedOnly:
             guard let cached else { try cachedOnlyFailure(policy: policy) }
             applyStreams(cached.value, in: category, contentType: contentType)
-            await storeSearchSnapshots(from: cached.value, contentType: contentType, category: category, providerFingerprint: providerFingerprint)
+            await replaceSearchSnapshots(from: cached.value, contentType: contentType, category: category, providerFingerprint: providerFingerprint)
         case .cachedThenRefresh:
             if let cached {
                 applyStreams(cached.value, in: category, contentType: contentType)
-                await storeSearchSnapshots(from: cached.value, contentType: contentType, category: category, providerFingerprint: providerFingerprint)
+                await replaceSearchSnapshots(from: cached.value, contentType: contentType, category: category, providerFingerprint: providerFingerprint)
                 scheduleStreamRefresh(for: key, category: category, contentType: contentType, fetcher: fetcher)
-            } else {
-                let fresh = try await refreshStreams(for: key, category: category, contentType: contentType, fetcher: fetcher)
-                applyStreams(fresh, in: category, contentType: contentType)
-            }
-        case .refreshIfStale:
-            if let cached {
-                applyStreams(cached.value, in: category, contentType: contentType)
-                await storeSearchSnapshots(from: cached.value, contentType: contentType, category: category, providerFingerprint: providerFingerprint)
-                if cached.isStale {
-                    scheduleStreamRefresh(for: key, category: category, contentType: contentType, fetcher: fetcher)
-                }
             } else {
                 let fresh = try await refreshStreams(for: key, category: category, contentType: contentType, fetcher: fetcher)
                 applyStreams(fresh, in: category, contentType: contentType)
@@ -369,9 +464,16 @@ final class Catalog {
         contentType: XtreamContentType,
         fetcher: @escaping @Sendable () async throws -> [CachedVideoDTO]
     ) async throws -> [CachedVideoDTO] {
+        let previousVideos = try await cacheManager.entry(for: key)?.videos ?? []
         let fresh = try await cacheManager.refreshValue(for: key, fetcher: fetcher)
         applyStreams(fresh, in: category, contentType: contentType)
-        await storeSearchSnapshots(from: fresh, contentType: contentType, category: category, providerFingerprint: key.providerFingerprint)
+        await replaceSearchSnapshots(from: fresh, contentType: contentType, category: category, providerFingerprint: key.providerFingerprint)
+        let removedVideoIDs = Set(previousVideos.map(\.id)).subtracting(fresh.map(\.id))
+        await pruneOrphanedDetailMetadata(
+            videoIDs: removedVideoIDs,
+            contentType: contentType,
+            providerFingerprint: key.providerFingerprint
+        )
         return fresh
     }
 
@@ -399,15 +501,11 @@ final class Catalog {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
 
         let key = try metadataKey(kind: .vodInfo, resourceID: String(video.id))
-        let cachedPayload = try await metadataCacheManager.cachedPayload(
-            for: key,
-            ttl: CatalogCacheTTL.details
-        )
+        let cachedPayload = try await metadataCacheManager.cachedPayload(for: key)
         let cached = try cachedPayload.map {
             CatalogCachedValue(
                 value: try decodeCachedValue(CachedVideoInfoDTO.self, from: $0.value),
-                savedAt: $0.savedAt,
-                isStale: $0.isStale
+                savedAt: $0.savedAt
             )
         }
 
@@ -419,16 +517,6 @@ final class Catalog {
             if let cached {
                 vodInfo[video] = VideoInfo(cached: cached.value)
                 scheduleVodInfoRefresh(video, key: key)
-            } else {
-                let fresh = try await refreshVodInfo(video, key: key)
-                vodInfo[video] = VideoInfo(cached: fresh)
-            }
-        case .refreshIfStale:
-            if let cached {
-                vodInfo[video] = VideoInfo(cached: cached.value)
-                if cached.isStale {
-                    scheduleVodInfoRefresh(video, key: key)
-                }
             } else {
                 let fresh = try await refreshVodInfo(video, key: key)
                 vodInfo[video] = VideoInfo(cached: fresh)
@@ -474,15 +562,11 @@ final class Catalog {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
 
         let key = try metadataKey(kind: .seriesInfo, resourceID: String(video.id))
-        let cachedPayload = try await metadataCacheManager.cachedPayload(
-            for: key,
-            ttl: CatalogCacheTTL.details
-        )
+        let cachedPayload = try await metadataCacheManager.cachedPayload(for: key)
         let cached = try cachedPayload.map {
             CatalogCachedValue(
                 value: try decodeCachedValue(XtreamSeries.self, from: $0.value),
-                savedAt: $0.savedAt,
-                isStale: $0.isStale
+                savedAt: $0.savedAt
             )
         }
 
@@ -495,14 +579,6 @@ final class Catalog {
             if let cached {
                 seriesInfoBySeriesID[video.id] = cached.value
                 scheduleSeriesInfoRefresh(video, key: key)
-                return cached.value
-            }
-        case .refreshIfStale:
-            if let cached {
-                seriesInfoBySeriesID[video.id] = cached.value
-                if cached.isStale {
-                    scheduleSeriesInfoRefresh(video, key: key)
-                }
                 return cached.value
             }
         case .refreshNow:
@@ -543,27 +619,27 @@ final class Catalog {
     }
 
     func getVodCategories(force: Bool = false) async throws {
-        try await getVodCategories(policy: force ? .refreshNow : .refreshIfStale)
+        try await getVodCategories(policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func getSeriesCategories(force: Bool = false) async throws {
-        try await getSeriesCategories(policy: force ? .refreshNow : .refreshIfStale)
+        try await getSeriesCategories(policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func getVodStreams(in category: Category, force: Bool = false) async throws {
-        try await getVodStreams(in: category, policy: force ? .refreshNow : .refreshIfStale)
+        try await getVodStreams(in: category, policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func getSeriesStreams(in category: Category, force: Bool = false) async throws {
-        try await getSeriesStreams(in: category, policy: force ? .refreshNow : .refreshIfStale)
+        try await getSeriesStreams(in: category, policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func getVodInfo(_ video: Video, force: Bool = false) async throws {
-        try await getVodInfo(video, policy: force ? .refreshNow : .refreshIfStale)
+        try await getVodInfo(video, policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func getSeriesInfo(_ video: Video, force: Bool = false) async throws -> XtreamSeries {
-        try await getSeriesInfo(video, policy: force ? .refreshNow : .refreshIfStale)
+        try await getSeriesInfo(video, policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func resolveURL(for video: Video) throws -> URL {
@@ -593,7 +669,7 @@ final class Catalog {
     func prepareDownloadMetadata(for video: Video) async throws -> DownloadPreparedMetadata {
         switch video.xtreamContentType {
         case .vod:
-            try await getVodInfo(video, policy: .refreshIfStale)
+            try await getVodInfo(video, policy: .cachedThenRefresh)
             let resolvedInfo = vodInfo[video] ?? VideoInfo(
                 images: [],
                 plot: "",
@@ -635,7 +711,7 @@ final class Catalog {
             )
 
         case .series:
-            let seriesInfo = try await getSeriesInfo(video, policy: .refreshIfStale)
+            let seriesInfo = try await getSeriesInfo(video, policy: .cachedThenRefresh)
             let artworkURLs = Array(
                 Set(
                     [
@@ -704,10 +780,10 @@ final class Catalog {
         guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
         let providerFingerprint = try currentProviderFingerprint()
         if vodCategories.isEmpty {
-            try await getVodCategories(policy: .refreshIfStale)
+            try await getVodCategories(policy: .cachedThenRefresh)
         }
         if seriesCategories.isEmpty {
-            try await getSeriesCategories(policy: .refreshIfStale)
+            try await getSeriesCategories(policy: .cachedThenRefresh)
         }
 
         let counts = await searchIndexStore.providerCounts(providerFingerprint: providerFingerprint)
@@ -775,9 +851,9 @@ final class Catalog {
                                 try await self.activityCenter.waitIfResumed()
                                 switch target.contentType {
                                 case .vod:
-                                    try await self.getVodStreams(in: target.category, policy: .refreshIfStale)
+                                    try await self.getVodStreams(in: target.category, policy: .cachedThenRefresh)
                                 case .series:
-                                    try await self.getSeriesStreams(in: target.category, policy: .refreshIfStale)
+                                    try await self.getSeriesStreams(in: target.category, policy: .cachedThenRefresh)
                                 case .live:
                                     break
                                 }
@@ -846,9 +922,9 @@ final class Catalog {
 
     private func indexCatalogueContent(
         _ contentType: XtreamContentType,
-        forceRefresh: Bool
+        forceRefresh _: Bool
     ) async throws {
-        let loadPolicy: CatalogLoadPolicy = forceRefresh ? .refreshNow : .refreshIfStale
+        let loadPolicy: CatalogLoadPolicy = .refreshNow
 
         try await activityCenter.waitIfResumed()
         try await getCategories(for: contentType, policy: loadPolicy)
@@ -1051,7 +1127,7 @@ extension Catalog {
                 try await activityCenter.waitIfResumed()
                 let category = categories(for: entry.key.contentType).first { $0.id == entry.key.categoryID }
                     ?? Category(id: entry.key.categoryID, name: entry.key.categoryID)
-                await storeSearchSnapshots(
+                await replaceSearchSnapshots(
                     from: entry.videos,
                     contentType: entry.key.contentType,
                     category: category,
@@ -1102,14 +1178,7 @@ extension Catalog {
     }
 
     func cachedVideos(in category: Category, contentType: XtreamContentType) -> [Video]? {
-        switch contentType {
-        case .vod:
-            vodCatalog[category]
-        case .series:
-            seriesCatalog[category]
-        case .live:
-            liveCatalog[category]
-        }
+        cachedVideosByID(categoryID: category.id, contentType: contentType)
     }
 
     func getCategories(for contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws {
@@ -1124,7 +1193,7 @@ extension Catalog {
     }
 
     func getCategories(for contentType: XtreamContentType, force: Bool = false) async throws {
-        try await getCategories(for: contentType, policy: force ? .refreshNow : .refreshIfStale)
+        try await getCategories(for: contentType, policy: force ? .refreshNow : .cachedThenRefresh)
     }
 
     func getStreams(in category: Category, contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws {
@@ -1139,6 +1208,6 @@ extension Catalog {
     }
 
     func getStreams(in category: Category, contentType: XtreamContentType, force: Bool = false) async throws {
-        try await getStreams(in: category, contentType: contentType, policy: force ? .refreshNow : .refreshIfStale)
+        try await getStreams(in: category, contentType: contentType, policy: force ? .refreshNow : .cachedThenRefresh)
     }
 }

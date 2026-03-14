@@ -281,7 +281,7 @@ struct CoreSpecTests {
     @Test
     func cacheManagerDeduplicatesInFlightLoads() async throws {
         let store = InMemoryStreamListCacheStore()
-        let manager = CatalogCacheManager(diskStore: store, ttl: 600)
+        let manager = CatalogCacheManager(diskStore: store)
         let key = makeCacheKey()
         let invocationCounter = InvocationCounter()
 
@@ -305,7 +305,7 @@ struct CoreSpecTests {
     @Test
     func cacheManagerCompletesBackgroundLoadAfterCallerCancellation() async throws {
         let store = InMemoryStreamListCacheStore()
-        let manager = CatalogCacheManager(diskStore: store, ttl: 600)
+        let manager = CatalogCacheManager(diskStore: store)
         let key = makeCacheKey()
 
         let firstLoad = Task {
@@ -335,7 +335,7 @@ struct CoreSpecTests {
     @Test
     func cacheManagerCachesEmptyCategoryResult() async throws {
         let store = InMemoryStreamListCacheStore()
-        let manager = CatalogCacheManager(diskStore: store, ttl: 600)
+        let manager = CatalogCacheManager(diskStore: store)
         let key = makeCacheKey()
 
         let firstResult = try await manager.loadStreamList(for: key) {
@@ -350,6 +350,32 @@ struct CoreSpecTests {
 
         #expect(firstResult.isEmpty)
         #expect(secondResult.isEmpty)
+        #expect(await invocationCounter.value == 0)
+    }
+
+    @Test
+    func cacheManagerReturnsPersistedEntriesWithoutAgeBasedExpiry() async throws {
+        let store = InMemoryStreamListCacheStore()
+        let key = makeCacheKey()
+        let oldDate = Date(timeIntervalSince1970: 0)
+        try await store.save(
+            StreamListCacheEntry(
+                key: key,
+                savedAt: oldDate,
+                lastAccessAt: oldDate,
+                videos: [makeCachedVideo(id: 99)]
+            ),
+            for: key
+        )
+
+        let manager = CatalogCacheManager(diskStore: store)
+        let invocationCounter = InvocationCounter()
+        let result = try await manager.loadStreamList(for: key) {
+            await invocationCounter.increment()
+            throw MockError.failed
+        }
+
+        #expect(result.map(\.id) == [99])
         #expect(await invocationCounter.value == 0)
     }
 
@@ -1142,6 +1168,10 @@ private actor InMemoryStreamListCacheStore: StreamListCacheStore {
     }
 
     func pruneCacheIfNeeded() async throws { }
+
+    func removeValue(for key: StreamListCacheKey) async throws {
+        storage[key.rawKey] = nil
+    }
 
     func removeAll(for providerFingerprint: String) async throws { storage.removeAll() }
 }

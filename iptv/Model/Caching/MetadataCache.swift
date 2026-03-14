@@ -53,13 +53,13 @@ nonisolated struct CatalogMetadataCacheEntry: Codable, Sendable {
 nonisolated struct CatalogCachedValue<Value: Sendable>: Sendable {
     let value: Value
     let savedAt: Date
-    let isStale: Bool
 }
 
 nonisolated protocol CatalogMetadataCacheStore: Sendable {
     func load(key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry?
     func save(_ entry: CatalogMetadataCacheEntry, for key: CatalogMetadataCacheKey) async throws
     func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry]
+    func removeValue(for key: CatalogMetadataCacheKey) async throws
     func removeAll(for providerFingerprint: String) async throws
     func pruneCacheIfNeeded() async throws
 }
@@ -131,6 +131,12 @@ actor DiskCatalogMetadataCacheStore: CatalogMetadataCacheStore {
         for entry in providerEntries {
             try? fileManager.removeItem(at: fileURL(for: entry.key))
         }
+    }
+
+    func removeValue(for key: CatalogMetadataCacheKey) async throws {
+        let url = fileURL(for: key)
+        guard fileManager.fileExists(atPath: url.path()) else { return }
+        try? fileManager.removeItem(at: url)
     }
 
     func pruneCacheIfNeeded() async throws {
@@ -219,8 +225,7 @@ actor CatalogMetadataCacheManager {
     }
 
     func cachedPayload(
-        for key: CatalogMetadataCacheKey,
-        ttl: TimeInterval
+        for key: CatalogMetadataCacheKey
     ) async throws -> CatalogCachedValue<Data>? {
         let currentDate = now()
 
@@ -229,8 +234,7 @@ actor CatalogMetadataCacheManager {
             memoryCache[key] = touched
             return CatalogCachedValue(
                 value: touched.payload,
-                savedAt: touched.savedAt,
-                isStale: isStale(touched.savedAt, ttl: ttl, at: currentDate)
+                savedAt: touched.savedAt
             )
         }
 
@@ -239,8 +243,7 @@ actor CatalogMetadataCacheManager {
 
         return CatalogCachedValue(
             value: diskEntry.payload,
-            savedAt: diskEntry.savedAt,
-            isStale: isStale(diskEntry.savedAt, ttl: ttl, at: currentDate)
+            savedAt: diskEntry.savedAt
         )
     }
 
@@ -274,6 +277,27 @@ actor CatalogMetadataCacheManager {
         try await diskStore.entries(providerFingerprint: providerFingerprint)
     }
 
+    func entry(for key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry? {
+        let currentDate = now()
+
+        if let memoryEntry = memoryCache[key] {
+            let touched = memoryEntry.touching(at: currentDate)
+            memoryCache[key] = touched
+            return touched
+        }
+
+        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
+        memoryCache[key] = diskEntry
+        return diskEntry
+    }
+
+    func removeValue(for key: CatalogMetadataCacheKey) async throws {
+        inFlightTasks[key]?.task.cancel()
+        inFlightTasks[key] = nil
+        memoryCache[key] = nil
+        try await diskStore.removeValue(for: key)
+    }
+
     func removeAll(for providerFingerprint: String) async throws {
         memoryCache = memoryCache.filter { $0.key.providerFingerprint != providerFingerprint }
         try await diskStore.removeAll(for: providerFingerprint)
@@ -282,10 +306,6 @@ actor CatalogMetadataCacheManager {
     private func finishInFlightTask(for key: CatalogMetadataCacheKey, loadID: UUID) {
         guard let current = inFlightTasks[key], current.id == loadID else { return }
         inFlightTasks[key] = nil
-    }
-
-    private func isStale(_ savedAt: Date, ttl: TimeInterval, at currentDate: Date) -> Bool {
-        currentDate.timeIntervalSince(savedAt) > ttl
     }
 }
 

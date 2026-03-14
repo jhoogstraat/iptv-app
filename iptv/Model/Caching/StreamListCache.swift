@@ -80,6 +80,7 @@ nonisolated protocol StreamListCacheStore: Sendable {
     func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws
     func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry]
     func pruneCacheIfNeeded() async throws
+    func removeValue(for key: StreamListCacheKey) async throws
     func removeAll(for providerFingerprint: String) async throws
 }
 
@@ -185,6 +186,12 @@ actor DiskStreamListCacheStore: StreamListCacheStore {
         }
     }
 
+    func removeValue(for key: StreamListCacheKey) async throws {
+        let url = fileURL(for: key)
+        guard fileManager.fileExists(atPath: url.path()) else { return }
+        try? fileManager.removeItem(at: url)
+    }
+
     func removeAll(for providerFingerprint: String) async throws {
         let providerEntries = try await entries(providerFingerprint: providerFingerprint)
         for entry in providerEntries {
@@ -217,16 +224,13 @@ actor CatalogCacheManager {
     private var inFlightTasks: [StreamListCacheKey: InFlightLoad] = [:]
 
     private let diskStore: StreamListCacheStore
-    private let ttl: TimeInterval
     private let now: @Sendable () -> Date
 
     init(
         diskStore: StreamListCacheStore? = nil,
-        ttl: TimeInterval = 60 * 60,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.diskStore = diskStore ?? DiskStreamListCacheStore()
-        self.ttl = ttl
         self.now = now
 
         Task(priority: .utility) {
@@ -245,8 +249,7 @@ actor CatalogCacheManager {
     }
 
     func cachedValue(
-        for key: StreamListCacheKey,
-        ttl: TimeInterval
+        for key: StreamListCacheKey
     ) async throws -> CatalogCachedValue<[CachedVideoDTO]>? {
         let currentDate = now()
 
@@ -255,8 +258,7 @@ actor CatalogCacheManager {
             memoryCache[key] = touched
             return CatalogCachedValue(
                 value: touched.videos,
-                savedAt: touched.savedAt,
-                isStale: isStale(touched.savedAt, ttl: ttl, at: currentDate)
+                savedAt: touched.savedAt
             )
         }
 
@@ -264,8 +266,7 @@ actor CatalogCacheManager {
         memoryCache[key] = diskEntry
         return CatalogCachedValue(
             value: diskEntry.videos,
-            savedAt: diskEntry.savedAt,
-            isStale: isStale(diskEntry.savedAt, ttl: ttl, at: currentDate)
+            savedAt: diskEntry.savedAt
         )
     }
 
@@ -285,6 +286,27 @@ actor CatalogCacheManager {
         try await diskStore.entries(providerFingerprint: providerFingerprint)
     }
 
+    func entry(for key: StreamListCacheKey) async throws -> StreamListCacheEntry? {
+        let currentDate = now()
+
+        if let memoryEntry = memoryCache[key] {
+            let touched = memoryEntry.touching(at: currentDate)
+            memoryCache[key] = touched
+            return touched
+        }
+
+        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
+        memoryCache[key] = diskEntry
+        return diskEntry
+    }
+
+    func removeValue(for key: StreamListCacheKey) async throws {
+        inFlightTasks[key]?.task.cancel()
+        inFlightTasks[key] = nil
+        memoryCache[key] = nil
+        try await diskStore.removeValue(for: key)
+    }
+
     func removeAll(for providerFingerprint: String) async throws {
         memoryCache = memoryCache.filter { $0.key.providerFingerprint != providerFingerprint }
         try await diskStore.removeAll(for: providerFingerprint)
@@ -295,50 +317,18 @@ actor CatalogCacheManager {
         force: Bool = false,
         fetcher: @escaping @Sendable () async throws -> [CachedVideoDTO]
     ) async throws -> [CachedVideoDTO] {
-        let currentDate = now()
-        var staleFallback: StreamListCacheEntry?
-
         if !force {
-            if let memoryEntry = memoryCache[key] {
-                let touched = memoryEntry.touching(at: currentDate)
-                memoryCache[key] = touched
-                if !isStale(memoryEntry.savedAt, at: currentDate) {
-                    return touched.videos
-                }
-                staleFallback = touched
-            }
-
-            if staleFallback == nil, let diskEntry = try await diskStore.load(key: key) {
-                let touched = diskEntry.touching(at: currentDate)
-                memoryCache[key] = touched
-                if !isStale(diskEntry.savedAt, at: currentDate) {
-                    return touched.videos
-                }
-                staleFallback = touched
+            if let entry = try await entry(for: key) {
+                return entry.videos
             }
         }
 
         if let inFlight = inFlightTasks[key] {
-            do {
-                return try await inFlight.task.value
-            } catch {
-                if let staleFallback, !force {
-                    return staleFallback.videos
-                }
-                throw error
-            }
+            return try await inFlight.task.value
         }
 
         let inFlight = startFetch(for: key, fetcher: fetcher)
-
-        do {
-            return try await inFlight.task.value
-        } catch {
-            if let staleFallback, !force {
-                return staleFallback.videos
-            }
-            throw error
-        }
+        return try await inFlight.task.value
     }
 
     private func startFetch(
@@ -376,14 +366,6 @@ actor CatalogCacheManager {
     private func finishInFlightTask(for key: StreamListCacheKey, loadID: UUID) {
         guard let current = inFlightTasks[key], current.id == loadID else { return }
         inFlightTasks[key] = nil
-    }
-
-    private func isStale(_ savedAt: Date, ttl: TimeInterval, at currentDate: Date) -> Bool {
-        currentDate.timeIntervalSince(savedAt) > ttl
-    }
-
-    private func isStale(_ savedAt: Date, at currentDate: Date) -> Bool {
-        isStale(savedAt, ttl: ttl, at: currentDate)
     }
 }
 

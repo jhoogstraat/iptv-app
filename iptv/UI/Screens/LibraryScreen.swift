@@ -8,6 +8,7 @@
 import SwiftUI
 
 struct LibraryScreen: View {
+    @Environment(AppContainer.self) private var appContainer
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
 
@@ -169,7 +170,7 @@ struct LibraryScreen: View {
             let providerFingerprint = ProviderCacheFingerprint.make(from: config)
 
             async let favoriteData = favoritesStore.load(providerFingerprint: providerFingerprint)
-            async let watchData = DiskWatchActivityStore.shared.loadAll()
+            async let watchData = appContainer.watchActivityStore.loadAll()
 
             let loadedFavorites = await favoriteData
             let loadedWatchRecords = await watchData.filter { $0.providerFingerprint == providerFingerprint }

@@ -101,6 +101,81 @@ struct SearchIndexStoreTests {
     }
 
     @Test
+    func replacingCategoryRemovesTitlesMissingFromLatestSync() async {
+        let store = SearchIndexStore()
+
+        await store.replaceCategory(
+            videos: [
+                makeSnapshot(id: 1, name: "One", contentType: "vod"),
+                makeSnapshot(id: 2, name: "Two", contentType: "vod")
+            ],
+            contentType: .vod,
+            categoryID: "action",
+            categoryName: "Action",
+            providerFingerprint: "provider"
+        )
+
+        await store.replaceCategory(
+            videos: [makeSnapshot(id: 2, name: "Two", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "action",
+            categoryName: "Action",
+            providerFingerprint: "provider"
+        )
+
+        let results = await store.query(
+            SearchQuery(text: "", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider"
+        )
+
+        #expect(results.map(\.video.id) == [2])
+    }
+
+    @Test
+    func removingCategoryOnlyDropsDocumentWhenNoOtherCategoryStillReferencesIt() async {
+        let store = SearchIndexStore()
+
+        await store.replaceCategory(
+            videos: [makeSnapshot(id: 7, name: "Shared", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "action",
+            categoryName: "Action",
+            providerFingerprint: "provider"
+        )
+        await store.replaceCategory(
+            videos: [makeSnapshot(id: 7, name: "Shared", contentType: "vod")],
+            contentType: .vod,
+            categoryID: "featured",
+            categoryName: "Featured",
+            providerFingerprint: "provider"
+        )
+
+        await store.removeCategory(
+            contentType: .vod,
+            categoryID: "action",
+            providerFingerprint: "provider"
+        )
+
+        let retained = await store.query(
+            SearchQuery(text: "shared", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider"
+        )
+        #expect(retained.map(\.video.id) == [7])
+
+        await store.removeCategory(
+            contentType: .vod,
+            categoryID: "featured",
+            providerFingerprint: "provider"
+        )
+
+        let removed = await store.query(
+            SearchQuery(text: "shared", scope: .movies, filters: .default, sort: .title),
+            providerFingerprint: "provider"
+        )
+        #expect(removed.isEmpty)
+    }
+
+    @Test
     func queryPreservesPlaybackTypeAndStableIdentityAcrossMediaScopes() async {
         let store = SearchIndexStore()
 

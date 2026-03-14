@@ -6,6 +6,14 @@
 //
 
 import Foundation
+import SwiftData
+
+protocol SearchIndexSnapshotStore: Sendable {
+    func load(providerFingerprint: String) async throws -> SearchIndexStore.ProviderIndex?
+    func save(_ index: SearchIndexStore.ProviderIndex, providerFingerprint: String) async throws
+    func remove(providerFingerprint: String) async throws
+    func removeAll() async throws
+}
 
 struct SearchVideoSnapshot: Hashable, Sendable {
     let id: Int
@@ -66,7 +74,7 @@ actor SearchIndexStore {
         let series: Int
     }
 
-    fileprivate struct SearchDocument: Codable, Hashable, Sendable {
+    struct SearchDocument: Codable, Hashable, Sendable {
         let key: String
         let videoID: Int
         let indexedContentType: XtreamContentType
@@ -80,11 +88,8 @@ actor SearchIndexStore {
         let addedAt: Date?
         let language: String?
         let normalizedLanguage: String?
-        let categoryIDs: Set<String>
-        let categories: Set<String>
-        let normalizedCategories: Set<String>
-        let genres: Set<String>
-        let normalizedGenres: Set<String>
+        let categoryNamesByID: [String: String]
+        let normalizedCategoryNamesByID: [String: String]
 
         var scope: SearchMediaScope {
             switch indexedContentType {
@@ -96,6 +101,26 @@ actor SearchIndexStore {
                 .all
             }
         }
+
+        var categoryIDs: Set<String> {
+            Set(categoryNamesByID.keys)
+        }
+
+        var categories: Set<String> {
+            Set(categoryNamesByID.values.filter { !$0.isEmpty })
+        }
+
+        var normalizedCategories: Set<String> {
+            Set(normalizedCategoryNamesByID.values.filter { !$0.isEmpty })
+        }
+
+        var genres: Set<String> {
+            categories
+        }
+
+        var normalizedGenres: Set<String> {
+            normalizedCategories
+        }
     }
 
     private struct RankedDocument: Sendable {
@@ -104,16 +129,93 @@ actor SearchIndexStore {
         let matchedFields: Set<SearchMatchedField>
     }
 
-    fileprivate struct ProviderIndex: Codable, Sendable {
+    struct ProviderIndex: Codable, Sendable {
         var documentsByKey: [String: SearchDocument] = [:]
         var movieKeys: Set<String> = []
         var seriesKeys: Set<String> = []
         var indexedMovieCategoryIDs: Set<String> = []
         var indexedSeriesCategoryIDs: Set<String> = []
+
+        mutating func insertKey(_ key: String, for contentType: XtreamContentType) {
+            switch contentType {
+            case .vod:
+                movieKeys.insert(key)
+            case .series:
+                seriesKeys.insert(key)
+            case .live:
+                break
+            }
+        }
+
+        mutating func markCategoryIndexed(_ categoryID: String, for contentType: XtreamContentType) {
+            guard !categoryID.isEmpty else { return }
+            switch contentType {
+            case .vod:
+                indexedMovieCategoryIDs.insert(categoryID)
+            case .series:
+                indexedSeriesCategoryIDs.insert(categoryID)
+            case .live:
+                break
+            }
+        }
+
+        func removingCategory(contentType: XtreamContentType, categoryID: String) -> ProviderIndex {
+            guard !categoryID.isEmpty else { return self }
+
+            var copy = self
+            let candidateKeys: Set<String>
+            switch contentType {
+            case .vod:
+                candidateKeys = movieKeys
+                copy.indexedMovieCategoryIDs.remove(categoryID)
+            case .series:
+                candidateKeys = seriesKeys
+                copy.indexedSeriesCategoryIDs.remove(categoryID)
+            case .live:
+                candidateKeys = []
+            }
+
+            for key in candidateKeys {
+                guard let document = copy.documentsByKey[key] else { continue }
+                guard document.categoryIDs.contains(categoryID) else { continue }
+
+                var categoryNamesByID = document.categoryNamesByID
+                var normalizedCategoryNamesByID = document.normalizedCategoryNamesByID
+                categoryNamesByID.removeValue(forKey: categoryID)
+                normalizedCategoryNamesByID.removeValue(forKey: categoryID)
+
+                if categoryNamesByID.isEmpty {
+                    copy.documentsByKey.removeValue(forKey: key)
+                    copy.movieKeys.remove(key)
+                    copy.seriesKeys.remove(key)
+                    continue
+                }
+
+                copy.documentsByKey[key] = SearchDocument(
+                    key: document.key,
+                    videoID: document.videoID,
+                    indexedContentType: document.indexedContentType,
+                    playbackContentType: document.playbackContentType,
+                    title: document.title,
+                    normalizedTitle: document.normalizedTitle,
+                    containerExtension: document.containerExtension,
+                    coverImageURL: document.coverImageURL,
+                    rating: document.rating,
+                    addedAtRaw: document.addedAtRaw,
+                    addedAt: document.addedAt,
+                    language: document.language,
+                    normalizedLanguage: document.normalizedLanguage,
+                    categoryNamesByID: categoryNamesByID,
+                    normalizedCategoryNamesByID: normalizedCategoryNamesByID
+                )
+            }
+
+            return copy
+        }
     }
 
-    fileprivate struct ProviderIndexSnapshot: Codable, Sendable {
-        static let schemaVersion = 1
+    struct ProviderIndexSnapshot: Codable, Sendable {
+        static let schemaVersion = 2
 
         let schemaVersion: Int
         let providerFingerprint: String
@@ -126,7 +228,7 @@ actor SearchIndexStore {
         }
     }
 
-    actor DiskSnapshotStore {
+    actor DiskSnapshotStore: SearchIndexSnapshotStore {
         private let fileManager = FileManager.default
         private let directoryURL: URL
         private let encoder = JSONEncoder()
@@ -196,7 +298,7 @@ actor SearchIndexStore {
 
     private var indexesByProvider: [String: ProviderIndex] = [:]
     private var hydratedProviders: Set<String> = []
-    private let snapshotStore: DiskSnapshotStore
+    private let snapshotStore: any SearchIndexSnapshotStore
 
     init() {
         self.snapshotStore = DiskSnapshotStore()
@@ -206,7 +308,11 @@ actor SearchIndexStore {
         self.snapshotStore = DiskSnapshotStore(directoryURL: snapshotDirectoryURL)
     }
 
-    func upsert(
+    init(modelContainer: ModelContainer) {
+        self.snapshotStore = SwiftDataSearchIndexSnapshotStore(modelContainer: modelContainer)
+    }
+
+    func replaceCategory(
         videos: [SearchVideoSnapshot],
         contentType: XtreamContentType,
         categoryID: String,
@@ -216,24 +322,30 @@ actor SearchIndexStore {
         guard contentType == .vod || contentType == .series else { return }
         await ensureLoaded(providerFingerprint: providerFingerprint)
 
+        let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCategoryName = Self.normalize(cleanedCategoryName)
+
         var providerIndex = indexesByProvider[providerFingerprint] ?? ProviderIndex()
+        providerIndex = providerIndex.removingCategory(
+            contentType: contentType,
+            categoryID: cleanedCategoryID
+        )
+
         for video in videos {
             let key = Self.makeKey(contentType: contentType, videoID: video.id)
-            let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
-            let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalizedCategory = Self.normalize(cleanedCategoryName)
             let playbackContentType = Self.playbackContentType(from: video.contentType, indexedAs: contentType)
-
-            let existing = providerIndex.documentsByKey[key]
-            let categoryIDs = (existing?.categoryIDs ?? []).union(cleanedCategoryID.isEmpty ? [] : [cleanedCategoryID])
-            let categories = (existing?.categories ?? []).union(cleanedCategoryName.isEmpty ? [] : [cleanedCategoryName])
-            let normalizedCategories = (existing?.normalizedCategories ?? []).union(normalizedCategory.isEmpty ? [] : [normalizedCategory])
-            let genres = (existing?.genres ?? []).union(cleanedCategoryName.isEmpty ? [] : [cleanedCategoryName])
-            let normalizedGenres = (existing?.normalizedGenres ?? []).union(normalizedCategory.isEmpty ? [] : [normalizedCategory])
-
             let language = video.language?.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizedLanguage = language.map(Self.normalize)
             let addedAtRaw = video.addedAtRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var categoryNamesByID = providerIndex.documentsByKey[key]?.categoryNamesByID ?? [:]
+            var normalizedCategoryNamesByID = providerIndex.documentsByKey[key]?.normalizedCategoryNamesByID ?? [:]
+
+            if !cleanedCategoryID.isEmpty {
+                categoryNamesByID[cleanedCategoryID] = cleanedCategoryName
+                normalizedCategoryNamesByID[cleanedCategoryID] = normalizedCategoryName
+            }
 
             let document = SearchDocument(
                 key: key,
@@ -249,33 +361,48 @@ actor SearchIndexStore {
                 addedAt: Self.parseDate(addedAtRaw),
                 language: language,
                 normalizedLanguage: normalizedLanguage,
-                categoryIDs: categoryIDs,
-                categories: categories,
-                normalizedCategories: normalizedCategories,
-                genres: genres,
-                normalizedGenres: normalizedGenres
+                categoryNamesByID: categoryNamesByID,
+                normalizedCategoryNamesByID: normalizedCategoryNamesByID
             )
 
             providerIndex.documentsByKey[key] = document
-            switch contentType {
-            case .vod:
-                providerIndex.movieKeys.insert(key)
-            case .series:
-                providerIndex.seriesKeys.insert(key)
-            case .live:
-                break
-            }
+            providerIndex.insertKey(key, for: contentType)
         }
 
-        switch contentType {
-        case .vod:
-            providerIndex.indexedMovieCategoryIDs.insert(categoryID)
-        case .series:
-            providerIndex.indexedSeriesCategoryIDs.insert(categoryID)
-        case .live:
-            break
-        }
+        providerIndex.markCategoryIndexed(cleanedCategoryID, for: contentType)
+        indexesByProvider[providerFingerprint] = providerIndex
+        try? await snapshotStore.save(providerIndex, providerFingerprint: providerFingerprint)
+    }
 
+    func upsert(
+        videos: [SearchVideoSnapshot],
+        contentType: XtreamContentType,
+        categoryID: String,
+        categoryName: String,
+        providerFingerprint: String
+    ) async {
+        await replaceCategory(
+            videos: videos,
+            contentType: contentType,
+            categoryID: categoryID,
+            categoryName: categoryName,
+            providerFingerprint: providerFingerprint
+        )
+    }
+
+    func removeCategory(
+        contentType: XtreamContentType,
+        categoryID: String,
+        providerFingerprint: String
+    ) async {
+        guard contentType == .vod || contentType == .series else { return }
+        await ensureLoaded(providerFingerprint: providerFingerprint)
+
+        var providerIndex = indexesByProvider[providerFingerprint] ?? ProviderIndex()
+        providerIndex = providerIndex.removingCategory(
+            contentType: contentType,
+            categoryID: categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         indexesByProvider[providerFingerprint] = providerIndex
         try? await snapshotStore.save(providerIndex, providerFingerprint: providerFingerprint)
     }

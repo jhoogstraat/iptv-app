@@ -64,7 +64,7 @@ final class MoviesScreenViewModel {
 
     enum Phase {
         case idle
-        case fetching
+        case loadingCatalog
         case error(Error)
         case done
     }
@@ -72,6 +72,8 @@ final class MoviesScreenViewModel {
     let contentType: XtreamContentType
 
     var phase: Phase = .idle
+    var isSelectedCategoryLoading = false
+    var selectedCategoryError: Error?
     var queryText = "" {
         didSet { scheduleBrowseResultsRefresh() }
     }
@@ -137,6 +139,8 @@ final class MoviesScreenViewModel {
         browseResultsTask?.cancel()
         browseResultsRevision = UUID()
         phase = .idle
+        isSelectedCategoryLoading = false
+        selectedCategoryError = nil
         selectedCategoryID = nil
         sourceItems = []
         videosByID = [:]
@@ -144,36 +148,51 @@ final class MoviesScreenViewModel {
     }
 
     func load(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
-        phase = .fetching
+        if categories.isEmpty {
+            phase = .loadingCatalog
+        }
+        selectedCategoryError = nil
 
         do {
             try await catalog.getCategories(for: contentType, policy: policy)
             reconcileSelection()
+            phase = .done
 
             guard selectedCategory != nil else {
                 browseResults = []
+                isSelectedCategoryLoading = false
                 phase = .done
                 return
             }
 
             await loadSelectedCategory(policy: policy)
         } catch {
-            phase = .error(error)
+            if categories.isEmpty {
+                phase = .error(error)
+            } else {
+                phase = .done
+            }
         }
     }
 
     func selectCategory(id: String?) async {
         guard selectedCategoryID != id else {
+            if selectedCategoryError != nil && browseResults.isEmpty {
+                await loadSelectedCategory(policy: .cachedThenRefresh)
+                return
+            }
             await refreshBrowseResultsNow()
             return
         }
 
         selectedCategoryID = id
+        selectedCategoryError = nil
 
         guard let category = selectedCategory else {
             sourceItems = []
             videosByID = [:]
             browseResults = []
+            isSelectedCategoryLoading = false
             phase = .done
             return
         }
@@ -181,11 +200,16 @@ final class MoviesScreenViewModel {
         if let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType) {
             applySourceVideos(cachedVideos)
             await refreshBrowseResultsNow()
+            isSelectedCategoryLoading = false
             phase = .done
-            return
         }
 
         await loadSelectedCategory(policy: .cachedThenRefresh)
+    }
+
+    func refreshSelectedCategory() async {
+        selectedCategoryError = nil
+        await loadSelectedCategory(policy: .refreshNow)
     }
 
     func video(for item: MoviesBrowseItem) -> Video? {
@@ -211,32 +235,50 @@ final class MoviesScreenViewModel {
             sourceItems = []
             videosByID = [:]
             browseResults = []
+            selectedCategoryError = nil
+            isSelectedCategoryLoading = false
             phase = .done
             return
         }
 
-        if policy != .refreshNow,
-           let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType) {
+        let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType)
+
+        if let cachedVideos {
             applySourceVideos(cachedVideos)
             await refreshBrowseResultsNow()
+            isSelectedCategoryLoading = false
             phase = .done
-        }
-
-        if policy == .refreshNow || browseResults.isEmpty {
-            phase = .fetching
-            if policy == .refreshNow {
-                browseResults = []
-            }
+        } else {
+            sourceItems = []
+            videosByID = [:]
+            browseResults = []
+            isSelectedCategoryLoading = true
+            phase = .done
         }
 
         do {
-            try await catalog.getStreams(in: category, contentType: contentType, policy: policy)
+            let effectivePolicy: CatalogLoadPolicy
+            if cachedVideos != nil, policy == .cachedThenRefresh {
+                effectivePolicy = .refreshNow
+            } else {
+                effectivePolicy = policy
+            }
+
+            try await catalog.getStreams(in: category, contentType: contentType, policy: effectivePolicy)
             let resolvedVideos = catalog.cachedVideos(in: category, contentType: contentType) ?? []
             applySourceVideos(resolvedVideos)
             await refreshBrowseResultsNow()
+            selectedCategoryError = nil
+            isSelectedCategoryLoading = false
             phase = .done
         } catch {
-            phase = .error(error)
+            isSelectedCategoryLoading = false
+            if browseResults.isEmpty {
+                selectedCategoryError = error
+            } else {
+                selectedCategoryError = nil
+            }
+            phase = .done
         }
     }
 

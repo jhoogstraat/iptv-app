@@ -17,6 +17,7 @@ final class AppContainer {
     let providerStore: ProviderStore
     let catalog: Catalog
     let favoritesStore: FavoritesStore
+    let watchActivityStore: any WatchActivityStoring
     let backgroundActivityCenter: BackgroundActivityCenter
     let downloadCenter: DownloadCenter
     let connectionMonitor: InternetConnectionMonitor
@@ -32,16 +33,16 @@ final class AppContainer {
         if let modelContainer {
             resolvedModelContainer = modelContainer
         } else {
-            let schema = Schema([])
-            let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-            resolvedModelContainer = try ModelContainer(for: schema, configurations: [modelConfiguration])
+            resolvedModelContainer = try AppPersistence.makeModelContainer()
         }
 
         let providerStore = ProviderStore()
-        let favoritesStore = FavoritesStore()
+        let favoritesStore = FavoritesStore(
+            store: SwiftDataFavoritesStore(modelContainer: resolvedModelContainer)
+        )
         let connectionMonitor = InternetConnectionMonitor.shared
         let backgroundActivityCenter = BackgroundActivityCenter(connectionMonitor: connectionMonitor)
-        let watchActivityStore = DiskWatchActivityStore.shared
+        let watchActivityStore = SwiftDataWatchActivityStore(modelContainer: resolvedModelContainer)
         let imagePrefetcher = URLSessionImagePrefetcher()
         let player = Player(
             watchActivityStore: watchActivityStore,
@@ -61,13 +62,16 @@ final class AppContainer {
         self.providerStore = providerStore
         self.catalog = catalog
         self.favoritesStore = favoritesStore
+        self.watchActivityStore = watchActivityStore
         self.backgroundActivityCenter = backgroundActivityCenter
         self.player = player
         self.connectionMonitor = connectionMonitor
         self.downloadCenter = DownloadCenter(
             providerStore: providerStore,
             catalog: catalog,
-            backgroundActivityCenter: backgroundActivityCenter
+            backgroundActivityCenter: backgroundActivityCenter,
+            store: DownloadStore(modelContainer: resolvedModelContainer),
+            metadataStore: OfflineMetadataStore(modelContainer: resolvedModelContainer)
         )
         self.searchService = catalog
         self.searchFavoritesStore = favoritesStore
@@ -94,7 +98,7 @@ final class AppContainer {
                 providerConfigurationProvider: providerStore,
                 categoryRepository: catalog,
                 streamRepository: catalog,
-                watchActivityStore: DiskWatchActivityStore.shared,
+                watchActivityStore: watchActivityStore,
                 recommendationProvider: LocalRecommendationProvider()
             )
         )

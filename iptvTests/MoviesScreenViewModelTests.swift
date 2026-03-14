@@ -28,6 +28,13 @@ struct MoviesScreenViewModelTests {
         ])
         #expect(viewModel.selectedCategoryID == "1")
         #expect(viewModel.browseResults.map(\.id) == [10])
+        if case .done = viewModel.phase {
+            #expect(true)
+        } else {
+            Issue.record("Expected view model to finish loading")
+        }
+        #expect(viewModel.isSelectedCategoryLoading == false)
+        #expect(viewModel.selectedCategoryError == nil)
     }
 
     @Test
@@ -50,10 +57,11 @@ struct MoviesScreenViewModelTests {
         ])
         #expect(viewModel.selectedCategoryID == "2")
         #expect(viewModel.browseResults.map(\.id) == [20])
+        #expect(viewModel.isSelectedCategoryLoading == false)
     }
 
     @Test
-    func reselectingLoadedCategoryUsesCachedVideosWithoutFetchingAgain() async {
+    func reselectingLoadedCategoryShowsCachedVideosAndRefreshesInBackground() async {
         let action = Category(id: "1", name: "Action")
         let drama = Category(id: "2", name: "Drama")
         let catalog = MoviesBrowsingCatalogSpy()
@@ -68,9 +76,67 @@ struct MoviesScreenViewModelTests {
 
         await viewModel.selectCategory(id: "1")
 
-        #expect(catalog.recordedEvents.isEmpty)
+        #expect(catalog.recordedEvents == [
+            .getStreams(.vod, "1", .refreshNow)
+        ])
         #expect(viewModel.selectedCategoryID == "1")
         #expect(viewModel.browseResults.map(\.id) == [10])
+        #expect(viewModel.selectedCategoryError == nil)
+    }
+
+    @Test
+    func cachedLoadKeepsBrowseShellVisibleWhileRefreshRuns() async {
+        let action = Category(id: "1", name: "Action")
+        let catalog = MoviesBrowsingCatalogSpy()
+        catalog.categoriesByType[.vod] = [action]
+        catalog.cachedVideosByKey["vod:1"] = [makeVideo(id: 10, name: "Alpha")]
+        catalog.streamDelay = .milliseconds(200)
+
+        let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
+        let loadTask = Task { await viewModel.load(policy: .cachedThenRefresh) }
+
+        try? await Task.sleep(for: .milliseconds(40))
+
+        if case .done = viewModel.phase {
+            #expect(true)
+        } else {
+            Issue.record("Expected cached load to keep the browse shell visible")
+        }
+        #expect(viewModel.categories.map(\.id) == ["1"])
+        #expect(viewModel.browseResults.map(\.id) == [10])
+        #expect(viewModel.isSelectedCategoryLoading == false)
+        #expect(viewModel.selectedCategoryError == nil)
+
+        await loadTask.value
+    }
+
+    @Test
+    func uncachedSelectedCategoryShowsSkeletonStateUntilFetchCompletes() async {
+        let action = Category(id: "1", name: "Action")
+        let catalog = MoviesBrowsingCatalogSpy()
+        catalog.categoriesByType[.vod] = [action]
+        catalog.fetchedVideosByKey["vod:1"] = [makeVideo(id: 10, name: "Alpha")]
+        catalog.streamDelay = .milliseconds(200)
+
+        let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
+        let loadTask = Task { await viewModel.load(policy: .cachedThenRefresh) }
+
+        try? await Task.sleep(for: .milliseconds(40))
+
+        if case .done = viewModel.phase {
+            #expect(true)
+        } else {
+            Issue.record("Expected uncached category load to stay in shell mode")
+        }
+        #expect(viewModel.categories.map(\.id) == ["1"])
+        #expect(viewModel.browseResults.isEmpty)
+        #expect(viewModel.isSelectedCategoryLoading)
+        #expect(viewModel.selectedCategoryError == nil)
+
+        await loadTask.value
+
+        #expect(viewModel.browseResults.map(\.id) == [10])
+        #expect(viewModel.isSelectedCategoryLoading == false)
     }
 
     @Test
@@ -168,6 +234,7 @@ private final class MoviesBrowsingCatalogSpy: MoviesBrowsingCatalog {
     var cachedVideosByKey: [String: [Video]] = [:]
     var fetchedVideosByKey: [String: [Video]] = [:]
     var recordedEvents: [Event] = []
+    var streamDelay: Duration?
 
     func getCategories(for contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws {
         recordedEvents.append(.getCategories(contentType, policy))
@@ -179,6 +246,9 @@ private final class MoviesBrowsingCatalogSpy: MoviesBrowsingCatalog {
 
     func getStreams(in category: iptv.Category, contentType: XtreamContentType, policy: CatalogLoadPolicy) async throws {
         recordedEvents.append(.getStreams(contentType, category.id, policy))
+        if let streamDelay {
+            try await Task.sleep(for: streamDelay)
+        }
         let key = "\(contentType.rawValue):\(category.id)"
         if let fetchedVideos = fetchedVideosByKey[key] {
             cachedVideosByKey[key] = fetchedVideos

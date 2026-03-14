@@ -71,9 +71,9 @@ final class StreamPrefetchCoordinator {
         let videos: [Video]
         switch contentType {
         case .vod:
-            videos = catalog.vodCatalog[category] ?? []
+            videos = catalog.cachedVideos(in: category, contentType: .vod) ?? []
         case .series:
-            videos = catalog.seriesCatalog[category] ?? []
+            videos = catalog.cachedVideos(in: category, contentType: .series) ?? []
         case .live:
             videos = []
         }
