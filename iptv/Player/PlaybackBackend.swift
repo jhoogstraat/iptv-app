@@ -54,6 +54,7 @@ protocol PlaybackBackend: AnyObject {
     func qualityVariants() -> [QualityVariant]
     func chapterMarkers() -> [ChapterMarker]
     func availableOutputRoutes() -> [OutputRoute]
+    func supportedAspectRatioModes() -> [PlayerAspectRatioMode]
 
     func selectAudioTrack(id: String)
     func selectSubtitleTrack(id: String)
@@ -89,6 +90,10 @@ extension PlaybackBackend {
 
     func availableOutputRoutes() -> [OutputRoute] {
         []
+    }
+
+    func supportedAspectRatioModes() -> [PlayerAspectRatioMode] {
+        [.fit]
     }
 
     func selectAudioTrack(id: String) {}

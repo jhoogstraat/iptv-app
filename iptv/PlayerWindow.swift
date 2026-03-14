@@ -43,7 +43,7 @@ struct PlayerWindow: Scene {
         }
         .defaultPosition(.center)
         .restorationBehavior(.disabled)
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .windowIdealPlacement { proxy, context in
             let displayBounds = context.defaultDisplay.visibleRect
             let idealSize = proxy.sizeThatFits(.unspecified)
@@ -157,7 +157,7 @@ struct PlayerWindow: Scene {
                     }
 
                     Menu("Aspect Ratio") {
-                        ForEach(PlayerAspectRatioMode.allCases) { mode in
+                        ForEach(player.supportedAspectRatioModes) { mode in
                             Button(mode.label) {
                                 player.setAspectRatio(mode)
                             }

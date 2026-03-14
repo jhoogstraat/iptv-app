@@ -146,22 +146,39 @@ struct PlayerView: View {
         return nil
     }
 
+    private var displayTitle: String {
+        guard let rawTitle = player.currentItem?.name else { return "No item loaded" }
+        return LanguageTaggedText(rawTitle).displayName
+    }
+
+    private var controlsFadeAnimation: Animation {
+        .easeInOut(duration: 0.28)
+    }
+
     var body: some View {
         ZStack {
+            Color.black
+                .ignoresSafeArea()
+
             PlayerRendererContainer()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        isShowingControls.toggle()
-                    }
-                    scheduleAutoHideIfNeeded()
+                    toggleControlsVisibility()
                 }
 
             if isShowingControls {
+                overlayBackground
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+
                 controlsOverlay
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .onAppear {
             scheduleAutoHideIfNeeded()
@@ -210,13 +227,23 @@ struct PlayerView: View {
 
     @ViewBuilder
     private var controlsOverlay: some View {
-        #if os(tvOS)
-        tvControlsOverlay
-        #elseif os(macOS)
-        macControlsOverlay
-        #else
-        mobileControlsOverlay
-        #endif
+        ZStack {
+            Color.clear
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    hideControls()
+                }
+
+            #if os(tvOS)
+            tvControlsOverlay
+            #elseif os(macOS)
+            macControlsOverlay
+            #else
+            mobileControlsOverlay
+            #endif
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var topBar: some View {
@@ -230,18 +257,12 @@ struct PlayerView: View {
                     .background(.black.opacity(0.5))
                     .clipShape(Circle())
             }
+            #if os(macOS)
+            .buttonStyle(.plain)
+            #endif
             .accessibilityIdentifier("player.close")
 
             Spacer()
-
-            if player.isBuffering {
-                Label("Buffering", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.subheadline)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.45))
-                    .clipShape(Capsule())
-            }
         }
     }
 
@@ -254,7 +275,7 @@ struct PlayerView: View {
                     .lineLimit(1)
             }
 
-            Text(player.currentItem?.name ?? "No item loaded")
+            Text(displayTitle)
                 .font(titleFont)
                 .fontWeight(.bold)
                 .foregroundStyle(.white)
@@ -266,10 +287,6 @@ struct PlayerView: View {
                     .foregroundStyle(.white.opacity(0.86))
                     .lineLimit(3)
                     .multilineTextAlignment(.leading)
-            }
-
-            if !streamBadges.isEmpty {
-                streamBadgeRow
             }
         }
     }
@@ -341,6 +358,9 @@ struct PlayerView: View {
             #endif
         }
         .font(.title2)
+        #if os(macOS)
+        .buttonStyle(.plain)
+        #endif
     }
 
     private var timelineControls: some View {
@@ -490,13 +510,8 @@ struct PlayerView: View {
             }
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(bottomPanelBackground)
         }
         .foregroundStyle(.white)
-        .background(overlayBackground)
-        .onTapGesture {
-            scheduleAutoHideIfNeeded()
-        }
     }
     #endif
 
@@ -512,12 +527,22 @@ struct PlayerView: View {
             VStack(alignment: .leading, spacing: 16) {
                 infoPanel
 
-                timelineControls
+                HStack(alignment: .center, spacing: 20) {
+                    if !streamBadges.isEmpty {
+                        streamBadgeRow
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Spacer(minLength: 0)
+                    }
 
-                HStack(alignment: .center, spacing: 16) {
-                    transportStrip
-                    menuStrip
+                    HStack(alignment: .center, spacing: 16) {
+                        transportStrip
+                        menuStrip
+                    }
+                    .padding(.trailing, -24)
                 }
+
+                timelineControls
 
                 if player.outputRoutes.count > 1 {
                     outputRouteSummary
@@ -525,15 +550,12 @@ struct PlayerView: View {
 
                 statusMessages
             }
-            .padding(24)
+            .padding(.top, 24)
+            .padding(.leading, 24)
+            .padding(.bottom, 24)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(bottomPanelBackground)
         }
         .foregroundStyle(.white)
-        .background(overlayBackground)
-        .onTapGesture {
-            scheduleAutoHideIfNeeded()
-        }
     }
     #endif
 
@@ -594,7 +616,6 @@ struct PlayerView: View {
         }
         .padding(28)
         .foregroundStyle(.white)
-        .background(overlayBackground)
         .onAppear {
             focusedControl = .transport
         }
@@ -620,6 +641,9 @@ struct PlayerView: View {
                 .background(.white.opacity(0.12))
                 .clipShape(Circle())
         }
+        #if os(macOS)
+        .buttonStyle(.plain)
+        #endif
         .disabled(player.currentItem == nil)
         .accessibilityIdentifier("player.favorite")
     }
@@ -673,6 +697,7 @@ struct PlayerView: View {
                 }
             }
         }
+        .menuStyle(.borderlessButton)
     }
     #endif
 
@@ -692,33 +717,20 @@ struct PlayerView: View {
     }
 
     private var overlayBackground: some View {
-        LinearGradient(
-            colors: [
-                .clear,
-                .black.opacity(0.24),
-                .black.opacity(0.74)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-    }
+        ZStack {
+            Rectangle()
+                .fill(.black.opacity(0.44))
 
-    private var bottomPanelBackground: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
-            .overlay(
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                .black.opacity(0.22),
-                                .black.opacity(0.5)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+            LinearGradient(
+                colors: [
+                    .black.opacity(0.18),
+                    .black.opacity(0.42),
+                    .black.opacity(0.78)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
             )
+        }
     }
 
     #if os(iOS)
@@ -956,7 +968,7 @@ struct PlayerView: View {
             get: { player.aspectRatioMode },
             set: { player.setAspectRatio($0) }
         )) {
-            ForEach(PlayerAspectRatioMode.allCases) { mode in
+            ForEach(player.supportedAspectRatioModes) { mode in
                 Text(mode.label).tag(mode)
             }
         }
@@ -1228,7 +1240,7 @@ struct PlayerView: View {
 
     private var aspectRatioMenuContent: some View {
         Group {
-            ForEach(PlayerAspectRatioMode.allCases) { mode in
+            ForEach(player.supportedAspectRatioModes) { mode in
                 Button(mode.label) {
                     player.setAspectRatio(mode)
                 }
@@ -1323,14 +1335,29 @@ struct PlayerView: View {
         hideControlsTask = Task {
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
+            withAnimation(controlsFadeAnimation) {
                 isShowingControls = false
             }
         }
     }
 
+    private func toggleControlsVisibility() {
+        if isShowingControls {
+            hideControls()
+        } else {
+            revealControls()
+        }
+    }
+
+    private func hideControls() {
+        hideControlsTask?.cancel()
+        withAnimation(controlsFadeAnimation) {
+            isShowingControls = false
+        }
+    }
+
     private func revealControls() {
-        withAnimation(.easeInOut(duration: 0.2)) {
+        withAnimation(controlsFadeAnimation) {
             isShowingControls = true
         }
         scheduleAutoHideIfNeeded()

@@ -12,6 +12,7 @@ struct LanguageTaggedText {
     let trimmedValue: String
     let prefixLanguageCode: String?
     let strippedPrefixValue: String?
+    let strippedSuffixValue: String?
 
     private let trailingLanguageCode: String?
 
@@ -33,6 +34,7 @@ struct LanguageTaggedText {
             prefixLanguageCode = match.code
             strippedPrefixValue = match.remainder
             trailingLanguageCode = nil
+            strippedSuffixValue = nil
             return
         }
 
@@ -42,17 +44,21 @@ struct LanguageTaggedText {
         if let match = Self.firstMatch(
             in: self.trimmedValue,
             using: Self.suffixPattern,
-            codeCaptureIndex: 2
+            codeCaptureIndex: 2,
+            remainderCaptureIndex: 1
         ) {
             trailingLanguageCode = match.code
+            strippedSuffixValue = match.remainder
         } else if let match = Self.firstMatch(
             in: self.trimmedValue,
             using: Self.exactPattern,
             codeCaptureIndex: 1
         ) {
             trailingLanguageCode = match.code
+            strippedSuffixValue = nil
         } else {
             trailingLanguageCode = nil
+            strippedSuffixValue = nil
         }
     }
 
@@ -62,6 +68,10 @@ struct LanguageTaggedText {
 
     var groupedDisplayName: String {
         strippedPrefixValue ?? trimmedValue
+    }
+
+    var displayName: String {
+        strippedPrefixValue ?? strippedSuffixValue ?? trimmedValue
     }
 }
 

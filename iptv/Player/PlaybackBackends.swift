@@ -136,6 +136,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
     private var automaticQualityTrackID: String?
+    private var currentAspectRatioMode: PlayerAspectRatioMode = .fit
 
     override init() {
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
@@ -335,14 +336,8 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func setAspectRatio(_ mode: PlayerAspectRatioMode) {
-        switch mode {
-        case .fit, .fill, .original:
-            player.videoAspectRatio = nil
-        case .sixteenByNine:
-            player.videoAspectRatio = "16:9"
-        case .fourByThree:
-            player.videoAspectRatio = "4:3"
-        }
+        currentAspectRatioMode = mode
+        applyAspectRatioMode()
     }
 
     func setAudioDelay(milliseconds: Int) {
@@ -351,6 +346,14 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
 
     func availableOutputRoutes() -> [OutputRoute] {
         outputRouteController.availableRoutes()
+    }
+
+    func supportedAspectRatioModes() -> [PlayerAspectRatioMode] {
+        #if os(macOS)
+        [.fit, .fill, .sixteenByNine, .fourByThree]
+        #else
+        [.fit, .sixteenByNine, .fourByThree]
+        #endif
     }
 
     func selectOutputRoute(id: String) {
@@ -374,9 +377,38 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         adjustFilter.brightness.value = NSNumber(value: clamped * 2.0)
     }
 
+    func attachDrawable(_ drawable: AnyObject?) {
+        player.drawable = drawable
+        applyAspectRatioMode()
+    }
+
     private func mediaDuration() -> Double? {
         let value = Double(player.media?.length.intValue ?? 0) / 1000.0
         return value > 0 ? value : nil
+    }
+
+    private func applyAspectRatioMode() {
+        player.scaleFactor = 0
+        player.setCropRatioWithNumerator(0, denominator: 0)
+
+        #if os(macOS)
+        if let videoView = player.drawable as? VLCVideoView {
+            videoView.fillScreen = (currentAspectRatioMode == .fill)
+        }
+        #endif
+
+        switch currentAspectRatioMode {
+        case .fit:
+            player.videoAspectRatio = nil
+        case .fill:
+            player.videoAspectRatio = nil
+        case .sixteenByNine:
+            player.videoAspectRatio = "16:9"
+        case .fourByThree:
+            player.videoAspectRatio = "4:3"
+        case .original:
+            player.videoAspectRatio = nil
+        }
     }
 
     private func currentTime() -> Double {
@@ -695,6 +727,10 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             let markerID = "chapter-\(index)-\(Int((rawStart * 1000).rounded()))"
             return ChapterMarker(id: markerID, title: title, startSeconds: max(0, rawStart))
         }
+    }
+
+    func supportedAspectRatioModes() -> [PlayerAspectRatioMode] {
+        [.fit, .fill]
     }
 
     func availableOutputRoutes() -> [OutputRoute] {

@@ -12,37 +12,35 @@ import VLCKit
 
 #if os(macOS)
 struct VLCKitContentView: NSViewRepresentable {
-    let player: VLCPlayerReference?
+    let backend: VLCPlaybackBackend?
 
     final class Coordinator: NSObject {
-        weak var player: VLCMediaPlayer?
+        weak var backend: VLCPlaybackBackend?
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.black.cgColor
+    func makeNSView(context: Context) -> VLCVideoView {
+        let view = VLCVideoView()
+        view.backColor = .black
         return view
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        guard let player = player as? VLCMediaPlayer else { return }
-        guard context.coordinator.player !== player else { return }
-        context.coordinator.player?.drawable = nil
-        player.drawable = nsView
-        context.coordinator.player = player
+    func updateNSView(_ nsView: VLCVideoView, context: Context) {
+        guard context.coordinator.backend !== backend else { return }
+        context.coordinator.backend?.attachDrawable(nil)
+        backend?.attachDrawable(nsView)
+        context.coordinator.backend = backend
     }
 }
 #else
 struct VLCKitContentView: UIViewRepresentable {
-    let player: VLCPlayerReference?
+    let backend: VLCPlaybackBackend?
 
     final class Coordinator: NSObject {
-        weak var player: VLCMediaPlayer?
+        weak var backend: VLCPlaybackBackend?
     }
 
     func makeCoordinator() -> Coordinator {
@@ -56,11 +54,10 @@ struct VLCKitContentView: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
-        guard let player = player as? VLCMediaPlayer else { return }
-        guard context.coordinator.player !== player else { return }
-        context.coordinator.player?.drawable = nil
-        player.drawable = uiView
-        context.coordinator.player = player
+        guard context.coordinator.backend !== backend else { return }
+        context.coordinator.backend?.attachDrawable(nil)
+        backend?.attachDrawable(uiView)
+        context.coordinator.backend = backend
     }
 }
 #endif
@@ -68,10 +65,10 @@ struct VLCKitContentView: UIViewRepresentable {
 #else
 
 struct VLCKitContentView: View {
-    let player: VLCPlayerReference?
+    let backend: VLCPlaybackBackend?
 
     var body: some View {
-        _ = player
+        _ = backend
         return Color.black
     }
 }

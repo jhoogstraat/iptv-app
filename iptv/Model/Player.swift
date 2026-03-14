@@ -60,6 +60,7 @@ final class Player {
 
     private(set) var playbackSpeed: Double = 1
     private(set) var aspectRatioMode: PlayerAspectRatioMode = .fit
+    private(set) var supportedAspectRatioModes: [PlayerAspectRatioMode] = [.fit]
     private(set) var audioDelayMilliseconds = 0
     private(set) var volume: Double = 1
     private(set) var brightness: Double = 0.5
@@ -143,6 +144,10 @@ final class Player {
 
     var vlcRenderer: VLCPlayerReference? {
         (backend as? VLCPlaybackBackend)?.player
+    }
+
+    var vlcBackend: VLCPlaybackBackend? {
+        backend as? VLCPlaybackBackend
     }
 
     var avRenderer: AVPlayer? {
@@ -238,6 +243,7 @@ final class Player {
 
         playbackSpeed = 1
         aspectRatioMode = .fit
+        supportedAspectRatioModes = [.fit]
         audioDelayMilliseconds = 0
         volume = 1
         brightness = 0.5
@@ -287,9 +293,10 @@ final class Player {
     }
 
     func setAspectRatio(_ mode: PlayerAspectRatioMode) {
-        aspectRatioMode = mode
-        backend?.setAspectRatio(mode)
-        persistPreference("defaultAspectRatio", value: mode.rawValue)
+        let resolvedMode = resolveAspectRatioMode(mode)
+        aspectRatioMode = resolvedMode
+        backend?.setAspectRatio(resolvedMode)
+        persistPreference("defaultAspectRatio", value: resolvedMode.rawValue)
     }
 
     func setAudioDelay(milliseconds: Int) {
@@ -595,6 +602,7 @@ final class Player {
             qualityVariants = [QualityVariant.auto]
             chapterMarkers = []
             outputRoutes = []
+            supportedAspectRatioModes = [.fit]
             selectedOutputRouteID = nil
             return
         }
@@ -607,6 +615,13 @@ final class Player {
         #endif
 
         capabilities = nextCapabilities
+        let backendSupportedAspectRatios = backend.supportedAspectRatioModes()
+        supportedAspectRatioModes = backendSupportedAspectRatios.isEmpty ? [.fit] : backendSupportedAspectRatios
+        let resolvedAspectRatioMode = resolveAspectRatioMode(aspectRatioMode)
+        if resolvedAspectRatioMode != aspectRatioMode {
+            aspectRatioMode = resolvedAspectRatioMode
+            backend.setAspectRatio(resolvedAspectRatioMode)
+        }
 
         audioTracks = nextCapabilities.supportsAudioTracks ? backend.audioTracks() : []
         subtitleTracks = nextCapabilities.supportsSubtitles ? backend.subtitleTracks() : []
@@ -640,7 +655,7 @@ final class Player {
 
     private func applySavedPreferencesIfPossible() {
         backend?.setPlaybackSpeed(playbackSpeed)
-        backend?.setAspectRatio(aspectRatioMode)
+        backend?.setAspectRatio(resolveAspectRatioMode(aspectRatioMode))
         backend?.setAudioDelay(milliseconds: audioDelayMilliseconds)
 
         guard !didApplyTrackPreferencesForCurrentItem else { return }
@@ -775,6 +790,18 @@ final class Player {
         let lhsPrimary = normalizedLHS.split(separator: "-").first.map(String.init)
         let rhsPrimary = normalizedRHS.split(separator: "-").first.map(String.init)
         return lhsPrimary == rhsPrimary
+    }
+
+    private func resolveAspectRatioMode(_ requested: PlayerAspectRatioMode) -> PlayerAspectRatioMode {
+        if supportedAspectRatioModes.contains(requested) {
+            return requested
+        }
+
+        if supportedAspectRatioModes.contains(.fit) {
+            return .fit
+        }
+
+        return supportedAspectRatioModes.first ?? .fit
     }
 
     private var isAdaptiveStream: Bool {
