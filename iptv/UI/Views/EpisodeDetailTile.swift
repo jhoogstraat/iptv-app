@@ -55,7 +55,7 @@ struct EpisodeDetailTile: View {
                     Text(loadError.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await loadSeriesInfo(policy: .refreshNow) }
+                        Task { await loadSeriesInfo(policy: .forceRefresh) }
                     }
                     .buttonStyle(DetailActionStyle(variant: .primary))
                 }
@@ -86,7 +86,7 @@ struct EpisodeDetailTile: View {
             )
         }
         .task {
-            await loadSeriesInfo(policy: .cachedThenRefresh)
+            await loadSeriesInfo(policy: .readThrough)
             await loadFavoriteState()
             await loadEpisodeProgressState()
         }
@@ -851,7 +851,7 @@ struct EpisodeDetailTile: View {
         }
     }
 
-    private func loadSeriesInfo(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
+    private func loadSeriesInfo(policy: CatalogLoadPolicy = .readThrough) async {
         isLoading = true
         defer { isLoading = false }
 

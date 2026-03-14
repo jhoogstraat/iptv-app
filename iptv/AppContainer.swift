@@ -19,6 +19,7 @@ final class AppContainer {
     let favoritesStore: FavoritesStore
     let watchActivityStore: any WatchActivityStoring
     let backgroundActivityCenter: BackgroundActivityCenter
+    let backgroundCatalogueRefresher: BackgroundCatalogueRefresher
     let downloadCenter: DownloadCenter
     let connectionMonitor: InternetConnectionMonitor
 
@@ -35,6 +36,7 @@ final class AppContainer {
         } else {
             resolvedModelContainer = try AppPersistence.makeModelContainer()
         }
+        Self.clearLegacySearchSnapshots(in: resolvedModelContainer)
 
         let providerStore = ProviderStore()
         let favoritesStore = FavoritesStore(
@@ -42,6 +44,7 @@ final class AppContainer {
         )
         let connectionMonitor = InternetConnectionMonitor.shared
         let backgroundActivityCenter = BackgroundActivityCenter(connectionMonitor: connectionMonitor)
+        let backgroundCatalogueRefresher = BackgroundCatalogueRefresher()
         let watchActivityStore = SwiftDataWatchActivityStore(modelContainer: resolvedModelContainer)
         let imagePrefetcher = URLSessionImagePrefetcher()
         let player = Player(
@@ -55,7 +58,8 @@ final class AppContainer {
             providerStore: providerStore,
             modelContainer: resolvedModelContainer,
             imagePrefetcher: imagePrefetcher,
-            activityCenter: backgroundActivityCenter
+            activityCenter: backgroundActivityCenter,
+            backgroundCatalogueRefresher: backgroundCatalogueRefresher
         )
 
         self.modelContainer = resolvedModelContainer
@@ -64,6 +68,7 @@ final class AppContainer {
         self.favoritesStore = favoritesStore
         self.watchActivityStore = watchActivityStore
         self.backgroundActivityCenter = backgroundActivityCenter
+        self.backgroundCatalogueRefresher = backgroundCatalogueRefresher
         self.player = player
         self.connectionMonitor = connectionMonitor
         self.downloadCenter = DownloadCenter(
@@ -150,5 +155,19 @@ final class AppContainer {
             )
             player.load(video, url, presentation: .fullWindow, autoplay: false)
         }
+    }
+
+    private static func clearLegacySearchSnapshots(in modelContainer: ModelContainer) {
+        let context = ModelContext(modelContainer)
+
+        for record in (try? context.fetch(FetchDescriptor<PersistedSearchDocumentRecord>())) ?? [] {
+            context.delete(record)
+        }
+
+        for record in (try? context.fetch(FetchDescriptor<PersistedSearchIndexedCategoryRecord>())) ?? [] {
+            context.delete(record)
+        }
+
+        try? context.save()
     }
 }

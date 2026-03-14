@@ -81,26 +81,27 @@ struct SettingsScreen: View {
         macSettingsBody
             .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 540)
             .onAppear(perform: loadCurrentValues)
-            .task(id: providerStore.revision) {
-                await observeCatalogueSummary()
+            .task(id: "\(providerStore.revision)|\(catalog.catalogueRevision)") {
+                await loadCatalogueSummary()
             }
             .sheet(isPresented: $isShowingPrefixSelector) {
                 prefixSelectionSheet
             }
         #else
         Form {
-            generalOverviewSection
+            providerOverviewSection
             providerCredentialsSection
             providerActionsSection
             librarySection
             playbackSection
+            supportSection
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
         .withBackgroundActivityToolbar()
         .onAppear(perform: loadCurrentValues)
-        .task(id: providerStore.revision) {
-            await observeCatalogueSummary()
+        .task(id: "\(providerStore.revision)|\(catalog.catalogueRevision)") {
+            await loadCatalogueSummary()
         }
         .sheet(isPresented: $isShowingPrefixSelector) {
             NavigationStack {
@@ -116,16 +117,7 @@ struct SettingsScreen: View {
         TabView {
             settingsPane {
                 Form {
-                    generalOverviewSection
-                    aboutSection
-                }
-            }
-            .tabItem {
-                Label("General", systemImage: "gearshape")
-            }
-
-            settingsPane {
-                Form {
+                    providerOverviewSection
                     providerCredentialsSection
                     providerActionsSection
                 }
@@ -151,6 +143,15 @@ struct SettingsScreen: View {
             .tabItem {
                 Label("Playback", systemImage: "play.rectangle")
             }
+
+            settingsPane {
+                Form {
+                    supportSection
+                }
+            }
+            .tabItem {
+                Label("About", systemImage: "info.circle")
+            }
         }
     }
 
@@ -163,12 +164,18 @@ struct SettingsScreen: View {
     }
     #endif
 
-    private var generalOverviewSection: some View {
+    private var providerOverviewSection: some View {
         Section {
             catalogueStatsGrid
 
-            LabeledContent("Provider") {
+            LabeledContent("Status") {
                 providerStatusBadge
+            }
+
+            LabeledContent("Type") {
+                Text(providerTypeSummary)
+                    .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
+                    .fixedSize()
             }
 
             LabeledContent("Endpoint") {
@@ -180,12 +187,6 @@ struct SettingsScreen: View {
             LabeledContent("Credentials") {
                 Text(providerStore.hasConfiguration ? "Stored Securely" : "Not Configured")
                     .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
-            }
-
-            LabeledContent("Excluded Prefixes") {
-                Text(excludedPrefixesSummary)
-                    .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
-                    .multilineTextAlignment(.trailing)
             }
 
             if let validationError = providerStore.lastValidationError, !providerStore.hasConfiguration {
@@ -222,6 +223,11 @@ struct SettingsScreen: View {
                 value: seriesCountText,
                 subtitle: seriesCountSubtitle
             )
+            statsCard(
+                title: "TV",
+                value: tvCountText,
+                subtitle: tvCountSubtitle
+            )
         }
         #else
         VStack(spacing: 12) {
@@ -234,6 +240,11 @@ struct SettingsScreen: View {
                 title: "Series",
                 value: seriesCountText,
                 subtitle: seriesCountSubtitle
+            )
+            statsCard(
+                title: "TV",
+                value: tvCountText,
+                subtitle: tvCountSubtitle
             )
         }
         #endif
@@ -272,6 +283,10 @@ struct SettingsScreen: View {
         return (catalogueSummary?.seriesCount ?? 0).formatted()
     }
 
+    private var tvCountText: String {
+        "Soon"
+    }
+
     private var movieCountSubtitle: String {
         guard let catalogueSummary else {
             return providerStore.hasConfiguration ? "Counting titles while your provider is being indexed." : "Configure a provider to show catalogue size."
@@ -304,6 +319,10 @@ struct SettingsScreen: View {
         return "Included in your provider"
     }
 
+    private var tvCountSubtitle: String {
+        "Live TV stats will appear here once TV support lands."
+    }
+
     private var providerCredentialsSection: some View {
         Section {
             TextField(text: $baseURL, prompt: Text("example.com or https://example.com")) {
@@ -330,7 +349,7 @@ struct SettingsScreen: View {
             .textContentType(.password)
             #endif
         } header: {
-            Text("Provider Credentials")
+            Text("Provider Settings")
         } footer: {
             Text("The password is stored in the system keychain. The API URL is normalized to the provider's `player_api.php` endpoint when needed.")
         }
@@ -516,28 +535,32 @@ struct SettingsScreen: View {
         }
     }
 
-    private var aboutSection: some View {
-        Section("About") {
+    private var supportSection: some View {
+        Section("Help & Legal") {
+            LabeledContent("Help", value: "Coming Soon")
+            LabeledContent("Licenses", value: "Coming Soon")
+            LabeledContent("Terms", value: "Coming Soon")
             LabeledContent("Version", value: appVersionDescription)
-            LabeledContent("Platform", value: platformDescription)
-            LabeledContent("Configuration Revision", value: String(providerStore.revision))
-            LabeledContent("Secure Storage", value: "System Keychain")
         }
     }
 
     private var providerStatusBadge: some View {
-        Label {
-            Text(providerStore.hasConfiguration ? "Configured" : "Needs Setup")
-        } icon: {
+        HStack(spacing: 6) {
             Image(systemName: providerStore.hasConfiguration ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+            Text(providerStore.hasConfiguration ? "Configured" : "Needs Setup")
         }
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(providerStore.hasConfiguration ? .green : .orange)
+        .fixedSize()
     }
 
     private var providerEndpointSummary: String {
         let trimmed = providerStore.baseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Not configured" : trimmed
+    }
+
+    private var providerTypeSummary: String {
+        "Xtream API"
     }
 
     private var excludedPrefixesSummary: String {
@@ -562,20 +585,6 @@ struct SettingsScreen: View {
         }
     }
 
-    private var platformDescription: String {
-        #if os(macOS)
-        return "macOS"
-        #elseif os(iOS)
-        return "iOS"
-        #elseif os(tvOS)
-        return "tvOS"
-        #elseif os(visionOS)
-        return "visionOS"
-        #else
-        return "Apple Platform"
-        #endif
-    }
-
     private func loadCurrentValues() {
         baseURL = providerStore.baseURLInput
         username = providerStore.username()
@@ -584,7 +593,7 @@ struct SettingsScreen: View {
         selectedVisiblePrefixes = Set()
     }
 
-    private func observeCatalogueSummary() async {
+    private func loadCatalogueSummary() async {
         guard providerStore.hasConfiguration else {
             await MainActor.run {
                 catalogueSummary = nil
@@ -597,20 +606,16 @@ struct SettingsScreen: View {
             isLoadingCatalogueSummary = true
         }
 
-        while !Task.isCancelled && providerStore.hasConfiguration {
-            do {
-                let summary = try await catalog.providerCatalogueSummary()
-                await MainActor.run {
-                    catalogueSummary = summary
-                    isLoadingCatalogueSummary = false
-                }
-            } catch {
-                await MainActor.run {
-                    isLoadingCatalogueSummary = false
-                }
+        do {
+            let summary = try await catalog.providerCatalogueSummary()
+            await MainActor.run {
+                catalogueSummary = summary
+                isLoadingCatalogueSummary = false
             }
-
-            try? await Task.sleep(for: .seconds(5))
+        } catch {
+            await MainActor.run {
+                isLoadingCatalogueSummary = false
+            }
         }
     }
 
@@ -772,6 +777,9 @@ private extension View {
 }
 
 #Preview {
+    let appContainer = try! AppContainer()
+
     SettingsScreen()
-        .environment(ProviderStore())
+        .environment(appContainer.providerStore)
+        .environment(appContainer.catalog)
 }

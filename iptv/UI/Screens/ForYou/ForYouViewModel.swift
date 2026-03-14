@@ -52,7 +52,7 @@ final class ForYouViewModel {
         self.seriesCategoryLimit = seriesCategoryLimit
     }
 
-    func load(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
+    func load(policy: CatalogLoadPolicy = .readThrough) async {
         guard providerConfigurationProvider.hasProviderConfiguration else {
             phase = .idle
             hero = nil
@@ -82,25 +82,6 @@ final class ForYouViewModel {
                 throw vodOutcome.error ?? seriesOutcome.error ?? CatalogError.missingProviderConfiguration
             }
 
-            let selectedVodCategories = vodOutcome.categories
-            let selectedSeriesCategories = seriesOutcome.categories
-
-            for category in selectedVodCategories {
-                do {
-                    try await streamRepository.loadStreams(in: category, contentType: .vod, policy: policy)
-                } catch {
-                    logger.debug("ForYou VOD prefetch failed for category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                }
-            }
-
-            for category in selectedSeriesCategories {
-                do {
-                    try await streamRepository.loadStreams(in: category, contentType: .series, policy: policy)
-                } catch {
-                    logger.debug("ForYou series prefetch failed for category \(category.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                }
-            }
-
             let providerFingerprint = try currentProviderFingerprint()
             let records = await watchActivityStore.loadAll()
                 .filter { $0.providerFingerprint == providerFingerprint }
@@ -108,12 +89,12 @@ final class ForYouViewModel {
             let context = RecommendationContext(
                 providerFingerprint: providerFingerprint,
                 watchRecords: records,
-                vodCategories: selectedVodCategories,
-                seriesCategories: selectedSeriesCategories,
-                vodCatalog: selectedVodCategories.reduce(into: [:]) { partialResult, category in
+                vodCategories: vodOutcome.categories,
+                seriesCategories: seriesOutcome.categories,
+                vodCatalog: vodOutcome.categories.reduce(into: [:]) { partialResult, category in
                     partialResult[category] = streamRepository.videos(in: category, contentType: .vod)
                 },
-                seriesCatalog: selectedSeriesCategories.reduce(into: [:]) { partialResult, category in
+                seriesCatalog: seriesOutcome.categories.reduce(into: [:]) { partialResult, category in
                     partialResult[category] = streamRepository.videos(in: category, contentType: .series)
                 }
             )
@@ -133,7 +114,7 @@ final class ForYouViewModel {
     }
 
     func refresh() async {
-        await load(policy: .refreshNow)
+        await load(policy: .forceRefresh)
     }
 
     private func currentProviderFingerprint() throws -> String {

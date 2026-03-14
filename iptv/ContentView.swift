@@ -18,7 +18,6 @@ struct ContentView: View {
     @Environment(BackgroundActivityCenter.self) private var backgroundActivityCenter
     @Environment(ProviderStore.self) private var providerStore
     @State private var selectedTab: Tabs = ProcessInfo.processInfo.arguments.contains("--uitest-open-movies") ? .movies : .home
-    @State private var warmupCoordinator = CatalogWarmupCoordinator()
     @State private var isShowingUITestSettings = false
 
     private var isUITestOpenMovies: Bool {
@@ -110,10 +109,10 @@ struct ContentView: View {
         #endif
         .task(id: providerStore.revision) {
             guard providerStore.hasConfiguration else {
-                warmupCoordinator.stop()
+                await catalog.stopBackgroundRefreshing()
                 return
             }
-            warmupCoordinator.start(providerRevision: providerStore.revision, catalog: catalog)
+            await catalog.startBackgroundRefreshing()
         }
     }
 

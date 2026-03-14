@@ -20,11 +20,11 @@ struct MoviesScreenViewModelTests {
         catalog.cachedVideosByKey["vod:1"] = [makeVideo(id: 10, name: "Alpha")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(policy: .refreshNow)
+        await viewModel.load(policy: .forceRefresh)
 
         #expect(catalog.recordedEvents == [
-            .getCategories(.vod, .refreshNow),
-            .getStreams(.vod, "1", .refreshNow)
+            .getCategories(.vod, .forceRefresh),
+            .getStreams(.vod, "1", .forceRefresh)
         ])
         #expect(viewModel.selectedCategoryID == "1")
         #expect(viewModel.browseResults.map(\.id) == [10])
@@ -47,13 +47,13 @@ struct MoviesScreenViewModelTests {
         catalog.fetchedVideosByKey["vod:2"] = [makeVideo(id: 20, name: "Beta")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(policy: .cachedThenRefresh)
+        await viewModel.load(policy: .readThrough)
         catalog.recordedEvents.removeAll()
 
         await viewModel.selectCategory(id: "2")
 
         #expect(catalog.recordedEvents == [
-            .getStreams(.vod, "2", .cachedThenRefresh)
+            .getStreams(.vod, "2", .readThrough)
         ])
         #expect(viewModel.selectedCategoryID == "2")
         #expect(viewModel.browseResults.map(\.id) == [20])
@@ -61,7 +61,7 @@ struct MoviesScreenViewModelTests {
     }
 
     @Test
-    func reselectingLoadedCategoryShowsCachedVideosAndRefreshesInBackground() async {
+    func reselectingLoadedCategoryUsesCachedVideosWithoutForceRefresh() async {
         let action = Category(id: "1", name: "Action")
         let drama = Category(id: "2", name: "Drama")
         let catalog = MoviesBrowsingCatalogSpy()
@@ -70,14 +70,14 @@ struct MoviesScreenViewModelTests {
         catalog.cachedVideosByKey["vod:2"] = [makeVideo(id: 20, name: "Beta")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(policy: .cachedThenRefresh)
+        await viewModel.load(policy: .readThrough)
         await viewModel.selectCategory(id: "2")
         catalog.recordedEvents.removeAll()
 
         await viewModel.selectCategory(id: "1")
 
         #expect(catalog.recordedEvents == [
-            .getStreams(.vod, "1", .refreshNow)
+            .getStreams(.vod, "1", .readThrough)
         ])
         #expect(viewModel.selectedCategoryID == "1")
         #expect(viewModel.browseResults.map(\.id) == [10])
@@ -93,7 +93,7 @@ struct MoviesScreenViewModelTests {
         catalog.streamDelay = .milliseconds(200)
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        let loadTask = Task { await viewModel.load(policy: .cachedThenRefresh) }
+        let loadTask = Task { await viewModel.load(policy: .readThrough) }
 
         try? await Task.sleep(for: .milliseconds(40))
 
@@ -119,7 +119,7 @@ struct MoviesScreenViewModelTests {
         catalog.streamDelay = .milliseconds(200)
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        let loadTask = Task { await viewModel.load(policy: .cachedThenRefresh) }
+        let loadTask = Task { await viewModel.load(policy: .readThrough) }
 
         try? await Task.sleep(for: .milliseconds(40))
 
@@ -148,19 +148,19 @@ struct MoviesScreenViewModelTests {
         catalog.cachedVideosByKey["vod:old"] = [makeVideo(id: 10, name: "Legacy")]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(policy: .cachedThenRefresh)
+        await viewModel.load(policy: .readThrough)
 
         catalog.categoriesByType[.vod] = [newCategory]
         catalog.cachedVideosByKey["vod:new"] = [makeVideo(id: 20, name: "Fresh")]
         catalog.recordedEvents.removeAll()
 
-        await viewModel.load(policy: .refreshNow)
+        await viewModel.load(policy: .forceRefresh)
 
         #expect(viewModel.selectedCategoryID == "new")
         #expect(viewModel.browseResults.map(\.id) == [20])
         #expect(catalog.recordedEvents == [
-            .getCategories(.vod, .refreshNow),
-            .getStreams(.vod, "new", .refreshNow)
+            .getCategories(.vod, .forceRefresh),
+            .getStreams(.vod, "new", .forceRefresh)
         ])
     }
 
@@ -176,7 +176,7 @@ struct MoviesScreenViewModelTests {
         ]
 
         let viewModel = MoviesScreenViewModel(contentType: .vod, catalog: catalog)
-        await viewModel.load(policy: .cachedThenRefresh)
+        await viewModel.load(policy: .readThrough)
         viewModel.queryText = "patrol"
         viewModel.browseSort = .rating
 

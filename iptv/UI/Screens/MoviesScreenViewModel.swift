@@ -147,7 +147,7 @@ final class MoviesScreenViewModel {
         browseResults = []
     }
 
-    func load(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
+    func load(policy: CatalogLoadPolicy = .readThrough) async {
         if categories.isEmpty {
             phase = .loadingCatalog
         }
@@ -178,7 +178,7 @@ final class MoviesScreenViewModel {
     func selectCategory(id: String?) async {
         guard selectedCategoryID != id else {
             if selectedCategoryError != nil && browseResults.isEmpty {
-                await loadSelectedCategory(policy: .cachedThenRefresh)
+                await loadSelectedCategory(policy: .readThrough)
                 return
             }
             await refreshBrowseResultsNow()
@@ -204,12 +204,12 @@ final class MoviesScreenViewModel {
             phase = .done
         }
 
-        await loadSelectedCategory(policy: .cachedThenRefresh)
+        await loadSelectedCategory(policy: .readThrough)
     }
 
     func refreshSelectedCategory() async {
         selectedCategoryError = nil
-        await loadSelectedCategory(policy: .refreshNow)
+        await loadSelectedCategory(policy: .forceRefresh)
     }
 
     func video(for item: MoviesBrowseItem) -> Video? {
@@ -230,7 +230,7 @@ final class MoviesScreenViewModel {
         selectedCategoryID = categories.first?.id
     }
 
-    private func loadSelectedCategory(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
+    private func loadSelectedCategory(policy: CatalogLoadPolicy = .readThrough) async {
         guard let category = selectedCategory else {
             sourceItems = []
             videosByID = [:]
@@ -257,14 +257,7 @@ final class MoviesScreenViewModel {
         }
 
         do {
-            let effectivePolicy: CatalogLoadPolicy
-            if cachedVideos != nil, policy == .cachedThenRefresh {
-                effectivePolicy = .refreshNow
-            } else {
-                effectivePolicy = policy
-            }
-
-            try await catalog.getStreams(in: category, contentType: contentType, policy: effectivePolicy)
+            try await catalog.getStreams(in: category, contentType: contentType, policy: policy)
             let resolvedVideos = catalog.cachedVideos(in: category, contentType: contentType) ?? []
             applySourceVideos(resolvedVideos)
             await refreshBrowseResultsNow()

@@ -298,18 +298,22 @@ actor SearchIndexStore {
 
     private var indexesByProvider: [String: ProviderIndex] = [:]
     private var hydratedProviders: Set<String> = []
-    private let snapshotStore: any SearchIndexSnapshotStore
+    private let snapshotStore: (any SearchIndexSnapshotStore)?
+    private let modelContainer: ModelContainer?
 
     init() {
         self.snapshotStore = DiskSnapshotStore()
+        self.modelContainer = nil
     }
 
     init(snapshotDirectoryURL: URL) {
         self.snapshotStore = DiskSnapshotStore(directoryURL: snapshotDirectoryURL)
+        self.modelContainer = nil
     }
 
     init(modelContainer: ModelContainer) {
-        self.snapshotStore = SwiftDataSearchIndexSnapshotStore(modelContainer: modelContainer)
+        self.snapshotStore = nil
+        self.modelContainer = modelContainer
     }
 
     func replaceCategory(
@@ -319,6 +323,18 @@ actor SearchIndexStore {
         categoryName: String,
         providerFingerprint: String
     ) async {
+        if let modelContainer {
+            try? replaceCategoryInSwiftData(
+                videos: videos,
+                contentType: contentType,
+                categoryID: categoryID,
+                categoryName: categoryName,
+                providerFingerprint: providerFingerprint,
+                modelContainer: modelContainer
+            )
+            return
+        }
+
         guard contentType == .vod || contentType == .series else { return }
         await ensureLoaded(providerFingerprint: providerFingerprint)
 
@@ -371,7 +387,7 @@ actor SearchIndexStore {
 
         providerIndex.markCategoryIndexed(cleanedCategoryID, for: contentType)
         indexesByProvider[providerFingerprint] = providerIndex
-        try? await snapshotStore.save(providerIndex, providerFingerprint: providerFingerprint)
+        try? await snapshotStore?.save(providerIndex, providerFingerprint: providerFingerprint)
     }
 
     func upsert(
@@ -395,6 +411,16 @@ actor SearchIndexStore {
         categoryID: String,
         providerFingerprint: String
     ) async {
+        if let modelContainer {
+            try? removeCategoryFromSwiftData(
+                contentType: contentType,
+                categoryID: categoryID,
+                providerFingerprint: providerFingerprint,
+                modelContainer: modelContainer
+            )
+            return
+        }
+
         guard contentType == .vod || contentType == .series else { return }
         await ensureLoaded(providerFingerprint: providerFingerprint)
 
@@ -404,33 +430,41 @@ actor SearchIndexStore {
             categoryID: categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         indexesByProvider[providerFingerprint] = providerIndex
-        try? await snapshotStore.save(providerIndex, providerFingerprint: providerFingerprint)
+        try? await snapshotStore?.save(providerIndex, providerFingerprint: providerFingerprint)
     }
 
     func query(_ query: SearchQuery, providerFingerprint: String) async -> [SearchResultItem] {
-        await ensureLoaded(providerFingerprint: providerFingerprint)
-        guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
+        let documents: [SearchDocument]
+        if let modelContainer {
+            documents = (try? loadDocumentsFromSwiftData(
+                providerFingerprint: providerFingerprint,
+                acceptedContentTypes: query.scope.acceptedContentTypes,
+                modelContainer: modelContainer
+            )) ?? []
+        } else {
+            await ensureLoaded(providerFingerprint: providerFingerprint)
+            guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
+            let candidateKeys: Set<String>
+            switch query.scope {
+            case .all:
+                candidateKeys = providerIndex.movieKeys.union(providerIndex.seriesKeys)
+            case .movies:
+                candidateKeys = providerIndex.movieKeys
+            case .series:
+                candidateKeys = providerIndex.seriesKeys
+            }
+            documents = candidateKeys.compactMap { providerIndex.documentsByKey[$0] }
+        }
 
         let now = Date()
         let normalizedQuery = Self.normalize(query.text)
         let normalizedGenreFilters = Set(query.filters.genres.map(Self.normalize))
         let normalizedLanguageFilters = Set(query.filters.languages.map(Self.normalize))
 
-        let candidateKeys: Set<String>
-        switch query.scope {
-        case .all:
-            candidateKeys = providerIndex.movieKeys.union(providerIndex.seriesKeys)
-        case .movies:
-            candidateKeys = providerIndex.movieKeys
-        case .series:
-            candidateKeys = providerIndex.seriesKeys
-        }
-
         var rankedDocuments: [RankedDocument] = []
-        rankedDocuments.reserveCapacity(candidateKeys.count)
+        rankedDocuments.reserveCapacity(documents.count)
 
-        for key in candidateKeys {
-            guard let doc = providerIndex.documentsByKey[key] else { continue }
+        for doc in documents {
             guard matchesFilters(
                 doc: doc,
                 filters: query.filters,
@@ -481,25 +515,33 @@ actor SearchIndexStore {
     }
 
     func facetValues(scope: SearchMediaScope, providerFingerprint: String) async -> SearchFacetValues {
-        await ensureLoaded(providerFingerprint: providerFingerprint)
-        guard let providerIndex = indexesByProvider[providerFingerprint] else {
-            return SearchFacetValues(genres: [], languages: [])
-        }
-
-        let candidateKeys: Set<String>
-        switch scope {
-        case .all:
-            candidateKeys = providerIndex.movieKeys.union(providerIndex.seriesKeys)
-        case .movies:
-            candidateKeys = providerIndex.movieKeys
-        case .series:
-            candidateKeys = providerIndex.seriesKeys
+        let documents: [SearchDocument]
+        if let modelContainer {
+            documents = (try? loadDocumentsFromSwiftData(
+                providerFingerprint: providerFingerprint,
+                acceptedContentTypes: scope.acceptedContentTypes,
+                modelContainer: modelContainer
+            )) ?? []
+        } else {
+            await ensureLoaded(providerFingerprint: providerFingerprint)
+            guard let providerIndex = indexesByProvider[providerFingerprint] else {
+                return SearchFacetValues(genres: [], languages: [])
+            }
+            let candidateKeys: Set<String>
+            switch scope {
+            case .all:
+                candidateKeys = providerIndex.movieKeys.union(providerIndex.seriesKeys)
+            case .movies:
+                candidateKeys = providerIndex.movieKeys
+            case .series:
+                candidateKeys = providerIndex.seriesKeys
+            }
+            documents = candidateKeys.compactMap { providerIndex.documentsByKey[$0] }
         }
 
         var genres = Set<String>()
         var languages = Set<String>()
-        for key in candidateKeys {
-            guard let document = providerIndex.documentsByKey[key] else { continue }
+        for document in documents {
             genres.formUnion(document.genres)
             if let language = document.language, !language.isEmpty {
                 languages.insert(language)
@@ -513,6 +555,14 @@ actor SearchIndexStore {
     }
 
     func indexedCategories(scope: SearchMediaScope, providerFingerprint: String) async -> Set<String> {
+        if let modelContainer {
+            return (try? loadIndexedCategoriesFromSwiftData(
+                scope: scope,
+                providerFingerprint: providerFingerprint,
+                modelContainer: modelContainer
+            )) ?? []
+        }
+
         await ensureLoaded(providerFingerprint: providerFingerprint)
         guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
         switch scope {
@@ -526,6 +576,18 @@ actor SearchIndexStore {
     }
 
     func providerCounts(providerFingerprint: String) async -> ProviderCounts {
+        if let modelContainer {
+            let documents = (try? loadDocumentsFromSwiftData(
+                providerFingerprint: providerFingerprint,
+                acceptedContentTypes: [.vod, .series],
+                modelContainer: modelContainer
+            )) ?? []
+            return ProviderCounts(
+                movies: documents.filter { $0.indexedContentType == .vod }.count,
+                series: documents.filter { $0.indexedContentType == .series }.count
+            )
+        }
+
         await ensureLoaded(providerFingerprint: providerFingerprint)
         guard let providerIndex = indexesByProvider[providerFingerprint] else {
             return ProviderCounts(movies: 0, series: 0)
@@ -537,21 +599,284 @@ actor SearchIndexStore {
     }
 
     func clear(providerFingerprint: String) async {
+        if let modelContainer {
+            try? clearSwiftData(providerFingerprint: providerFingerprint, modelContainer: modelContainer)
+            return
+        }
+
         indexesByProvider[providerFingerprint] = nil
         hydratedProviders.insert(providerFingerprint)
-        try? await snapshotStore.remove(providerFingerprint: providerFingerprint)
+        try? await snapshotStore?.remove(providerFingerprint: providerFingerprint)
     }
 
     func clearAll() async {
+        if let modelContainer {
+            try? clearSwiftData(providerFingerprint: nil, modelContainer: modelContainer)
+            return
+        }
+
         indexesByProvider.removeAll()
         hydratedProviders.removeAll()
-        try? await snapshotStore.removeAll()
+        try? await snapshotStore?.removeAll()
     }
 
     private func ensureLoaded(providerFingerprint: String) async {
+        guard modelContainer == nil else { return }
         guard !hydratedProviders.contains(providerFingerprint) else { return }
         hydratedProviders.insert(providerFingerprint)
-        indexesByProvider[providerFingerprint] = try? await snapshotStore.load(providerFingerprint: providerFingerprint)
+        indexesByProvider[providerFingerprint] = try? await snapshotStore?.load(providerFingerprint: providerFingerprint)
+    }
+
+    private func loadDocumentsFromSwiftData(
+        providerFingerprint: String,
+        acceptedContentTypes: Set<XtreamContentType>,
+        modelContainer: ModelContainer
+    ) throws -> [SearchDocument] {
+        let context = ModelContext(modelContainer)
+        let rawAcceptedContentTypes = Set(acceptedContentTypes.map(\.rawValue))
+        let records = try context.fetch(
+            FetchDescriptor<PersistedStreamRecord>(
+                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
+            )
+        )
+
+        var documentsByKey: [String: SearchDocument] = [:]
+        documentsByKey.reserveCapacity(records.count)
+
+        for record in records {
+            guard let indexedContentType = XtreamContentType(rawValue: record.contentType),
+                  rawAcceptedContentTypes.contains(indexedContentType.rawValue) else {
+                continue
+            }
+
+            let key = Self.makeKey(contentType: indexedContentType, videoID: record.videoID)
+            var categoryNamesByID = documentsByKey[key]?.categoryNamesByID ?? [:]
+            var normalizedCategoryNamesByID = documentsByKey[key]?.normalizedCategoryNamesByID ?? [:]
+
+            categoryNamesByID[record.categoryID] = record.categoryName
+            normalizedCategoryNamesByID[record.categoryID] = record.normalizedCategoryName
+
+            documentsByKey[key] = SearchDocument(
+                key: key,
+                videoID: record.videoID,
+                indexedContentType: indexedContentType,
+                playbackContentType: record.playbackContentType,
+                title: record.name,
+                normalizedTitle: record.normalizedTitle,
+                containerExtension: record.containerExtension,
+                coverImageURL: record.coverImageURL,
+                rating: record.rating,
+                addedAtRaw: record.addedAtRaw,
+                addedAt: record.addedAt,
+                language: record.language,
+                normalizedLanguage: record.normalizedLanguage,
+                categoryNamesByID: categoryNamesByID,
+                normalizedCategoryNamesByID: normalizedCategoryNamesByID
+            )
+        }
+
+        return Array(documentsByKey.values)
+    }
+
+    private func loadIndexedCategoriesFromSwiftData(
+        scope: SearchMediaScope,
+        providerFingerprint: String,
+        modelContainer: ModelContainer
+    ) throws -> Set<String> {
+        let context = ModelContext(modelContainer)
+        let rawAcceptedContentTypes = Set(scope.acceptedContentTypes.map(\.rawValue))
+        let records = try context.fetch(
+            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
+                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
+            )
+        )
+
+        return Set(
+            records
+                .filter { record in
+                    rawAcceptedContentTypes.contains(record.contentType) &&
+                    record.lastSuccessfulRefreshAt != nil
+                }
+                .map(\.categoryID)
+        )
+    }
+
+    private func replaceCategoryInSwiftData(
+        videos: [SearchVideoSnapshot],
+        contentType: XtreamContentType,
+        categoryID: String,
+        categoryName: String,
+        providerFingerprint: String,
+        modelContainer: ModelContainer
+    ) throws {
+        guard contentType == .vod || contentType == .series else { return }
+
+        let context = ModelContext(modelContainer)
+        let rawContentType = contentType.rawValue
+        let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCategoryName = Self.normalize(cleanedCategoryName)
+        let now = Date()
+
+        for record in try context.fetch(
+            FetchDescriptor<PersistedStreamRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == rawContentType &&
+                    $0.categoryID == cleanedCategoryID
+                }
+            )
+        ) {
+            context.delete(record)
+        }
+
+        for (index, video) in videos.enumerated() {
+            let language = video.language?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? LanguageTaggedText(video.name).languageCode
+            let addedAtRaw = video.addedAtRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
+            context.insert(
+                PersistedStreamRecord(
+                    id: "\(providerFingerprint)|\(rawContentType)|\(cleanedCategoryID)|\(video.id)",
+                    providerFingerprint: providerFingerprint,
+                    contentType: rawContentType,
+                    categoryID: cleanedCategoryID,
+                    categoryName: cleanedCategoryName,
+                    normalizedCategoryName: normalizedCategoryName,
+                    pageToken: nil,
+                    videoID: video.id,
+                    sortIndex: index,
+                    name: video.name,
+                    normalizedTitle: Self.normalize(video.name),
+                    language: language,
+                    normalizedLanguage: language.map(Self.normalize),
+                    containerExtension: video.containerExtension,
+                    playbackContentType: Self.playbackContentType(from: video.contentType, indexedAs: contentType),
+                    coverImageURL: video.coverImageURL,
+                    tmdbId: nil,
+                    rating: video.rating,
+                    addedAtRaw: addedAtRaw,
+                    addedAt: Self.parseDate(addedAtRaw),
+                    savedAt: now,
+                    lastAccessAt: now
+                )
+            )
+        }
+
+        try upsertRefreshState(
+            context: context,
+            providerFingerprint: providerFingerprint,
+            contentType: rawContentType,
+            categoryID: cleanedCategoryID,
+            at: now,
+            error: nil
+        )
+        try context.save()
+    }
+
+    private func removeCategoryFromSwiftData(
+        contentType: XtreamContentType,
+        categoryID: String,
+        providerFingerprint: String,
+        modelContainer: ModelContainer
+    ) throws {
+        guard contentType == .vod || contentType == .series else { return }
+
+        let context = ModelContext(modelContainer)
+        let rawContentType = contentType.rawValue
+        let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for record in try context.fetch(
+            FetchDescriptor<PersistedStreamRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == rawContentType &&
+                    $0.categoryID == cleanedCategoryID
+                }
+            )
+        ) {
+            context.delete(record)
+        }
+
+        for record in try context.fetch(
+            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == rawContentType &&
+                    $0.categoryID == cleanedCategoryID
+                }
+            )
+        ) {
+            context.delete(record)
+        }
+
+        try context.save()
+    }
+
+    private func clearSwiftData(providerFingerprint: String?, modelContainer: ModelContainer) throws {
+        let context = ModelContext(modelContainer)
+
+        for record in try context.fetch(FetchDescriptor<PersistedStreamRecord>()) {
+            if providerFingerprint == nil || record.providerFingerprint == providerFingerprint {
+                context.delete(record)
+            }
+        }
+
+        for record in try context.fetch(FetchDescriptor<PersistedCategoryRefreshStateRecord>()) {
+            if providerFingerprint == nil || record.providerFingerprint == providerFingerprint {
+                context.delete(record)
+            }
+        }
+
+        try context.save()
+    }
+
+    private func upsertRefreshState(
+        context: ModelContext,
+        providerFingerprint: String,
+        contentType: String,
+        categoryID: String,
+        at date: Date,
+        error: String?
+    ) throws {
+        let existing = try context.fetch(
+            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == contentType &&
+                    $0.categoryID == categoryID
+                }
+            )
+        ).first
+
+        if let existing {
+            existing.lastAttemptedRefreshAt = date
+            if let error {
+                existing.failureCount += 1
+                existing.lastError = error
+                let backoff = min(900.0, 15.0 * pow(2.0, Double(existing.failureCount)))
+                existing.nextEligibleRefreshAt = date.addingTimeInterval(backoff)
+            } else {
+                existing.lastSuccessfulRefreshAt = date
+                existing.failureCount = 0
+                existing.lastError = nil
+                existing.nextEligibleRefreshAt = date.addingTimeInterval(6 * 60 * 60)
+            }
+            return
+        }
+
+        context.insert(
+            PersistedCategoryRefreshStateRecord(
+                id: "\(providerFingerprint)|\(contentType)|\(categoryID)",
+                providerFingerprint: providerFingerprint,
+                contentType: contentType,
+                categoryID: categoryID,
+                lastSuccessfulRefreshAt: error == nil ? date : nil,
+                lastAttemptedRefreshAt: date,
+                nextEligibleRefreshAt: error == nil ? date.addingTimeInterval(6 * 60 * 60) : date.addingTimeInterval(15),
+                failureCount: error == nil ? 0 : 1,
+                lastError: error
+            )
+        )
     }
 
     private static func formatRating(_ rating: Double?) -> String? {
@@ -709,7 +1034,7 @@ actor SearchIndexStore {
         return normalized.isEmpty ? contentType.playbackPathComponent : normalized
     }
 
-    private static func normalize(_ input: String) -> String {
+    static func normalize(_ input: String) -> String {
         input
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
@@ -717,7 +1042,7 @@ actor SearchIndexStore {
             .lowercased()
     }
 
-    private static func parseDate(_ raw: String?) -> Date? {
+    static func parseDate(_ raw: String?) -> Date? {
         guard let raw else { return nil }
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }

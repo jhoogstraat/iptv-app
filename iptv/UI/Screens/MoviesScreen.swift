@@ -77,7 +77,7 @@ struct MoviesScreen: View {
                 return
             }
 
-            await viewModel?.load(policy: .cachedThenRefresh)
+            await viewModel?.load(policy: .readThrough)
         }
     }
 
@@ -92,7 +92,7 @@ struct MoviesScreen: View {
                     Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await viewModel.load(policy: .refreshNow) }
+                        Task { await viewModel.load(policy: .forceRefresh) }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -103,7 +103,7 @@ struct MoviesScreen: View {
                     VStack(spacing: 12) {
                         Text(emptyCatalogMessage)
                         Button("Refresh") {
-                            Task { await viewModel.load(policy: .refreshNow) }
+                            Task { await viewModel.load(policy: .forceRefresh) }
                         }
                         .buttonStyle(.borderedProminent)
                     }

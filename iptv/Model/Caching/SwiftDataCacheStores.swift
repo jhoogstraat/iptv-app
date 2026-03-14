@@ -34,16 +34,11 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
         )
 
         guard let first = records.first else { return nil }
-        let touchedAt = Date()
-        for record in records {
-            record.lastAccessAt = touchedAt
-        }
-        try context.save()
 
         return StreamListCacheEntry(
             key: key,
             savedAt: first.savedAt,
-            lastAccessAt: touchedAt,
+            lastAccessAt: first.lastAccessAt,
             videos: records.map { record in
                 CachedVideoDTO(
                     id: record.videoID,
@@ -65,6 +60,14 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
         let contentType = key.contentType.rawValue
         let categoryID = key.categoryID
         let pageToken = key.pageToken
+        let categoryRecord = try fetchCategoryRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID,
+            context: context
+        )
+        let categoryName = categoryRecord?.name ?? categoryID
+        let normalizedCategoryName = Self.normalize(categoryName)
         let existing = try context.fetch(
             FetchDescriptor<PersistedStreamRecord>(
                 predicate: #Predicate {
@@ -86,16 +89,22 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
                     providerFingerprint: key.providerFingerprint,
                     contentType: key.contentType.rawValue,
                     categoryID: key.categoryID,
+                    categoryName: categoryName,
+                    normalizedCategoryName: normalizedCategoryName,
                     pageToken: key.pageToken,
                     videoID: video.id,
                     sortIndex: index,
                     name: video.name,
+                    normalizedTitle: Self.normalize(video.name),
+                    language: Self.languageCode(from: video.name),
+                    normalizedLanguage: Self.languageCode(from: video.name).map(Self.normalize),
                     containerExtension: video.containerExtension,
                     playbackContentType: video.contentType,
                     coverImageURL: video.coverImageURL,
                     tmdbId: video.tmdbId,
                     rating: video.rating,
                     addedAtRaw: video.added,
+                    addedAt: Self.parseDate(video.added),
                     savedAt: entry.savedAt,
                     lastAccessAt: entry.lastAccessAt
                 )
@@ -191,6 +200,66 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
 
     private static func recordID(for key: StreamListCacheKey, videoID: Int) -> String {
         "\(key.rawKey)|\(videoID)"
+    }
+
+    private func fetchCategoryRecord(
+        providerFingerprint: String,
+        contentType: String,
+        categoryID: String,
+        context: ModelContext
+    ) throws -> PersistedCategoryRecord? {
+        try context.fetch(
+            FetchDescriptor<PersistedCategoryRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == contentType &&
+                    $0.categoryID == categoryID
+                }
+            )
+        ).first
+    }
+
+    private static func normalize(_ input: String) -> String {
+        input
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private static func languageCode(from title: String) -> String? {
+        LanguageTaggedText(title).languageCode
+    }
+
+    private static func parseDate(_ raw: String?) -> Date? {
+        guard let raw else { return nil }
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+
+        if let seconds = Double(value), value.allSatisfy(\.isNumber) {
+            return Date(timeIntervalSince1970: seconds)
+        }
+
+        let formats = [
+            "yyyy-MM-dd",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy/MM/dd",
+            "dd-MM-yyyy",
+            "MM/dd/yyyy"
+        ]
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+
+        for format in formats {
+            formatter.dateFormat = format
+            if let date = formatter.date(from: value) {
+                return date
+            }
+        }
+        return nil
     }
 }
 
@@ -304,6 +373,12 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
                     )
                 )
             }
+            try updateStreamCategoryMetadata(
+                providerFingerprint: providerFingerprint,
+                contentType: contentType,
+                categories: categories,
+                context: context
+            )
         case .vodInfo:
             let dto = try JSONDecoder().decode(CachedVideoInfoDTO.self, from: entry.payload)
             if let existing = try fetchMovieDetail(for: key, context: context) {
@@ -350,6 +425,39 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
         }
 
         try context.save()
+    }
+
+    private func updateStreamCategoryMetadata(
+        providerFingerprint: String,
+        contentType: String,
+        categories: [CachedCategoryDTO],
+        context: ModelContext
+    ) throws {
+        guard !categories.isEmpty else { return }
+
+        let categoryNamesByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0.name) })
+        let streams = try context.fetch(
+            FetchDescriptor<PersistedStreamRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == contentType
+                }
+            )
+        )
+
+        for stream in streams {
+            guard let name = categoryNamesByID[stream.categoryID] else { continue }
+            stream.categoryName = name
+            stream.normalizedCategoryName = Self.normalize(name)
+        }
+    }
+
+    private static func normalize(_ input: String) -> String {
+        input
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
     }
 
     func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry] {

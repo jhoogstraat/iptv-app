@@ -37,7 +37,7 @@ struct VideoTileRow: View {
                         Text(error.localizedDescription)
                         Text("Error loading category")
                         Button("Retry") {
-                            Task { await fetchVideos(policy: .refreshNow) }
+                            Task { await fetchVideos(policy: .forceRefresh) }
                         }
                     }
                 } else {
@@ -76,7 +76,7 @@ struct VideoTileRow: View {
             }
         }
         .task(id: providerStore.revision) {
-            await fetchVideos(policy: .cachedThenRefresh)
+            await fetchVideos(policy: .readThrough)
         }
     }
 
@@ -108,10 +108,10 @@ struct VideoTileRow: View {
         }
     }
 
-    func fetchVideos(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
+    func fetchVideos(policy: CatalogLoadPolicy = .readThrough) async {
         defer { isFetching = false }
 
-        guard policy == .refreshNow || (cachedVideos == nil && error == nil) else {
+        guard policy == .forceRefresh || (cachedVideos == nil && error == nil) else {
             rowItems = (cachedVideos ?? []).map { RowItem(id: $0.id, video: $0) }
             return
         }

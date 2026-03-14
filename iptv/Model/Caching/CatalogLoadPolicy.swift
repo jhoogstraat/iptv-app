@@ -8,7 +8,7 @@
 import Foundation
 
 enum CatalogLoadPolicy: Sendable, Equatable {
-    case cachedOnly
-    case cachedThenRefresh
-    case refreshNow
+    case cacheOnly
+    case readThrough
+    case forceRefresh
 }

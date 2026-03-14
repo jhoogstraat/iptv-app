@@ -43,16 +43,22 @@ final class PersistedStreamRecord {
     var providerFingerprint: String
     var contentType: String
     var categoryID: String
+    var categoryName: String = ""
+    var normalizedCategoryName: String = ""
     var pageToken: String?
     var videoID: Int
     var sortIndex: Int
     var name: String
+    var normalizedTitle: String = ""
+    var language: String?
+    var normalizedLanguage: String?
     var containerExtension: String
     var playbackContentType: String
     var coverImageURL: String?
     var tmdbId: String?
     var rating: Double?
     var addedAtRaw: String?
+    var addedAt: Date?
     var savedAt: Date
     var lastAccessAt: Date
 
@@ -61,16 +67,22 @@ final class PersistedStreamRecord {
         providerFingerprint: String,
         contentType: String,
         categoryID: String,
+        categoryName: String,
+        normalizedCategoryName: String,
         pageToken: String?,
         videoID: Int,
         sortIndex: Int,
         name: String,
+        normalizedTitle: String,
+        language: String?,
+        normalizedLanguage: String?,
         containerExtension: String,
         playbackContentType: String,
         coverImageURL: String?,
         tmdbId: String?,
         rating: Double?,
         addedAtRaw: String?,
+        addedAt: Date?,
         savedAt: Date,
         lastAccessAt: Date
     ) {
@@ -78,18 +90,59 @@ final class PersistedStreamRecord {
         self.providerFingerprint = providerFingerprint
         self.contentType = contentType
         self.categoryID = categoryID
+        self.categoryName = categoryName
+        self.normalizedCategoryName = normalizedCategoryName
         self.pageToken = pageToken
         self.videoID = videoID
         self.sortIndex = sortIndex
         self.name = name
+        self.normalizedTitle = normalizedTitle
+        self.language = language
+        self.normalizedLanguage = normalizedLanguage
         self.containerExtension = containerExtension
         self.playbackContentType = playbackContentType
         self.coverImageURL = coverImageURL
         self.tmdbId = tmdbId
         self.rating = rating
         self.addedAtRaw = addedAtRaw
+        self.addedAt = addedAt
         self.savedAt = savedAt
         self.lastAccessAt = lastAccessAt
+    }
+}
+
+@Model
+final class PersistedCategoryRefreshStateRecord {
+    @Attribute(.unique) var id: String
+    var providerFingerprint: String
+    var contentType: String
+    var categoryID: String
+    var lastSuccessfulRefreshAt: Date?
+    var lastAttemptedRefreshAt: Date?
+    var nextEligibleRefreshAt: Date?
+    var failureCount: Int
+    var lastError: String?
+
+    init(
+        id: String,
+        providerFingerprint: String,
+        contentType: String,
+        categoryID: String,
+        lastSuccessfulRefreshAt: Date?,
+        lastAttemptedRefreshAt: Date?,
+        nextEligibleRefreshAt: Date?,
+        failureCount: Int,
+        lastError: String?
+    ) {
+        self.id = id
+        self.providerFingerprint = providerFingerprint
+        self.contentType = contentType
+        self.categoryID = categoryID
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        self.lastAttemptedRefreshAt = lastAttemptedRefreshAt
+        self.nextEligibleRefreshAt = nextEligibleRefreshAt
+        self.failureCount = failureCount
+        self.lastError = lastError
     }
 }
 

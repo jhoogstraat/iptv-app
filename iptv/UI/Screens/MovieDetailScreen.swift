@@ -63,7 +63,7 @@ struct MovieDetailScreen: View {
                     Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await loadInfo(policy: .refreshNow) }
+                        Task { await loadInfo(policy: .forceRefresh) }
                     }
                     .buttonStyle(DetailActionStyle(variant: .primary))
                 }
@@ -92,7 +92,7 @@ struct MovieDetailScreen: View {
             )
         }
         .task {
-            await loadInfo(policy: .cachedThenRefresh)
+            await loadInfo(policy: .readThrough)
             await loadFavoriteState()
         }
     }
@@ -410,8 +410,8 @@ struct MovieDetailScreen: View {
         return String(digits.prefix(4))
     }
 
-    private func loadInfo(policy: CatalogLoadPolicy = .cachedThenRefresh) async {
-        guard policy == .refreshNow || (info == nil && offlineInfo == nil) else {
+    private func loadInfo(policy: CatalogLoadPolicy = .readThrough) async {
+        guard policy == .forceRefresh || (info == nil && offlineInfo == nil) else {
             state = .done
             return
         }

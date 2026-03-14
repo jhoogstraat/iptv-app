@@ -48,6 +48,7 @@ struct IPTVApp: App {
         Settings {
             SettingsScreen()
                 .environment(appContainer.providerStore)
+                .environment(appContainer.catalog)
         }
         #endif
         

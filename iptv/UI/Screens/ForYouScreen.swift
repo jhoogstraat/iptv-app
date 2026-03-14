@@ -76,7 +76,7 @@ struct ForYouScreen: View {
                 return
             }
 
-            await viewModel?.load(policy: .cachedThenRefresh)
+            await viewModel?.load(policy: .readThrough)
         }
     }
 

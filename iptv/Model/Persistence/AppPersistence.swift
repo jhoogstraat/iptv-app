@@ -15,6 +15,7 @@ enum AppPersistence {
         VideoInfo.self,
         PersistedCategoryRecord.self,
         PersistedStreamRecord.self,
+        PersistedCategoryRefreshStateRecord.self,
         PersistedMovieDetailRecord.self,
         PersistedSeriesDetailRecord.self,
         PersistedSearchDocumentRecord.self,
