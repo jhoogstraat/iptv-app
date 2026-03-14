@@ -129,8 +129,8 @@ final class iptvUITests: XCTestCase {
 
         XCTAssertTrue(app.menuItems["Audio Tracks"].exists)
         XCTAssertTrue(app.menuItems["Subtitles"].exists)
-        XCTAssertTrue(app.menuItems["Quality"].exists)
-        XCTAssertTrue(app.menuItems["Playback Speed"].exists)
+        XCTAssertTrue(app.menuItems["More"].exists)
+        XCTAssertFalse(app.menuItems["Quality"].exists)
     }
     #endif
 

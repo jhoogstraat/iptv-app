@@ -321,6 +321,10 @@ nonisolated struct CachedVideoInfoDTO: Codable, Hashable, Sendable {
     let ageRating: String
     let country: String
     let rating: Double?
+    let streamBitrate: Int?
+    let audioDescription: String
+    let videoResolution: String
+    let videoFrameRate: Double?
 
     init(
         images: [URL],
@@ -333,7 +337,11 @@ nonisolated struct CachedVideoInfoDTO: Codable, Hashable, Sendable {
         runtimeMinutes: Int?,
         ageRating: String,
         country: String,
-        rating: Double?
+        rating: Double?,
+        streamBitrate: Int?,
+        audioDescription: String,
+        videoResolution: String,
+        videoFrameRate: Double?
     ) {
         self.images = images
         self.plot = plot
@@ -346,6 +354,10 @@ nonisolated struct CachedVideoInfoDTO: Codable, Hashable, Sendable {
         self.ageRating = ageRating
         self.country = country
         self.rating = rating
+        self.streamBitrate = streamBitrate
+        self.audioDescription = audioDescription
+        self.videoResolution = videoResolution
+        self.videoFrameRate = videoFrameRate
     }
 
     init(_ info: VideoInfo) {
@@ -360,6 +372,10 @@ nonisolated struct CachedVideoInfoDTO: Codable, Hashable, Sendable {
         self.ageRating = info.ageRating
         self.country = info.country
         self.rating = info.rating
+        self.streamBitrate = info.streamBitrate
+        self.audioDescription = info.audioDescription
+        self.videoResolution = info.videoResolution
+        self.videoFrameRate = info.videoFrameRate
     }
 }
 
@@ -382,7 +398,11 @@ extension VideoInfo {
             runtimeMinutes: cached.runtimeMinutes,
             ageRating: cached.ageRating,
             country: cached.country,
-            rating: cached.rating
+            rating: cached.rating,
+            streamBitrate: cached.streamBitrate,
+            audioDescription: cached.audioDescription,
+            videoResolution: cached.videoResolution,
+            videoFrameRate: cached.videoFrameRate
         )
     }
 }

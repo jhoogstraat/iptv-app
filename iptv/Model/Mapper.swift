@@ -108,7 +108,66 @@ extension VideoInfo {
             runtimeMinutes: xtream.info.runtime ?? xtream.info.durationSecs.map { $0 / 60 },
             ageRating: xtream.info.age,
             country: xtream.info.country,
-            rating: xtream.info.rating
+            rating: xtream.info.rating,
+            streamBitrate: xtream.info.bitrate > 0 ? xtream.info.bitrate : nil,
+            audioDescription: streamAudioDescription(from: xtream.info.audio),
+            videoResolution: streamVideoResolution(from: xtream.info.video),
+            videoFrameRate: streamFrameRate(from: xtream.info.video)
         )
     }
+}
+
+private func streamAudioDescription(from audio: XtreamAudio?) -> String {
+    guard let audio else { return "" }
+
+    let layout = audio.channelLayout.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !layout.isEmpty {
+        switch layout.lowercased() {
+        case "stereo":
+            return "Stereo"
+        case "mono":
+            return "Mono"
+        default:
+            return layout.replacingOccurrences(of: "(side)", with: "").capitalized
+        }
+    }
+
+    let codec = audio.codecLongName.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !codec.isEmpty {
+        return codec.capitalized
+    }
+
+    return audio.codecName.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+}
+
+private func streamVideoResolution(from video: XtreamVideo?) -> String {
+    guard let video,
+          video.width > 0,
+          video.height > 0
+    else { return "" }
+
+    return "\(video.width)x\(video.height)"
+}
+
+private func streamFrameRate(from video: XtreamVideo?) -> Double? {
+    streamFrameRate(from: video?.avgFrameRate) ?? streamFrameRate(from: video?.rFrameRate)
+}
+
+private func streamFrameRate(from rawValue: String?) -> Double? {
+    guard let rawValue else { return nil }
+
+    let normalized = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !normalized.isEmpty else { return nil }
+
+    if normalized.contains("/") {
+        let components = normalized.split(separator: "/", maxSplits: 1).map(String.init)
+        guard components.count == 2,
+              let numerator = Double(components[0]),
+              let denominator = Double(components[1]),
+              denominator != 0
+        else { return nil }
+        return numerator / denominator
+    }
+
+    return Double(normalized)
 }

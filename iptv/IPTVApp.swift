@@ -55,6 +55,7 @@ struct IPTVApp: App {
         #if os(macOS)
         PlayerWindow(
             player: appContainer.player,
+            catalog: appContainer.catalog,
             providerStore: appContainer.providerStore,
             favoritesStore: appContainer.favoritesStore
         )

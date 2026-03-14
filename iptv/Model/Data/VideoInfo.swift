@@ -22,6 +22,10 @@ class VideoInfo: Identifiable {
     var ageRating: String
     var country: String
     var rating: Double?
+    var streamBitrate: Int?
+    var audioDescription: String
+    var videoResolution: String
+    var videoFrameRate: Double?
 
     init(
         images: [URL],
@@ -34,7 +38,11 @@ class VideoInfo: Identifiable {
         runtimeMinutes: Int?,
         ageRating: String,
         country: String,
-        rating: Double?
+        rating: Double?,
+        streamBitrate: Int? = nil,
+        audioDescription: String = "",
+        videoResolution: String = "",
+        videoFrameRate: Double? = nil
     ) {
         self.video = nil
         self.images = images
@@ -48,5 +56,9 @@ class VideoInfo: Identifiable {
         self.ageRating = ageRating
         self.country = country
         self.rating = rating
+        self.streamBitrate = streamBitrate
+        self.audioDescription = audioDescription
+        self.videoResolution = videoResolution
+        self.videoFrameRate = videoFrameRate
     }
 }

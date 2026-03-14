@@ -12,6 +12,7 @@ import SwiftUI
 struct PlayerWindow: Scene {
     /// An object that controls the video playback behavior.
     var player: Player
+    var catalog: Catalog
     var providerStore: ProviderStore
     var favoritesStore: FavoritesStore
 
@@ -20,6 +21,7 @@ struct PlayerWindow: Scene {
         WindowGroup(id: PlayerView.identifier) {
             PlayerView()
                 .environment(player)
+                .environment(catalog)
                 .environment(providerStore)
                 .environment(favoritesStore)
                 .onAppear {
@@ -121,49 +123,6 @@ struct PlayerWindow: Scene {
                 }
                 .disabled(player.currentItem == nil)
 
-                Menu("Quality") {
-                    if player.capabilities.supportsQualitySelection {
-                        ForEach(player.qualityVariants) { variant in
-                            Button(menuLabel(variant.label, selected: variant.id == player.selectedQualityVariantID)) {
-                                player.selectQualityVariant(id: variant.id)
-                            }
-                        }
-                    } else {
-                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Quality:") }) ?? "Unsupported")
-                    }
-                }
-                .disabled(player.currentItem == nil)
-
-                Menu("Chapters") {
-                    if player.capabilities.supportsChapterMarkers {
-                        if player.chapterMarkers.isEmpty {
-                            Text("No chapters")
-                        } else {
-                            ForEach(player.chapterMarkers) { chapter in
-                                Button(chapter.title) {
-                                    player.jumpToChapter(id: chapter.id)
-                                }
-                            }
-                        }
-                    } else {
-                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Chapters:") }) ?? "Unsupported")
-                    }
-                }
-                .disabled(player.currentItem == nil)
-
-                Menu("Output Device") {
-                    if player.capabilities.supportsOutputRouteSelection, !player.outputRoutes.isEmpty {
-                        ForEach(player.outputRoutes) { route in
-                            Button(menuLabel(route.name, selected: route.id == player.selectedOutputRouteID)) {
-                                player.selectOutputRoute(id: route.id)
-                            }
-                        }
-                    } else {
-                        Text(player.unavailableFeatureMessages.first(where: { $0.hasPrefix("Output device:") }) ?? "Unsupported")
-                    }
-                }
-                .disabled(player.currentItem == nil)
-
                 Menu("Episodes") {
                     if player.episodeOptions.count > 1 {
                         ForEach(player.episodeOptions, id: \.id) { episode in
@@ -177,61 +136,69 @@ struct PlayerWindow: Scene {
                 }
                 .disabled(player.currentItem == nil)
 
-                Menu("Playback Speed") {
-                    Button("0.5x") { player.setPlaybackSpeed(0.5) }
-                    Button("0.75x") { player.setPlaybackSpeed(0.75) }
-                    Button("1.0x") { player.setPlaybackSpeed(1.0) }
-                    Button("1.25x") { player.setPlaybackSpeed(1.25) }
-                    Button("1.5x") { player.setPlaybackSpeed(1.5) }
-                    Button("2.0x") { player.setPlaybackSpeed(2.0) }
-                }
-                .disabled(player.currentItem == nil)
-
-                Menu("Aspect Ratio") {
-                    ForEach(PlayerAspectRatioMode.allCases) { mode in
-                        Button(mode.label) {
-                            player.setAspectRatio(mode)
+                Menu("More") {
+                    if player.capabilities.supportsOutputRouteSelection, !player.outputRoutes.isEmpty {
+                        Menu("Output Device") {
+                            ForEach(player.outputRoutes) { route in
+                                Button(menuLabel(route.name, selected: route.id == player.selectedOutputRouteID)) {
+                                    player.selectOutputRoute(id: route.id)
+                                }
+                            }
                         }
                     }
-                }
-                .disabled(player.currentItem == nil)
 
-                Menu("Sleep Timer") {
-                    ForEach(SleepTimerOption.allCases) { option in
-                        Button(option.label) {
-                            player.setSleepTimer(option)
+                    Menu("Playback Speed") {
+                        Button("0.5x") { player.setPlaybackSpeed(0.5) }
+                        Button("0.75x") { player.setPlaybackSpeed(0.75) }
+                        Button("1.0x") { player.setPlaybackSpeed(1.0) }
+                        Button("1.25x") { player.setPlaybackSpeed(1.25) }
+                        Button("1.5x") { player.setPlaybackSpeed(1.5) }
+                        Button("2.0x") { player.setPlaybackSpeed(2.0) }
+                    }
+
+                    Menu("Aspect Ratio") {
+                        ForEach(PlayerAspectRatioMode.allCases) { mode in
+                            Button(mode.label) {
+                                player.setAspectRatio(mode)
+                            }
                         }
                     }
-                }
-                .disabled(player.currentItem == nil)
 
-                Menu("Audio Delay") {
-                    Button("Reset to 0 ms") {
-                        player.resetAudioDelay()
+                    Menu("Sleep Timer") {
+                        ForEach(SleepTimerOption.allCases) { option in
+                            Button(option.label) {
+                                player.setSleepTimer(option)
+                            }
+                        }
                     }
-                    .disabled(!player.capabilities.supportsAudioDelay || player.audioDelayMilliseconds == 0)
 
-                    Button("-250 ms") {
-                        player.setAudioDelay(milliseconds: player.audioDelayMilliseconds - 250)
-                    }
-                    .disabled(!player.capabilities.supportsAudioDelay)
+                    if player.capabilities.supportsAudioDelay {
+                        Menu("Audio Delay") {
+                            Button("Reset to 0 ms") {
+                                player.resetAudioDelay()
+                            }
+                            .disabled(player.audioDelayMilliseconds == 0)
 
-                    Button("+250 ms") {
-                        player.setAudioDelay(milliseconds: player.audioDelayMilliseconds + 250)
-                    }
-                    .disabled(!player.capabilities.supportsAudioDelay)
-                }
-                .disabled(player.currentItem == nil)
+                            Button("-250 ms") {
+                                player.setAudioDelay(milliseconds: player.audioDelayMilliseconds - 250)
+                            }
 
-                Menu("Volume") {
-                    Button("Mute") {
-                        player.setVolume(0)
+                            Button("+250 ms") {
+                                player.setAudioDelay(milliseconds: player.audioDelayMilliseconds + 250)
+                            }
+                        }
                     }
-                    Button("50%") {
-                        player.setVolume(0.5)
-                    }
-                    Button("100%") {
-                        player.setVolume(1)
+
+                    Menu("Volume") {
+                        Button("Mute") {
+                            player.setVolume(0)
+                        }
+                        Button("50%") {
+                            player.setVolume(0.5)
+                        }
+                        Button("100%") {
+                            player.setVolume(1)
+                        }
                     }
                 }
                 .disabled(player.currentItem == nil)

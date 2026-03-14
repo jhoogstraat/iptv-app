@@ -71,6 +71,10 @@ final class Catalog {
         providerStore.hasConfiguration
     }
 
+    func cachedSeriesInfo(for video: Video) -> XtreamSeries? {
+        seriesInfoBySeriesID[video.id]
+    }
+
     func reset() {
         vodCategories = []
         seriesCategories = []
