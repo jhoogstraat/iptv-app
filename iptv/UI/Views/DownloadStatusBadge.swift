@@ -11,6 +11,7 @@ struct DownloadStatusBadge: View {
     let selection: DownloadSelection
     let showsTitle: Bool
     let presentation: DownloadStatusBadgePresentation
+    let labelOverride: String?
 
     @Environment(DownloadCenter.self) private var downloadCenter
     @State private var isWorking = false
@@ -18,11 +19,13 @@ struct DownloadStatusBadge: View {
     init(
         selection: DownloadSelection,
         showsTitle: Bool = false,
-        presentation: DownloadStatusBadgePresentation = .capsule
+        presentation: DownloadStatusBadgePresentation = .capsule,
+        labelOverride: String? = nil
     ) {
         self.selection = selection
         self.showsTitle = showsTitle
         self.presentation = presentation
+        self.labelOverride = labelOverride
     }
 
     private var state: DownloadBadgeState {
@@ -138,6 +141,10 @@ struct DownloadStatusBadge: View {
     }
 
     private var downloadLabel: String {
+        if let labelOverride {
+            return labelOverride
+        }
+
         switch selection {
         case .movie:
             return "Download"

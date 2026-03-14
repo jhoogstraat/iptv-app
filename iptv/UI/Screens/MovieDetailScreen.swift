@@ -30,6 +30,11 @@ struct MovieDetailScreen: View {
     @State private var offlineInfo: VideoInfo?
     @State private var offlineArtworkURL: URL?
     @State private var heroCollapseProgress: CGFloat = 0
+    @State private var heroScrollOffset: CGFloat = 0
+    @State private var isShowingOtherSources = false
+    @State private var isLoadingOtherSources = false
+    @State private var otherSources: [DetailAlternativeSource] = []
+    @State private var otherSourcesError: String?
 
     private var info: VideoInfo? {
         catalog.vodInfo[video]
@@ -39,6 +44,14 @@ struct MovieDetailScreen: View {
         info ?? offlineInfo
     }
 
+    private var displayTitle: String {
+        LanguageTaggedText(video.name).groupedDisplayName
+    }
+
+    private var heroLanguageText: String? {
+        LanguageTaggedText(video.name).languageCode
+    }
+
     var body: some View {
         Group {
             switch state {
@@ -46,7 +59,7 @@ struct MovieDetailScreen: View {
                 ProgressView()
 
             case .error(let error):
-                VStack(spacing: 12) {
+                VStack(spacing: DetailSpacing.sm) {
                     Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
@@ -60,7 +73,7 @@ struct MovieDetailScreen: View {
                 detailContent
             }
         }
-        .navigationTitle(video.name)
+        .navigationTitle(displayTitle)
         #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(.hidden, for: .navigationBar)
@@ -68,6 +81,16 @@ struct MovieDetailScreen: View {
         .preferredColorScheme(.dark)
         #endif
         .withBackgroundActivityToolbar()
+        .sheet(isPresented: $isShowingOtherSources) {
+            DetailAlternativeSourcesSheet(
+                title: "Other Sources",
+                isLoading: isLoadingOtherSources,
+                errorMessage: otherSourcesError,
+                sources: otherSources,
+                onRetry: { triggerOtherSourcesLookup() },
+                destination: { MovieDetailScreen(video: $0) }
+            )
+        }
         .task {
             await loadInfo(policy: .cachedThenRefresh)
             await loadFavoriteState()
@@ -121,11 +144,12 @@ struct MovieDetailScreen: View {
                 .coordinateSpace(name: "movieDetailScroll")
                 .scrollIndicators(.hidden)
                 .onPreferenceChange(DetailHeroProgressPreferenceKey.self) { minY in
+                    heroScrollOffset = minY
                     heroCollapseProgress = heroProgress(for: minY)
                 }
 
                 DetailCollapsedHeaderBar(
-                    title: video.name,
+                    title: displayTitle,
                     artworkURL: collapsedArtworkURL,
                     titleArtworkURL: heroTitleArtworkURL,
                     progress: heroCollapseProgress
@@ -138,14 +162,11 @@ struct MovieDetailScreen: View {
 
     @ViewBuilder
     private var primaryActions: some View {
-        VStack(spacing: 12) {
+        HStack(spacing: DetailSpacing.sm) {
             playButton
-
-            HStack(spacing: 12) {
-                favoriteButton
-                downloadButton
-                refreshButton
-            }
+            favoriteButton
+            downloadButton
+            otherSourcesButton
         }
     }
 
@@ -177,13 +198,19 @@ struct MovieDetailScreen: View {
         .buttonStyle(DetailActionStyle(variant: .icon))
     }
 
-    private var refreshButton: some View {
+    private var otherSourcesButton: some View {
         Button {
-            Task { await loadInfo(policy: .refreshNow) }
+            triggerOtherSourcesLookup()
         } label: {
-            Image(systemName: "arrow.clockwise")
+            if isLoadingOtherSources {
+                ProgressView()
+                    .tint(.white)
+            } else {
+                Image(systemName: "square.stack.3d.up")
+            }
         }
         .buttonStyle(DetailActionStyle(variant: .icon))
+        .accessibilityLabel("Other Sources")
     }
 
     private var scoreBadges: [DetailScoreBadgeModel] {
@@ -251,7 +278,7 @@ struct MovieDetailScreen: View {
     }
 
     private var ratingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             DetailSectionHeader(title: "Ratings")
             DetailScoreBadgeRow(badges: scoreBadges)
         }
@@ -274,7 +301,7 @@ struct MovieDetailScreen: View {
 
     @ViewBuilder
     private func section(_ title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: DetailSpacing.xs) {
             DetailSectionHeader(title: title)
             Text(text.isEmpty ? "Not available." : text)
                 .font(.body)
@@ -285,45 +312,17 @@ struct MovieDetailScreen: View {
 
     @ViewBuilder
     private func heroBackground(topInset: CGFloat) -> some View {
-        ZStack(alignment: .bottom) {
-            if let heroArtworkURL {
-                AsyncImage(url: heroArtworkURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    default:
-                        Color.white.opacity(0.05)
-                    }
-                }
-            } else {
-                Color.white.opacity(0.05)
-            }
-
-            LinearGradient(
-                colors: [
-                    Color.black.opacity(0.12),
-                    Color.black.opacity(0.28),
-                    Color.black.opacity(0.68),
-                    Color.black
-                ],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        }
-        .frame(height: heroHeight + topInset)
-        .frame(maxWidth: .infinity)
-        .clipped()
-        .overlay {
-            Color.black.opacity(Double(heroCollapseProgress) * 0.36)
-        }
-        .opacity(1.0 - (Double(heroCollapseProgress) * 0.92))
-        .ignoresSafeArea(edges: .top)
+        DetailHeroBackdrop(
+            artworkURL: heroArtworkURL,
+            height: heroHeight,
+            topInset: topInset,
+            collapseProgress: heroCollapseProgress,
+            scrollOffset: heroScrollOffset
+        )
     }
 
     private func heroForeground(topInset: CGFloat) -> some View {
-        VStack(spacing: 16) {
+        VStack(spacing: DetailSpacing.md) {
             Spacer()
 
             if let heroTitleArtworkURL {
@@ -342,7 +341,7 @@ struct MovieDetailScreen: View {
                 .shadow(color: Color.black.opacity(0.28), radius: 20, y: 10)
             }
 
-            Text(video.name)
+            Text(displayTitle)
                 .font(.system(size: usesCompactDetailLayout ? 42 : 56, weight: .heavy, design: .rounded))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white)
@@ -360,7 +359,7 @@ struct MovieDetailScreen: View {
         .frame(maxWidth: .infinity, minHeight: heroHeight + topInset, alignment: .bottom)
         .padding(.horizontal, usesCompactDetailLayout ? 24 : 32)
         .padding(.top, topInset + 24)
-        .padding(.bottom, 28)
+        .padding(.bottom, DetailSpacing.lg)
         .opacity(1.0 - (Double(heroCollapseProgress) * 0.94))
         .offset(y: -(heroCollapseProgress * 18))
     }
@@ -368,10 +367,10 @@ struct MovieDetailScreen: View {
     @ViewBuilder
     private var heroMetaRow: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 14) {
+            HStack(spacing: DetailSpacing.sm) {
                 heroMetaItems
             }
-            VStack(spacing: 10) {
+            VStack(spacing: DetailSpacing.xs) {
                 heroMetaItems
             }
         }
@@ -379,6 +378,11 @@ struct MovieDetailScreen: View {
 
     @ViewBuilder
     private var heroMetaItems: some View {
+        if let heroLanguageText {
+            Text(heroLanguageText)
+                .font(.title2.weight(.medium))
+                .foregroundStyle(.white.opacity(0.88))
+        }
         if let heroScoreText {
             DetailMetaPill(heroScoreText, systemImage: "star.fill")
         }
@@ -463,6 +467,33 @@ struct MovieDetailScreen: View {
         let targetState = !isFavorite
         await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: targetState)
         isFavorite = targetState
+    }
+
+    private func triggerOtherSourcesLookup() {
+        isShowingOtherSources = true
+        guard !isLoadingOtherSources else { return }
+
+        Task {
+            await loadOtherSources()
+        }
+    }
+
+    private func loadOtherSources() async {
+        isLoadingOtherSources = true
+        otherSourcesError = nil
+
+        do {
+            otherSources = try await loadDetailAlternativeSources(
+                for: video,
+                preferredTitle: video.name,
+                catalog: catalog
+            )
+        } catch {
+            otherSources = []
+            otherSourcesError = error.localizedDescription
+        }
+
+        isLoadingOtherSources = false
     }
 }
 
