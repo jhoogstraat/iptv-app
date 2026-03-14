@@ -60,12 +60,26 @@ private struct BackgroundActivityToolbarModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.toolbar {
-            if backgroundActivityCenter.shouldShowIndicator {
+            if shouldShowCatalogueIndicator {
                 ToolbarItem(placement: .topBarTrailing) {
                     BackgroundActivityIndicatorView(activityCenter: backgroundActivityCenter)
                 }
             }
         }
+    }
+
+    private var shouldShowCatalogueIndicator: Bool {
+        backgroundActivityCenter.activeList.contains(where: isCatalogueIndexActivity)
+        || backgroundActivityCenter.recentList.contains {
+            isCatalogueIndexActivity($0) && $0.state == .failed
+        }
+    }
+
+    private func isCatalogueIndexActivity(_ activity: BackgroundActivity) -> Bool {
+        let id = activity.id.lowercased()
+        return id.hasPrefix("background-index:movies")
+            || id.hasPrefix("background-index:series")
+            || id.hasPrefix("background-index:live")
     }
 }
 #endif

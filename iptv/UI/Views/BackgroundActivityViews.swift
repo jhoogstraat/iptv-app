@@ -8,56 +8,31 @@
 import SwiftUI
 
 private enum CatalogueArea: String, CaseIterable, Identifiable {
-    case catalogue
     case movies
     case series
     case liveTV
-    case downloads
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .catalogue:
-            return "Catalogue"
         case .movies:
             return "Movies"
         case .series:
             return "Series"
         case .liveTV:
-            return "Live TV"
-        case .downloads:
-            return "Downloads"
+            return "TV"
         }
     }
 
     var idleSubtitle: String {
         switch self {
-        case .catalogue:
-            return "Keeps browsing and search ready."
         case .movies:
-            return "Checks movie categories and titles."
+            return "Waiting to index your movie catalogue."
         case .series:
-            return "Checks series categories and episodes."
+            return "Waiting to index your series catalogue and episodes."
         case .liveTV:
-            return "Live TV updates are not part of this version yet."
-        case .downloads:
-            return "Shows offline download activity."
-        }
-    }
-
-    var progressNoun: String {
-        switch self {
-        case .catalogue:
-            return "catalogue steps"
-        case .movies:
-            return "movie categories"
-        case .series:
-            return "series categories"
-        case .liveTV:
-            return "TV categories"
-        case .downloads:
-            return "downloads"
+            return "Live TV indexing is not available in this version."
         }
     }
 }
@@ -69,23 +44,278 @@ private enum CatalogueRowStatus {
     case waitingForInternet
     case success
     case failure
+
+    var isActive: Bool {
+        switch self {
+        case .running, .paused, .waitingForInternet:
+            return true
+        case .idle, .success, .failure:
+            return false
+        }
+    }
 }
 
 private struct CatalogueRowModel: Identifiable {
     let area: CatalogueArea
     let status: CatalogueRowStatus
     let subtitle: String
+    let updatedAt: Date?
 
     var id: String { area.id }
     var title: String { area.title }
+}
+
+private struct CatalogueStatusSnapshot {
+    let rows: [CatalogueRowModel]
+
+    init(activityCenter: BackgroundActivityCenter) {
+        self.rows = CatalogueArea.allCases.map { area in
+            Self.makeRow(for: area, activityCenter: activityCenter)
+        }
+    }
+
+    var hasActiveWork: Bool {
+        rows.contains { $0.status.isActive }
+    }
+
+    var hasWaitingForInternet: Bool {
+        rows.contains { $0.status == .waitingForInternet }
+    }
+
+    var hasPausedWork: Bool {
+        rows.contains { $0.status == .paused }
+    }
+
+    var hasFailure: Bool {
+        rows.contains { $0.status == .failure }
+    }
+
+    var shouldShowIndicator: Bool {
+        hasActiveWork || hasFailure
+    }
+
+    var indicatorTitle: String {
+        if hasWaitingForInternet {
+            return "Waiting for internet"
+        }
+        if hasPausedWork {
+            return "Catalogue indexing paused"
+        }
+        if hasFailure && !hasActiveWork {
+            return "Catalogue indexing needs attention"
+        }
+        return "Catalogue indexing in progress"
+    }
+
+    var accessibilityValue: String {
+        if let activeRow = rows.first(where: { $0.status.isActive }) {
+            return "\(activeRow.title): \(activeRow.subtitle)"
+        }
+        if let failureRow = rows.first(where: { $0.status == .failure }) {
+            return "\(failureRow.title): \(failureRow.subtitle)"
+        }
+        return "No catalogue indexing in progress"
+    }
+
+    private static func makeRow(
+        for area: CatalogueArea,
+        activityCenter: BackgroundActivityCenter
+    ) -> CatalogueRowModel {
+        let activeCandidates = matchingActivities(
+            for: area,
+            in: activityCenter.activeList
+        ).sorted { lhs, rhs in
+            activePriority(lhs: lhs, rhs: rhs)
+        }
+
+        if let active = activeCandidates.first {
+            return CatalogueRowModel(
+                area: area,
+                status: activeStatus(for: active, activityCenter: activityCenter),
+                subtitle: activeSubtitle(for: active, activityCenter: activityCenter),
+                updatedAt: active.updatedAt
+            )
+        }
+
+        let recentCandidates = matchingActivities(
+            for: area,
+            in: activityCenter.recentList
+        ).sorted { lhs, rhs in
+            if lhs.updatedAt != rhs.updatedAt {
+                return lhs.updatedAt > rhs.updatedAt
+            }
+            return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+        }
+
+        if let recent = recentCandidates.first {
+            return CatalogueRowModel(
+                area: area,
+                status: recentStatus(for: recent),
+                subtitle: terminalSubtitle(for: recent, area: area),
+                updatedAt: recent.updatedAt
+            )
+        }
+
+        return CatalogueRowModel(
+            area: area,
+            status: .idle,
+            subtitle: area.idleSubtitle,
+            updatedAt: nil
+        )
+    }
+
+    private static func matchingActivities(
+        for area: CatalogueArea,
+        in activities: [BackgroundActivity]
+    ) -> [BackgroundActivity] {
+        activities.filter { mappedAreas(for: $0).contains(area) }
+    }
+
+    private static func mappedAreas(for activity: BackgroundActivity) -> Set<CatalogueArea> {
+        let id = activity.id.lowercased()
+        var result = Set<CatalogueArea>()
+
+        if id.hasPrefix("background-index:movies") {
+            result.insert(.movies)
+        } else if id.hasPrefix("background-index:series") {
+            result.insert(.series)
+        } else if id.hasPrefix("background-index:live") {
+            result.insert(.liveTV)
+        }
+
+        return result
+    }
+
+    private static func activePriority(lhs: BackgroundActivity, rhs: BackgroundActivity) -> Bool {
+        let lhsHasProgress = hasNumericProgress(lhs)
+        let rhsHasProgress = hasNumericProgress(rhs)
+        if lhsHasProgress != rhsHasProgress {
+            return lhsHasProgress
+        }
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+    }
+
+    private static func hasNumericProgress(_ activity: BackgroundActivity) -> Bool {
+        guard let current = activity.currentStep,
+              let total = activity.totalSteps else {
+            return false
+        }
+        return total > 0 && current >= 0
+    }
+
+    private static func activeStatus(
+        for activity: BackgroundActivity,
+        activityCenter: BackgroundActivityCenter
+    ) -> CatalogueRowStatus {
+        if activityCenter.isWaitingForInternet, activity.isPausable {
+            return .waitingForInternet
+        }
+        if activityCenter.isPaused, activity.isPausable {
+            return .paused
+        }
+        return .running
+    }
+
+    private static func recentStatus(for activity: BackgroundActivity) -> CatalogueRowStatus {
+        switch activity.state {
+        case .completed:
+            return .success
+        case .failed:
+            return .failure
+        case .cancelled, .running:
+            return .idle
+        }
+    }
+
+    private static func activeSubtitle(
+        for activity: BackgroundActivity,
+        activityCenter: BackgroundActivityCenter
+    ) -> String {
+        if activityCenter.isWaitingForInternet {
+            return "Waiting for internet"
+        }
+        if activityCenter.isPaused, activity.isPausable {
+            return "Paused"
+        }
+
+        if let current = activity.currentStep,
+           let total = activity.totalSteps,
+           total > 0 {
+            let progressText = "\(min(current, total)) / \(total)"
+            if let category = currentCategoryName(from: activity) {
+                return "\(progressText) • \(category)"
+            }
+            return progressText
+        }
+
+        return "Indexing your provider"
+    }
+
+    private static func terminalSubtitle(
+        for activity: BackgroundActivity,
+        area: CatalogueArea
+    ) -> String {
+        switch activity.state {
+        case .completed:
+            return "Up to date"
+        case .failed:
+            return failureSummary(for: activity)
+        case .cancelled, .running:
+            return area.idleSubtitle
+        }
+    }
+
+    private static func failureSummary(for activity: BackgroundActivity) -> String {
+        guard let errorDescription = activity.errorDescription?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !errorDescription.isEmpty else {
+            return "Needs attention"
+        }
+
+        if errorDescription.localizedCaseInsensitiveContains("internet") ||
+            errorDescription.localizedCaseInsensitiveContains("network") ||
+            errorDescription.localizedCaseInsensitiveContains("offline") {
+            return "Couldn't reach the server"
+        }
+
+        return "Needs attention"
+    }
+
+    private static func currentCategoryName(from activity: BackgroundActivity) -> String? {
+        guard let detail = activity.detail?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !detail.isEmpty else {
+            return nil
+        }
+
+        let lowercased = detail.lowercased()
+
+        if lowercased.hasPrefix("checking ") ||
+            lowercased.hasPrefix("updating ") ||
+            lowercased.hasPrefix("organising ") ||
+            lowercased.hasPrefix("indexing ") ||
+            lowercased.hasPrefix("processing ") ||
+            lowercased.hasPrefix("waiting ") ||
+            lowercased == "up to date" {
+            return nil
+        }
+
+        return detail
+    }
 }
 
 struct BackgroundActivityIndicatorView: View {
     @Bindable var activityCenter: BackgroundActivityCenter
     @State private var isPresentingDetails = false
 
+    private var snapshot: CatalogueStatusSnapshot {
+        CatalogueStatusSnapshot(activityCenter: activityCenter)
+    }
+
     var body: some View {
-        if activityCenter.shouldShowIndicator {
+        if snapshot.shouldShowIndicator {
             Button {
                 isPresentingDetails = true
             } label: {
@@ -102,8 +332,8 @@ struct BackgroundActivityIndicatorView: View {
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(titleText)
-            .accessibilityValue(activityCenter.summaryText)
+            .accessibilityLabel(snapshot.indicatorTitle)
+            .accessibilityValue(snapshot.accessibilityValue)
             .sheet(isPresented: $isPresentingDetails) {
                 NavigationStack {
                     BackgroundActivityDetailsScreen(activityCenter: activityCenter)
@@ -114,15 +344,15 @@ struct BackgroundActivityIndicatorView: View {
 
     @ViewBuilder
     private var indicatorIcon: some View {
-        if activityCenter.isWaitingForInternet {
+        if snapshot.hasWaitingForInternet {
             Image(systemName: "wifi.slash")
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(.orange)
-        } else if activityCenter.isPaused {
+        } else if snapshot.hasPausedWork {
             Image(systemName: "pause.fill")
                 .font(.footnote.weight(.bold))
                 .foregroundStyle(.orange)
-        } else if activityCenter.hasFailures, activityCenter.activeCount == 0 {
+        } else if snapshot.hasFailure && !snapshot.hasActiveWork {
             Image(systemName: "exclamationmark")
                 .font(.headline.weight(.bold))
                 .foregroundStyle(.red)
@@ -130,19 +360,6 @@ struct BackgroundActivityIndicatorView: View {
             ProgressView()
                 .controlSize(.small)
         }
-    }
-
-    private var titleText: String {
-        if activityCenter.isWaitingForInternet {
-            return "Waiting for internet"
-        }
-        if activityCenter.isPaused {
-            return "Updates paused"
-        }
-        if activityCenter.hasFailures, activityCenter.activeCount == 0 {
-            return "Update needs attention"
-        }
-        return "Updates in progress"
     }
 }
 
@@ -152,23 +369,21 @@ struct BackgroundActivityDetailsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isRestarting = false
 
+    private var snapshot: CatalogueStatusSnapshot {
+        CatalogueStatusSnapshot(activityCenter: activityCenter)
+    }
+
     var body: some View {
         List {
             Section("Catalogue Status") {
-                ForEach(catalogueRows) { row in
+                ForEach(snapshot.rows) { row in
                     catalogueRow(row)
-                }
-            }
-
-            if shouldShowDownloads {
-                Section("Downloads") {
-                    catalogueRow(downloadsRow)
                 }
             }
 
             controlsSection
         }
-        .navigationTitle("Catalogue Updates")
+        .navigationTitle("Catalogue Indexing")
         #if !os(macOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif
@@ -181,36 +396,18 @@ struct BackgroundActivityDetailsScreen: View {
         }
     }
 
-    private var catalogueRows: [CatalogueRowModel] {
-        [
-            makeRow(for: .catalogue),
-            makeRow(for: .movies),
-            makeRow(for: .series),
-            makeRow(for: .liveTV)
-        ]
-    }
-
-    private var downloadsRow: CatalogueRowModel {
-        makeRow(for: .downloads)
-    }
-
-    private var shouldShowDownloads: Bool {
-        let allRelated = relatedActivities(for: .downloads)
-        return !allRelated.active.isEmpty || !allRelated.recent.isEmpty
-    }
-
     private var controlsSection: some View {
         Section("Controls") {
-            Button(activityCenter.isPaused ? "Resume updates" : "Pause updates") {
+            Button(activityCenter.isPaused ? "Resume catalogue indexing" : "Pause catalogue indexing") {
                 activityCenter.isPaused.toggle()
             }
 
-            Button(isRestarting ? "Restarting catalogue update..." : "Restart catalogue update") {
+            Button(isRestarting ? "Restarting catalogue indexing..." : "Restart catalogue indexing") {
                 Task { await restartCatalogueUpdate() }
             }
             .disabled(isRestarting)
 
-            if activityCenter.hasFailures {
+            if snapshot.hasFailure {
                 Button("Clear issue history") {
                     activityCenter.clearRecentFailures()
                 }
@@ -232,7 +429,8 @@ struct BackgroundActivityDetailsScreen: View {
                 Text(row.subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             }
         }
         .padding(.vertical, 4)
@@ -262,178 +460,6 @@ struct BackgroundActivityDetailsScreen: View {
         }
     }
 
-    private func makeRow(for area: CatalogueArea) -> CatalogueRowModel {
-        let related = relatedActivities(for: area)
-
-        if let active = related.active.first {
-            let status: CatalogueRowStatus
-            if activityCenter.isWaitingForInternet, active.isPausable {
-                status = .waitingForInternet
-            } else if activityCenter.isPaused, active.isPausable {
-                status = .paused
-            } else {
-                status = .running
-            }
-            return CatalogueRowModel(
-                area: area,
-                status: status,
-                subtitle: subtitle(for: active, area: area)
-            )
-        }
-
-        if let failed = related.recent.first(where: { $0.state == .failed }) {
-            return CatalogueRowModel(
-                area: area,
-                status: .failure,
-                subtitle: failureSubtitle(for: failed, area: area)
-            )
-        }
-
-        if let completed = related.recent.first(where: { $0.state == .completed }) {
-            return CatalogueRowModel(
-                area: area,
-                status: .success,
-                subtitle: completionSubtitle(for: completed, area: area)
-            )
-        }
-
-        if let cancelled = related.recent.first(where: { $0.state == .cancelled }) {
-            return CatalogueRowModel(
-                area: area,
-                status: .idle,
-                subtitle: friendlyDetail(cancelled.detail, fallback: area.idleSubtitle)
-            )
-        }
-
-        return CatalogueRowModel(area: area, status: .idle, subtitle: area.idleSubtitle)
-    }
-
-    private func relatedActivities(for area: CatalogueArea) -> (active: [BackgroundActivity], recent: [BackgroundActivity]) {
-        let active = activityCenter.activeList.filter { areas(for: $0).contains(area) }
-        let recent = activityCenter.recentList.filter { areas(for: $0).contains(area) }
-        return (active, recent)
-    }
-
-    private func areas(for activity: BackgroundActivity) -> Set<CatalogueArea> {
-        let id = activity.id.lowercased()
-        let source = activity.source.lowercased()
-        var result: Set<CatalogueArea> = []
-
-        if source == "downloads" {
-            return [.downloads]
-        }
-
-        if id.hasPrefix("catalog-warmup:movies") {
-            result.insert(.movies)
-        } else if id.hasPrefix("catalog-warmup:series") {
-            result.insert(.series)
-        } else if id.hasPrefix("catalog-warmup:live") {
-            result.insert(.liveTV)
-        } else if id.hasPrefix("catalog-warmup:") {
-            result.insert(.catalogue)
-        }
-
-        if id.hasPrefix("category-refresh:") {
-            if id.contains("vodcategories") {
-                result.insert(.movies)
-            }
-            if id.contains("seriescategories") {
-                result.insert(.series)
-            }
-        }
-
-        if id.hasPrefix("stream-refresh:") {
-            if id.contains("|vod|") {
-                result.insert(.movies)
-            }
-            if id.contains("|series|") {
-                result.insert(.series)
-            }
-            if id.contains("|live|") {
-                result.insert(.liveTV)
-            }
-        }
-
-        if id.hasPrefix("vod-detail-refresh:") {
-            result.insert(.movies)
-        }
-
-        if id.hasPrefix("series-detail-refresh:") {
-            result.insert(.series)
-        }
-
-        if id.hasPrefix("search-coverage:") {
-            if id.hasSuffix(":movies") {
-                result.insert(.movies)
-            } else if id.hasSuffix(":series") {
-                result.insert(.series)
-            } else {
-                result.insert(.catalogue)
-            }
-        }
-
-        if id.hasPrefix("search-index-rebuild:") {
-            result.insert(.catalogue)
-        }
-
-        if result.isEmpty {
-            result.insert(.catalogue)
-        }
-
-        return result
-    }
-
-    private func subtitle(for activity: BackgroundActivity, area: CatalogueArea) -> String {
-        if activityCenter.isWaitingForInternet {
-            return "Waiting for internet before continuing."
-        }
-
-        if area != .downloads,
-           let current = activity.currentStep,
-           let total = activity.totalSteps,
-           total > 1 {
-            return "\(min(current, total)) of \(total) \(area.progressNoun) updated"
-        }
-
-        return friendlyDetail(activity.detail, fallback: area.idleSubtitle)
-    }
-
-    private func completionSubtitle(for activity: BackgroundActivity, area: CatalogueArea) -> String {
-        if let detail = activity.detail, !detail.isEmpty {
-            return friendlyDetail(detail, fallback: "Up to date")
-        }
-        if area == .downloads {
-            return "Downloads are up to date."
-        }
-        return "Up to date."
-    }
-
-    private func failureSubtitle(for activity: BackgroundActivity, area: CatalogueArea) -> String {
-        if let detail = activity.detail, !detail.isEmpty {
-            return friendlyDetail(detail, fallback: "Needs attention.")
-        }
-        if let errorDescription = activity.errorDescription, !errorDescription.isEmpty {
-            return errorDescription
-        }
-        if area == .downloads {
-            return "Downloads need attention."
-        }
-        return "This part of the catalogue needs attention."
-    }
-
-    private func friendlyDetail(_ detail: String?, fallback: String) -> String {
-        guard let detail else { return fallback }
-
-        let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return fallback }
-
-        return trimmed
-            .replacingOccurrences(of: "Checking saved library data", with: "Organising saved titles for browsing")
-            .replacingOccurrences(of: "Checking categories", with: "Looking for new categories")
-            .replacingOccurrences(of: "Your library is ready", with: "Up to date")
-            .replacingOccurrences(of: "Search is ready", with: "Up to date")
-    }
-
     private func restartCatalogueUpdate() async {
         guard !isRestarting else { return }
 
@@ -443,8 +469,7 @@ struct BackgroundActivityDetailsScreen: View {
         do {
             activityCenter.isPaused = false
             activityCenter.clearRecentFailures()
-            try await catalog.refreshCurrentProvider()
-            try await catalog.rebuildSearchIndexFromCachedMetadata()
+            try await catalog.runBackgroundCatalogueIndex(forceRefresh: true)
         } catch {
             // Errors surface through the activity center itself.
         }

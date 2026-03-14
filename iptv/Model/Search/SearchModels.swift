@@ -257,3 +257,19 @@ struct SearchFacetValues: Hashable, Sendable {
     let genres: [String]
     let languages: [String]
 }
+
+struct ProviderCatalogueSummary: Hashable, Sendable {
+    let movieCount: Int
+    let seriesCount: Int
+    let indexedMovieCategories: Int
+    let totalMovieCategories: Int
+    let indexedSeriesCategories: Int
+    let totalSeriesCategories: Int
+
+    var isComplete: Bool {
+        indexedMovieCategories >= totalMovieCategories &&
+        indexedSeriesCategories >= totalSeriesCategories &&
+        totalMovieCategories > 0 &&
+        totalSeriesCategories > 0
+    }
+}

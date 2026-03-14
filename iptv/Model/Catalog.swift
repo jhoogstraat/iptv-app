@@ -700,6 +700,37 @@ final class Catalog {
         )
     }
 
+    func providerCatalogueSummary() async throws -> ProviderCatalogueSummary {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+        let providerFingerprint = try currentProviderFingerprint()
+        if vodCategories.isEmpty {
+            try await getVodCategories(policy: .refreshIfStale)
+        }
+        if seriesCategories.isEmpty {
+            try await getSeriesCategories(policy: .refreshIfStale)
+        }
+
+        let counts = await searchIndexStore.providerCounts(providerFingerprint: providerFingerprint)
+        let indexedMovies = await searchIndexStore.indexedCategories(scope: .movies, providerFingerprint: providerFingerprint).count
+        let indexedSeries = await searchIndexStore.indexedCategories(scope: .series, providerFingerprint: providerFingerprint).count
+
+        return ProviderCatalogueSummary(
+            movieCount: counts.movies,
+            seriesCount: counts.series,
+            indexedMovieCategories: indexedMovies,
+            totalMovieCategories: vodCategories.count,
+            indexedSeriesCategories: indexedSeries,
+            totalSeriesCategories: seriesCategories.count
+        )
+    }
+
+    func runBackgroundCatalogueIndex(forceRefresh: Bool = false) async throws {
+        guard hasProviderConfiguration else { throw CatalogError.missingProviderConfiguration }
+
+        try await indexCatalogueContent(.vod, forceRefresh: forceRefresh)
+        try await indexCatalogueContent(.series, forceRefresh: forceRefresh)
+    }
+
     func ensureSearchCoverage(scope: SearchMediaScope) -> AsyncStream<SearchIndexProgress> {
         AsyncStream { continuation in
             Task { @MainActor in
@@ -811,6 +842,139 @@ final class Catalog {
             targets.append(contentsOf: seriesCategories.map { SearchCoverageTarget(contentType: .series, category: $0) })
         }
         return targets
+    }
+
+    private func indexCatalogueContent(
+        _ contentType: XtreamContentType,
+        forceRefresh: Bool
+    ) async throws {
+        let loadPolicy: CatalogLoadPolicy = forceRefresh ? .refreshNow : .refreshIfStale
+
+        try await activityCenter.waitIfResumed()
+        try await getCategories(for: contentType, policy: loadPolicy)
+
+        let categories = categories(for: contentType)
+        guard !categories.isEmpty else { return }
+
+        let activityID = backgroundIndexActivityID(for: contentType)
+        var discoveredVideoIDs = Set<Int>()
+        var discoveredVideos: [Video] = []
+        let categoryStepCount = max(categories.count, 1)
+
+        activityCenter.start(
+            id: activityID,
+            title: backgroundIndexTitle(for: contentType),
+            detail: nil,
+            source: "Indexing",
+            progress: (0, categoryStepCount)
+        )
+
+        do {
+            for (offset, category) in categories.enumerated() {
+                try await activityCenter.waitIfResumed()
+                try await getStreams(in: category, contentType: contentType, policy: loadPolicy)
+
+                if contentType == .series,
+                   let videos = cachedVideos(in: category, contentType: .series) {
+                    appendUniqueVideos(
+                        videos,
+                        seenIDs: &discoveredVideoIDs,
+                        into: &discoveredVideos
+                    )
+                }
+
+                let totalSteps = categoryStepCount + detailIndexStepCount(for: contentType, videos: discoveredVideos)
+                activityCenter.update(
+                    id: activityID,
+                    detail: category.name,
+                    progress: (offset + 1, max(totalSteps, 1))
+                )
+            }
+
+            try await indexSupplementalMetadata(
+                for: contentType,
+                videos: discoveredVideos,
+                loadPolicy: loadPolicy,
+                activityID: activityID,
+                completedCategorySteps: categoryStepCount
+            )
+
+            activityCenter.finish(id: activityID, detail: "Up to date")
+        } catch is CancellationError {
+            activityCenter.cancel(id: activityID)
+            throw CancellationError()
+        } catch {
+            activityCenter.fail(id: activityID, error: error)
+            throw error
+        }
+    }
+
+    private func indexSupplementalMetadata(
+        for contentType: XtreamContentType,
+        videos: [Video],
+        loadPolicy: CatalogLoadPolicy,
+        activityID: String,
+        completedCategorySteps: Int
+    ) async throws {
+        let supplementalCount = detailIndexStepCount(for: contentType, videos: videos)
+        guard supplementalCount > 0 else { return }
+
+        let totalSteps = completedCategorySteps + supplementalCount
+        switch contentType {
+        case .series:
+            for (offset, video) in videos.enumerated() {
+                try await activityCenter.waitIfResumed()
+                _ = try await getSeriesInfo(video, policy: loadPolicy)
+                activityCenter.update(
+                    id: activityID,
+                    detail: video.name,
+                    progress: (completedCategorySteps + offset + 1, totalSteps)
+                )
+            }
+        case .vod, .live:
+            return
+        }
+    }
+
+    private func detailIndexStepCount(for contentType: XtreamContentType, videos: [Video]) -> Int {
+        switch contentType {
+        case .series:
+            return videos.count
+        case .vod, .live:
+            return 0
+        }
+    }
+
+    private func appendUniqueVideos(
+        _ videos: [Video],
+        seenIDs: inout Set<Int>,
+        into destination: inout [Video]
+    ) {
+        for video in videos where seenIDs.insert(video.id).inserted {
+            destination.append(video)
+        }
+    }
+
+    private func backgroundIndexActivityID(for contentType: XtreamContentType) -> String {
+        switch contentType {
+        case .vod:
+            return "background-index:movies"
+        case .series:
+            return "background-index:series"
+        case .live:
+            return "background-index:live"
+        }
+    }
+
+    private func backgroundIndexTitle(for contentType: XtreamContentType) -> String {
+        switch contentType {
+        case .vod:
+            return "Indexing Movies"
+        case .series:
+            return "Indexing Series"
+        case .live:
+            return "Indexing TV"
+        }
     }
 }
 

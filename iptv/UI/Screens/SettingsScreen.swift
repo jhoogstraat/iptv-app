@@ -59,6 +59,7 @@ struct SettingsScreen: View {
         }
     }
 
+    @Environment(Catalog.self) private var catalog
     @Environment(ProviderStore.self) private var providerStore
 
     @State private var baseURL = ""
@@ -72,12 +73,17 @@ struct SettingsScreen: View {
     @State private var prefixDiscoveryError: String?
     @State private var statusMessage: String?
     @State private var statusIsError = false
+    @State private var catalogueSummary: ProviderCatalogueSummary?
+    @State private var isLoadingCatalogueSummary = false
 
     var body: some View {
         #if os(macOS)
         macSettingsBody
             .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 540)
             .onAppear(perform: loadCurrentValues)
+            .task(id: providerStore.revision) {
+                await observeCatalogueSummary()
+            }
             .sheet(isPresented: $isShowingPrefixSelector) {
                 prefixSelectionSheet
             }
@@ -93,6 +99,9 @@ struct SettingsScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .withBackgroundActivityToolbar()
         .onAppear(perform: loadCurrentValues)
+        .task(id: providerStore.revision) {
+            await observeCatalogueSummary()
+        }
         .sheet(isPresented: $isShowingPrefixSelector) {
             NavigationStack {
                 prefixSelectionSheet
@@ -156,6 +165,8 @@ struct SettingsScreen: View {
 
     private var generalOverviewSection: some View {
         Section {
+            catalogueStatsGrid
+
             LabeledContent("Provider") {
                 providerStatusBadge
             }
@@ -195,6 +206,102 @@ struct SettingsScreen: View {
         } footer: {
             Text("Provider credentials unlock catalog loading, search, recommendations, and playback.")
         }
+    }
+
+    @ViewBuilder
+    private var catalogueStatsGrid: some View {
+        #if os(macOS)
+        HStack(spacing: 12) {
+            statsCard(
+                title: "Movies",
+                value: movieCountText,
+                subtitle: movieCountSubtitle
+            )
+            statsCard(
+                title: "Series",
+                value: seriesCountText,
+                subtitle: seriesCountSubtitle
+            )
+        }
+        #else
+        VStack(spacing: 12) {
+            statsCard(
+                title: "Movies",
+                value: movieCountText,
+                subtitle: movieCountSubtitle
+            )
+            statsCard(
+                title: "Series",
+                value: seriesCountText,
+                subtitle: seriesCountSubtitle
+            )
+        }
+        #endif
+    }
+
+    private func statsCard(title: String, value: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Text(value)
+                .font(.title2.weight(.bold))
+
+            Text(subtitle)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var movieCountText: String {
+        if isLoadingCatalogueSummary && catalogueSummary == nil {
+            return "..."
+        }
+        return (catalogueSummary?.movieCount ?? 0).formatted()
+    }
+
+    private var seriesCountText: String {
+        if isLoadingCatalogueSummary && catalogueSummary == nil {
+            return "..."
+        }
+        return (catalogueSummary?.seriesCount ?? 0).formatted()
+    }
+
+    private var movieCountSubtitle: String {
+        guard let catalogueSummary else {
+            return providerStore.hasConfiguration ? "Counting titles while your provider is being indexed." : "Configure a provider to show catalogue size."
+        }
+
+        if catalogueSummary.totalMovieCategories == 0 {
+            return "No movie categories found yet."
+        }
+
+        if catalogueSummary.indexedMovieCategories < catalogueSummary.totalMovieCategories {
+            return "\(catalogueSummary.indexedMovieCategories) of \(catalogueSummary.totalMovieCategories) movie categories indexed so far"
+        }
+
+        return "Included in your provider"
+    }
+
+    private var seriesCountSubtitle: String {
+        guard let catalogueSummary else {
+            return providerStore.hasConfiguration ? "Counting titles while your provider is being indexed." : "Configure a provider to show catalogue size."
+        }
+
+        if catalogueSummary.totalSeriesCategories == 0 {
+            return "No series categories found yet."
+        }
+
+        if catalogueSummary.indexedSeriesCategories < catalogueSummary.totalSeriesCategories {
+            return "\(catalogueSummary.indexedSeriesCategories) of \(catalogueSummary.totalSeriesCategories) series categories indexed so far"
+        }
+
+        return "Included in your provider"
     }
 
     private var providerCredentialsSection: some View {
@@ -475,6 +582,36 @@ struct SettingsScreen: View {
         password = providerStore.password()
         excludedPrefixesInput = providerStore.excludedCategoryPrefixesInput()
         selectedVisiblePrefixes = Set()
+    }
+
+    private func observeCatalogueSummary() async {
+        guard providerStore.hasConfiguration else {
+            await MainActor.run {
+                catalogueSummary = nil
+                isLoadingCatalogueSummary = false
+            }
+            return
+        }
+
+        await MainActor.run {
+            isLoadingCatalogueSummary = true
+        }
+
+        while !Task.isCancelled && providerStore.hasConfiguration {
+            do {
+                let summary = try await catalog.providerCatalogueSummary()
+                await MainActor.run {
+                    catalogueSummary = summary
+                    isLoadingCatalogueSummary = false
+                }
+            } catch {
+                await MainActor.run {
+                    isLoadingCatalogueSummary = false
+                }
+            }
+
+            try? await Task.sleep(for: .seconds(5))
+        }
     }
 
     private func save() {

@@ -108,12 +108,12 @@ struct ContentView: View {
                 .padding(.bottom, 16)
         }
         #endif
-        .task(id: "\(providerStore.revision)|\(selectedTab.id)") {
+        .task(id: providerStore.revision) {
             guard providerStore.hasConfiguration else {
                 warmupCoordinator.stop()
                 return
             }
-            warmupCoordinator.start(selectedTab: selectedTab, providerRevision: providerStore.revision, catalog: catalog)
+            warmupCoordinator.start(providerRevision: providerStore.revision, catalog: catalog)
         }
     }
 

@@ -61,6 +61,11 @@ struct SearchVideoSnapshot: Hashable, Sendable {
 }
 
 actor SearchIndexStore {
+    struct ProviderCounts: Hashable, Sendable {
+        let movies: Int
+        let series: Int
+    }
+
     fileprivate struct SearchDocument: Codable, Hashable, Sendable {
         let key: String
         let videoID: Int
@@ -391,6 +396,17 @@ actor SearchIndexStore {
         case .all:
             return providerIndex.indexedMovieCategoryIDs.union(providerIndex.indexedSeriesCategoryIDs)
         }
+    }
+
+    func providerCounts(providerFingerprint: String) async -> ProviderCounts {
+        await ensureLoaded(providerFingerprint: providerFingerprint)
+        guard let providerIndex = indexesByProvider[providerFingerprint] else {
+            return ProviderCounts(movies: 0, series: 0)
+        }
+        return ProviderCounts(
+            movies: providerIndex.movieKeys.count,
+            series: providerIndex.seriesKeys.count
+        )
     }
 
     func clear(providerFingerprint: String) async {
