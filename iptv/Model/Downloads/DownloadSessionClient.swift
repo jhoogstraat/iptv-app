@@ -65,13 +65,15 @@ final class DownloadSessionClient: NSObject, @unchecked Sendable {
 
     nonisolated private func makeSession() -> URLSession {
         let configuration: URLSessionConfiguration
-        #if os(tvOS)
-        configuration = .default
-        #else
+        // macOS builds in this project do not ship the application-identifier entitlement
+        // required for background URLSession adoption, so use a foreground session there.
+        #if os(iOS)
         configuration = .background(withIdentifier: identifier)
         configuration.isDiscretionary = false
         configuration.sessionSendsLaunchEvents = true
         configuration.waitsForConnectivity = true
+        #else
+        configuration = .default
         #endif
         configuration.allowsCellularAccess = true
         configuration.timeoutIntervalForRequest = 60
