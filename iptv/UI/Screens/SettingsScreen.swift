@@ -74,35 +74,33 @@ struct SettingsScreen: View {
     @State private var statusMessage: String?
     @State private var statusIsError = false
     @State private var catalogueSummary: ProviderCatalogueSummary?
+    @State private var movieSyncProgress: CatalogueSyncProgress?
+    @State private var seriesSyncProgress: CatalogueSyncProgress?
     @State private var isLoadingCatalogueSummary = false
 
     var body: some View {
         #if os(macOS)
-        macSettingsBody
-            .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 540)
-            .onAppear(perform: loadCurrentValues)
-            .task(id: "\(providerStore.revision)|\(catalog.catalogueRevision)") {
-                await loadCatalogueSummary()
-            }
+        withSettingsLifecycle(
+            macSettingsBody
+                .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 540)
+        )
             .sheet(isPresented: $isShowingPrefixSelector) {
                 prefixSelectionSheet
             }
         #else
-        Form {
-            providerOverviewSection
-            providerCredentialsSection
-            providerActionsSection
-            librarySection
-            playbackSection
-            supportSection
-        }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-        .withBackgroundActivityToolbar()
-        .onAppear(perform: loadCurrentValues)
-        .task(id: "\(providerStore.revision)|\(catalog.catalogueRevision)") {
-            await loadCatalogueSummary()
-        }
+        withSettingsLifecycle(
+            Form {
+                providerOverviewSection
+                providerCredentialsSection
+                providerActionsSection
+                librarySection
+                playbackSection
+                supportSection
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .withBackgroundActivityToolbar()
+        )
         .sheet(isPresented: $isShowingPrefixSelector) {
             NavigationStack {
                 prefixSelectionSheet
@@ -110,6 +108,20 @@ struct SettingsScreen: View {
             .presentationDetents([.medium, .large])
         }
         #endif
+    }
+
+    private func withSettingsLifecycle<Content: View>(_ content: Content) -> some View {
+        content
+            .onAppear(perform: loadCurrentValues)
+            .task(id: providerStore.revision) {
+                await loadCatalogueSummary()
+            }
+            .task(id: "movies-\(providerStore.revision)") {
+                await observeSyncProgress(for: .movies)
+            }
+            .task(id: "series-\(providerStore.revision)") {
+                await observeSyncProgress(for: .series)
+            }
     }
 
     #if os(macOS)
@@ -288,35 +300,21 @@ struct SettingsScreen: View {
     }
 
     private var movieCountSubtitle: String {
-        guard let catalogueSummary else {
-            return providerStore.hasConfiguration ? "Counting titles while your provider is being synced." : "Configure a provider to show catalogue size."
-        }
-
-        if catalogueSummary.totalMovieCategories == 0 {
-            return "No movie categories found yet."
-        }
-
-        if catalogueSummary.syncedMovieCategories < catalogueSummary.totalMovieCategories {
-            return "\(catalogueSummary.syncedMovieCategories) of \(catalogueSummary.totalMovieCategories) movie categories synced so far"
-        }
-
-        return "Included in your provider"
+        syncSubtitle(
+            kind: "movie",
+            progress: movieSyncProgress,
+            fallbackSyncedCategories: catalogueSummary?.syncedMovieCategories,
+            fallbackTotalCategories: catalogueSummary?.totalMovieCategories
+        )
     }
 
     private var seriesCountSubtitle: String {
-        guard let catalogueSummary else {
-            return providerStore.hasConfiguration ? "Counting titles while your provider is being synced." : "Configure a provider to show catalogue size."
-        }
-
-        if catalogueSummary.totalSeriesCategories == 0 {
-            return "No series categories found yet."
-        }
-
-        if catalogueSummary.syncedSeriesCategories < catalogueSummary.totalSeriesCategories {
-            return "\(catalogueSummary.syncedSeriesCategories) of \(catalogueSummary.totalSeriesCategories) series categories synced so far"
-        }
-
-        return "Included in your provider"
+        syncSubtitle(
+            kind: "series",
+            progress: seriesSyncProgress,
+            fallbackSyncedCategories: catalogueSummary?.syncedSeriesCategories,
+            fallbackTotalCategories: catalogueSummary?.totalSeriesCategories
+        )
     }
 
     private var tvCountSubtitle: String {
@@ -585,6 +583,7 @@ struct SettingsScreen: View {
         }
     }
 
+    @MainActor
     private func loadCurrentValues() {
         baseURL = providerStore.baseURLInput
         username = providerStore.username()
@@ -593,30 +592,73 @@ struct SettingsScreen: View {
         selectedVisiblePrefixes = Set()
     }
 
+    @MainActor
     private func loadCatalogueSummary() async {
         guard providerStore.hasConfiguration else {
-            await MainActor.run {
-                catalogueSummary = nil
-                isLoadingCatalogueSummary = false
-            }
+            catalogueSummary = nil
+            isLoadingCatalogueSummary = false
             return
         }
 
-        await MainActor.run {
-            isLoadingCatalogueSummary = true
-        }
+        isLoadingCatalogueSummary = true
 
         do {
             let summary = try await catalog.providerCatalogueSummary()
-            await MainActor.run {
-                catalogueSummary = summary
-                isLoadingCatalogueSummary = false
-            }
+            catalogueSummary = summary
+            isLoadingCatalogueSummary = false
         } catch {
-            await MainActor.run {
-                isLoadingCatalogueSummary = false
-            }
+            isLoadingCatalogueSummary = false
         }
+    }
+
+    @MainActor
+    private func observeSyncProgress(for scope: SearchMediaScope) async {
+        setSyncProgress(nil, for: scope)
+        guard providerStore.hasConfiguration else { return }
+
+        let stream = catalog.observeSyncProgress(scope: scope)
+        for await progress in stream {
+            if Task.isCancelled {
+                break
+            }
+            setSyncProgress(progress, for: scope)
+        }
+    }
+
+    @MainActor
+    private func setSyncProgress(_ progress: CatalogueSyncProgress?, for scope: SearchMediaScope) {
+        switch scope {
+        case .movies:
+            movieSyncProgress = progress
+        case .series:
+            seriesSyncProgress = progress
+        case .all:
+            break
+        }
+    }
+
+    private func syncSubtitle(
+        kind: String,
+        progress: CatalogueSyncProgress?,
+        fallbackSyncedCategories: Int?,
+        fallbackTotalCategories: Int?
+    ) -> String {
+        guard providerStore.hasConfiguration else {
+            return "Configure a provider to show catalogue size."
+        }
+
+        let totalCategories = progress?.totalCategories ?? fallbackTotalCategories
+        let syncedCategories = progress?.syncedCategories ?? fallbackSyncedCategories ?? 0
+
+        guard let totalCategories, totalCategories > 0 else {
+            return "Discovering \(kind) categories."
+        }
+
+        if syncedCategories < totalCategories {
+            return "\(syncedCategories) of \(totalCategories) \(kind) categories synced so far"
+        }
+
+        return "All \(kind) categories synced. Search is ready."
     }
 
     private func save() {
