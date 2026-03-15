@@ -55,143 +55,13 @@ nonisolated struct CatalogCachedValue<Value: Sendable>: Sendable {
     let savedAt: Date
 }
 
-nonisolated protocol CatalogMetadataCacheStore: Sendable {
+nonisolated protocol CatalogMetadataCachePersisting: Sendable {
     func load(key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry?
     func save(_ entry: CatalogMetadataCacheEntry, for key: CatalogMetadataCacheKey) async throws
     func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry]
     func removeValue(for key: CatalogMetadataCacheKey) async throws
     func removeAll(for providerFingerprint: String) async throws
     func pruneCacheIfNeeded() async throws
-}
-
-actor DiskCatalogMetadataCacheStore: CatalogMetadataCacheStore {
-    private let fileManager = FileManager.default
-    private let directoryURL: URL
-    private let maxCacheBytes: Int
-
-    init(
-        directoryURL: URL? = nil,
-        maxCacheBytes: Int = 32 * 1024 * 1024
-    ) {
-        let baseDirectory = directoryURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        self.directoryURL = baseDirectory.appending(path: "CatalogMetadataCache", directoryHint: .isDirectory)
-        self.maxCacheBytes = maxCacheBytes
-    }
-
-    func load(key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry? {
-        try ensureDirectoryExists()
-        let url = fileURL(for: key)
-        guard fileManager.fileExists(atPath: url.path()) else { return nil }
-
-        do {
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
-            let entry = try JSONDecoder().decode(CatalogMetadataCacheEntry.self, from: data)
-            guard entry.schemaVersion == CatalogMetadataCacheEntry.schemaVersion, entry.key == key else {
-                try? fileManager.removeItem(at: url)
-                return nil
-            }
-            touchFile(at: url)
-            return entry.touching(at: Date())
-        } catch {
-            try? fileManager.removeItem(at: url)
-            return nil
-        }
-    }
-
-    func save(_ entry: CatalogMetadataCacheEntry, for key: CatalogMetadataCacheKey) async throws {
-        try ensureDirectoryExists()
-        let data = try JSONEncoder().encode(entry)
-        let url = fileURL(for: key)
-        try data.write(to: url, options: [.atomic])
-        touchFile(at: url)
-        try await pruneCacheIfNeeded()
-    }
-
-    func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry] {
-        try ensureDirectoryExists()
-        let files = try fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-
-        let decoder = JSONDecoder()
-        return files.compactMap { file in
-            guard let data = try? Data(contentsOf: file),
-                  let entry = try? decoder.decode(CatalogMetadataCacheEntry.self, from: data),
-                  entry.key.providerFingerprint == providerFingerprint else {
-                return nil
-            }
-            return entry
-        }
-    }
-
-    func removeAll(for providerFingerprint: String) async throws {
-        let providerEntries = try await entries(providerFingerprint: providerFingerprint)
-        for entry in providerEntries {
-            try? fileManager.removeItem(at: fileURL(for: entry.key))
-        }
-    }
-
-    func removeValue(for key: CatalogMetadataCacheKey) async throws {
-        let url = fileURL(for: key)
-        guard fileManager.fileExists(atPath: url.path()) else { return }
-        try? fileManager.removeItem(at: url)
-    }
-
-    func pruneCacheIfNeeded() async throws {
-        try ensureDirectoryExists()
-
-        struct FileRecord {
-            let url: URL
-            let size: Int
-            let modifiedAt: Date
-        }
-
-        let files = try fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        )
-
-        var records: [FileRecord] = []
-        var totalSize = 0
-
-        for file in files {
-            let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])
-            guard values.isRegularFile == true else { continue }
-            let size = values.fileSize ?? 0
-            totalSize += size
-            records.append(
-                FileRecord(
-                    url: file,
-                    size: size,
-                    modifiedAt: values.contentModificationDate ?? .distantPast
-                )
-            )
-        }
-
-        guard totalSize > maxCacheBytes else { return }
-
-        for record in records.sorted(by: { $0.modifiedAt < $1.modifiedAt }) where totalSize > maxCacheBytes {
-            try? fileManager.removeItem(at: record.url)
-            totalSize -= record.size
-        }
-    }
-
-    private func fileURL(for key: CatalogMetadataCacheKey) -> URL {
-        directoryURL.appending(path: key.fileName)
-    }
-
-    private func ensureDirectoryExists() throws {
-        if !fileManager.fileExists(atPath: directoryURL.path()) {
-            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        }
-    }
-
-    private func touchFile(at url: URL) {
-        try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path())
-    }
 }
 
 actor CatalogMetadataCacheManager {
@@ -203,18 +73,18 @@ actor CatalogMetadataCacheManager {
     private var memoryCache: [CatalogMetadataCacheKey: CatalogMetadataCacheEntry] = [:]
     private var inFlightTasks: [CatalogMetadataCacheKey: InFlightLoad] = [:]
 
-    private let diskStore: CatalogMetadataCacheStore
+    private let store: any CatalogMetadataCachePersisting
     private let now: @Sendable () -> Date
 
     init(
-        diskStore: CatalogMetadataCacheStore? = nil,
+        store: any CatalogMetadataCachePersisting,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.diskStore = diskStore ?? DiskCatalogMetadataCacheStore()
+        self.store = store
         self.now = now
 
         Task(priority: .utility) {
-            try? await self.diskStore.pruneCacheIfNeeded()
+            try? await self.store.pruneCacheIfNeeded()
         }
     }
 
@@ -238,12 +108,12 @@ actor CatalogMetadataCacheManager {
             )
         }
 
-        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
-        memoryCache[key] = diskEntry
+        guard let storedEntry = try await store.load(key: key) else { return nil }
+        memoryCache[key] = storedEntry
 
         return CatalogCachedValue(
-            value: diskEntry.payload,
-            savedAt: diskEntry.savedAt
+            value: storedEntry.payload,
+            savedAt: storedEntry.savedAt
         )
     }
 
@@ -264,7 +134,7 @@ actor CatalogMetadataCacheManager {
             let currentDate = now()
             let entry = CatalogMetadataCacheEntry(key: key, savedAt: currentDate, lastAccessAt: currentDate, payload: data)
             memoryCache[key] = entry
-            try await diskStore.save(entry, for: key)
+            try await store.save(entry, for: key)
             finishInFlightTask(for: key, loadID: loadID)
             return data
         } catch {
@@ -274,7 +144,7 @@ actor CatalogMetadataCacheManager {
     }
 
     func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry] {
-        try await diskStore.entries(providerFingerprint: providerFingerprint)
+        try await store.entries(providerFingerprint: providerFingerprint)
     }
 
     func entry(for key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry? {
@@ -286,21 +156,21 @@ actor CatalogMetadataCacheManager {
             return touched
         }
 
-        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
-        memoryCache[key] = diskEntry
-        return diskEntry
+        guard let storedEntry = try await store.load(key: key) else { return nil }
+        memoryCache[key] = storedEntry
+        return storedEntry
     }
 
     func removeValue(for key: CatalogMetadataCacheKey) async throws {
         inFlightTasks[key]?.task.cancel()
         inFlightTasks[key] = nil
         memoryCache[key] = nil
-        try await diskStore.removeValue(for: key)
+        try await store.removeValue(for: key)
     }
 
     func removeAll(for providerFingerprint: String) async throws {
         memoryCache = memoryCache.filter { $0.key.providerFingerprint != providerFingerprint }
-        try await diskStore.removeAll(for: providerFingerprint)
+        try await store.removeAll(for: providerFingerprint)
     }
 
     private func finishInFlightTask(for key: CatalogMetadataCacheKey, loadID: UUID) {

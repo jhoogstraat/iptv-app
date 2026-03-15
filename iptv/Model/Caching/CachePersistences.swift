@@ -1,5 +1,5 @@
 //
-//  SwiftDataCacheStores.swift
+//  CachePersistences.swift
 //  iptv
 //
 //  Created by Codex on 14.03.26.
@@ -8,20 +8,15 @@
 import Foundation
 import SwiftData
 
-actor SwiftDataStreamListCacheStore: StreamListCacheStore {
-    private let modelContainer: ModelContainer
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-    }
+@ModelActor
+actor StreamListCachePersistence: StreamListCachePersisting {
 
     func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry? {
-        let context = ModelContext(modelContainer)
         let providerFingerprint = key.providerFingerprint
         let contentType = key.contentType.rawValue
         let categoryID = key.categoryID
         let pageToken = key.pageToken
-        let records = try context.fetch(
+        let records = try modelContext.fetch(
             FetchDescriptor<PersistedStreamRecord>(
                 predicate: #Predicate {
                     $0.providerFingerprint == providerFingerprint &&
@@ -55,7 +50,6 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
     }
 
     func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws {
-        let context = ModelContext(modelContainer)
         let providerFingerprint = key.providerFingerprint
         let contentType = key.contentType.rawValue
         let categoryID = key.categoryID
@@ -64,11 +58,11 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
             providerFingerprint: providerFingerprint,
             contentType: contentType,
             categoryID: categoryID,
-            context: context
+            context: modelContext
         )
         let categoryName = categoryRecord?.name ?? categoryID
         let normalizedCategoryName = Self.normalize(categoryName)
-        let existing = try context.fetch(
+        let existing = try modelContext.fetch(
             FetchDescriptor<PersistedStreamRecord>(
                 predicate: #Predicate {
                     $0.providerFingerprint == providerFingerprint &&
@@ -109,7 +103,7 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
                 record.savedAt = entry.savedAt
                 record.lastAccessAt = entry.lastAccessAt
             } else {
-                context.insert(
+                modelContext.insert(
                     PersistedStreamRecord(
                         id: recordID,
                         providerFingerprint: key.providerFingerprint,
@@ -139,15 +133,14 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
         }
 
         for record in existing where !retainedRecordIDs.contains(record.id) {
-            context.delete(record)
+            modelContext.delete(record)
         }
 
-        try context.save()
+        try modelContext.save()
     }
 
     func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry] {
-        let context = ModelContext(modelContainer)
-        let records = try context.fetch(
+        let records = try modelContext.fetch(
             FetchDescriptor<PersistedStreamRecord>(
                 predicate: #Predicate { $0.providerFingerprint == providerFingerprint },
                 sortBy: [
@@ -195,38 +188,28 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
     func pruneCacheIfNeeded() async throws { }
 
     func removeValue(for key: StreamListCacheKey) async throws {
-        let context = ModelContext(modelContainer)
         let providerFingerprint = key.providerFingerprint
         let contentType = key.contentType.rawValue
         let categoryID = key.categoryID
         let pageToken = key.pageToken
-        let records = try context.fetch(
-            FetchDescriptor<PersistedStreamRecord>(
-                predicate: #Predicate {
-                    $0.providerFingerprint == providerFingerprint &&
-                    $0.contentType == contentType &&
-                    $0.categoryID == categoryID &&
-                    $0.pageToken == pageToken
-                }
-            )
+        try modelContext.delete(
+            model: PersistedStreamRecord.self,
+            where: #Predicate {
+                $0.providerFingerprint == providerFingerprint &&
+                $0.contentType == contentType &&
+                $0.categoryID == categoryID &&
+                $0.pageToken == pageToken
+            }
         )
-        for record in records {
-            context.delete(record)
-        }
-        try context.save()
+        try modelContext.save()
     }
 
     func removeAll(for providerFingerprint: String) async throws {
-        let context = ModelContext(modelContainer)
-        let records = try context.fetch(
-            FetchDescriptor<PersistedStreamRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
+        try modelContext.delete(
+            model: PersistedStreamRecord.self,
+            where: #Predicate { $0.providerFingerprint == providerFingerprint }
         )
-        for record in records {
-            context.delete(record)
-        }
-        try context.save()
+        try modelContext.save()
     }
 
     private static func recordID(for key: StreamListCacheKey, videoID: Int) -> String {
@@ -294,22 +277,17 @@ actor SwiftDataStreamListCacheStore: StreamListCacheStore {
     }
 }
 
-actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
-    private let modelContainer: ModelContainer
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-    }
+@ModelActor
+actor CatalogMetadataCachePersistence: CatalogMetadataCachePersisting {
 
     func load(key: CatalogMetadataCacheKey) async throws -> CatalogMetadataCacheEntry? {
-        let context = ModelContext(modelContainer)
         let currentDate = Date()
 
         switch key.kind {
         case .vodCategories, .seriesCategories:
             let contentType = Self.categoryContentType(for: key.kind)
             let providerFingerprint = key.providerFingerprint
-            let categories = try context.fetch(
+            let categories = try modelContext.fetch(
                 FetchDescriptor<PersistedCategoryRecord>(
                     predicate: #Predicate {
                         $0.providerFingerprint == providerFingerprint &&
@@ -328,9 +306,9 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
                 payload: payload
             )
         case .vodInfo:
-            guard let record = try fetchMovieDetail(for: key, context: context) else { return nil }
+            guard let record = try fetchMovieDetail(for: key, context: modelContext) else { return nil }
             record.lastAccessAt = currentDate
-            try context.save()
+            try modelContext.save()
             let dto = CachedVideoInfoDTO(
                 images: record.imageURLs.compactMap(URL.init(string:)),
                 plot: record.plot,
@@ -355,9 +333,9 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
                 payload: try JSONEncoder().encode(dto)
             )
         case .seriesInfo:
-            guard let record = try fetchSeriesDetail(for: key, context: context) else { return nil }
+            guard let record = try fetchSeriesDetail(for: key, context: modelContext) else { return nil }
             record.lastAccessAt = currentDate
-            try context.save()
+            try modelContext.save()
             return CatalogMetadataCacheEntry(
                 key: key,
                 savedAt: record.savedAt,
@@ -368,13 +346,11 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
     }
 
     func save(_ entry: CatalogMetadataCacheEntry, for key: CatalogMetadataCacheKey) async throws {
-        let context = ModelContext(modelContainer)
-
         switch key.kind {
         case .vodCategories, .seriesCategories:
             let providerFingerprint = key.providerFingerprint
             let contentType = Self.categoryContentType(for: key.kind)
-            let existing = try context.fetch(
+            let existing = try modelContext.fetch(
                 FetchDescriptor<PersistedCategoryRecord>(
                     predicate: #Predicate {
                         $0.providerFingerprint == providerFingerprint &&
@@ -401,7 +377,7 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
                     record.sortIndex = index
                     record.updatedAt = entry.savedAt
                 } else {
-                    context.insert(
+                    modelContext.insert(
                         PersistedCategoryRecord(
                             id: recordID,
                             providerFingerprint: providerFingerprint,
@@ -416,21 +392,21 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
             }
 
             for record in existing where !retainedRecordIDs.contains(record.id) {
-                context.delete(record)
+                modelContext.delete(record)
             }
 
             try updateStreamCategoryMetadata(
                 providerFingerprint: providerFingerprint,
                 contentType: contentType,
                 categories: categories,
-                context: context
+                context: modelContext
             )
         case .vodInfo:
             let dto = try JSONDecoder().decode(CachedVideoInfoDTO.self, from: entry.payload)
-            if let existing = try fetchMovieDetail(for: key, context: context) {
-                context.delete(existing)
+            if let existing = try fetchMovieDetail(for: key, context: modelContext) {
+                modelContext.delete(existing)
             }
-            context.insert(
+            modelContext.insert(
                 PersistedMovieDetailRecord(
                     id: key.rawKey,
                     providerFingerprint: key.providerFingerprint,
@@ -455,10 +431,10 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
                 )
             )
         case .seriesInfo:
-            if let existing = try fetchSeriesDetail(for: key, context: context) {
-                context.delete(existing)
+            if let existing = try fetchSeriesDetail(for: key, context: modelContext) {
+                modelContext.delete(existing)
             }
-            context.insert(
+            modelContext.insert(
                 PersistedSeriesDetailRecord(
                     id: key.rawKey,
                     providerFingerprint: key.providerFingerprint,
@@ -470,7 +446,7 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
             )
         }
 
-        try context.save()
+        try modelContext.save()
     }
 
     private func updateStreamCategoryMetadata(
@@ -507,12 +483,11 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
     }
 
     func entries(providerFingerprint: String) async throws -> [CatalogMetadataCacheEntry] {
-        let context = ModelContext(modelContainer)
         var results: [CatalogMetadataCacheEntry] = []
         let vodContentType = XtreamContentType.vod.rawValue
         let seriesContentType = XtreamContentType.series.rawValue
 
-        let vodCategories = try context.fetch(
+        let vodCategories = try modelContext.fetch(
             FetchDescriptor<PersistedCategoryRecord>(
                 predicate: #Predicate {
                     $0.providerFingerprint == providerFingerprint &&
@@ -533,7 +508,7 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
             )
         }
 
-        let seriesCategories = try context.fetch(
+        let seriesCategories = try modelContext.fetch(
             FetchDescriptor<PersistedCategoryRecord>(
                 predicate: #Predicate {
                     $0.providerFingerprint == providerFingerprint &&
@@ -554,7 +529,7 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
             )
         }
 
-        let movieDetails = try context.fetch(
+        let movieDetails = try modelContext.fetch(
             FetchDescriptor<PersistedMovieDetailRecord>(
                 predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
             )
@@ -589,7 +564,7 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
             )
         })
 
-        let seriesDetails = try context.fetch(
+        let seriesDetails = try modelContext.fetch(
             FetchDescriptor<PersistedSeriesDetailRecord>(
                 predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
             )
@@ -611,64 +586,44 @@ actor SwiftDataCatalogMetadataCacheStore: CatalogMetadataCacheStore {
     }
 
     func removeValue(for key: CatalogMetadataCacheKey) async throws {
-        let context = ModelContext(modelContainer)
-
         switch key.kind {
         case .vodCategories, .seriesCategories:
             let providerFingerprint = key.providerFingerprint
             let contentType = Self.categoryContentType(for: key.kind)
-            let records = try context.fetch(
-                FetchDescriptor<PersistedCategoryRecord>(
-                    predicate: #Predicate {
-                        $0.providerFingerprint == providerFingerprint &&
-                        $0.contentType == contentType
-                    }
-                )
+            try modelContext.delete(
+                model: PersistedCategoryRecord.self,
+                where: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == contentType
+                }
             )
-            for record in records {
-                context.delete(record)
-            }
         case .vodInfo:
-            if let record = try fetchMovieDetail(for: key, context: context) {
-                context.delete(record)
+            if let record = try fetchMovieDetail(for: key, context: modelContext) {
+                modelContext.delete(record)
             }
         case .seriesInfo:
-            if let record = try fetchSeriesDetail(for: key, context: context) {
-                context.delete(record)
+            if let record = try fetchSeriesDetail(for: key, context: modelContext) {
+                modelContext.delete(record)
             }
         }
 
-        try context.save()
+        try modelContext.save()
     }
 
     func removeAll(for providerFingerprint: String) async throws {
-        let context = ModelContext(modelContainer)
-
-        for category in try context.fetch(
-            FetchDescriptor<PersistedCategoryRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
-        ) {
-            context.delete(category)
-        }
-
-        for detail in try context.fetch(
-            FetchDescriptor<PersistedMovieDetailRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
-        ) {
-            context.delete(detail)
-        }
-
-        for detail in try context.fetch(
-            FetchDescriptor<PersistedSeriesDetailRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
-        ) {
-            context.delete(detail)
-        }
-
-        try context.save()
+        try modelContext.delete(
+            model: PersistedCategoryRecord.self,
+            where: #Predicate { $0.providerFingerprint == providerFingerprint }
+        )
+        try modelContext.delete(
+            model: PersistedMovieDetailRecord.self,
+            where: #Predicate { $0.providerFingerprint == providerFingerprint }
+        )
+        try modelContext.delete(
+            model: PersistedSeriesDetailRecord.self,
+            where: #Predicate { $0.providerFingerprint == providerFingerprint }
+        )
+        try modelContext.save()
     }
 
     func pruneCacheIfNeeded() async throws { }

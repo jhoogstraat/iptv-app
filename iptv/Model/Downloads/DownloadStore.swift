@@ -14,59 +14,17 @@ private struct DownloadStoreSnapshot: Codable {
     let assets: [DownloadAssetRecord]
 }
 
-private protocol DownloadStorePersistence: Sendable {
-    func load() async throws -> DownloadStoreSnapshot?
-    func save(_ snapshot: DownloadStoreSnapshot) async throws
-}
+@ModelActor
+private actor DatabaseDownloadStorePersistence {
 
-private actor FileDownloadStorePersistence: DownloadStorePersistence {
-    private let fileURL: URL
-
-    init(fileURL: URL) {
-        self.fileURL = fileURL
-    }
-
-    func load() async throws -> DownloadStoreSnapshot? {
-        let directoryURL = fileURL.deletingLastPathComponent()
-        if !FileManager.default.fileExists(atPath: directoryURL.path()) {
-            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        }
-
-        guard FileManager.default.fileExists(atPath: fileURL.path()) else {
-            return nil
-        }
-
-        let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode(DownloadStoreSnapshot.self, from: data)
-    }
-
-    func save(_ snapshot: DownloadStoreSnapshot) async throws {
-        let directoryURL = fileURL.deletingLastPathComponent()
-        if !FileManager.default.fileExists(atPath: directoryURL.path()) {
-            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        }
-
-        let data = try JSONEncoder().encode(snapshot)
-        try data.write(to: fileURL, options: [.atomic])
-    }
-}
-
-private actor SwiftDataDownloadStorePersistence: DownloadStorePersistence {
-    private let modelContainer: ModelContainer
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-    }
-
-    func load() async throws -> DownloadStoreSnapshot? {
-        let context = ModelContext(modelContainer)
-        let groups = try context.fetch(
+    func load() throws -> DownloadStoreSnapshot? {
+        let groups = try modelContext.fetch(
             FetchDescriptor<PersistedDownloadGroupStoreRecord>(
                 sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
             )
         ).compactMap(Self.groupRecord(from:))
 
-        let assets = try context.fetch(
+        let assets = try modelContext.fetch(
             FetchDescriptor<PersistedDownloadAssetStoreRecord>(
                 sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
             )
@@ -76,17 +34,18 @@ private actor SwiftDataDownloadStorePersistence: DownloadStorePersistence {
         return DownloadStoreSnapshot(groups: groups, assets: assets)
     }
 
-    func save(_ snapshot: DownloadStoreSnapshot) async throws {
-        let context = ModelContext(modelContainer)
-        for record in try context.fetch(FetchDescriptor<PersistedDownloadGroupStoreRecord>()) {
-            context.delete(record)
-        }
-        for record in try context.fetch(FetchDescriptor<PersistedDownloadAssetStoreRecord>()) {
-            context.delete(record)
-        }
+    func save(_ snapshot: DownloadStoreSnapshot) throws {
+        try modelContext.delete(
+            model: PersistedDownloadGroupStoreRecord.self,
+            where: #Predicate<PersistedDownloadGroupStoreRecord> { _ in true }
+        )
+        try modelContext.delete(
+            model: PersistedDownloadAssetStoreRecord.self,
+            where: #Predicate<PersistedDownloadAssetStoreRecord> { _ in true }
+        )
 
         for group in snapshot.groups {
-            context.insert(
+            modelContext.insert(
                 PersistedDownloadGroupStoreRecord(
                     id: group.id,
                     scopeProfileID: group.scope.profileID,
@@ -109,7 +68,7 @@ private actor SwiftDataDownloadStorePersistence: DownloadStorePersistence {
         }
 
         for asset in snapshot.assets {
-            context.insert(
+            modelContext.insert(
                 PersistedDownloadAssetStoreRecord(
                     id: asset.id,
                     scopeProfileID: asset.scope.profileID,
@@ -136,7 +95,7 @@ private actor SwiftDataDownloadStorePersistence: DownloadStorePersistence {
             )
         }
 
-        try context.save()
+        try modelContext.save()
     }
 
     private static func groupRecord(from entity: PersistedDownloadGroupStoreRecord) -> DownloadGroupRecord? {
@@ -207,7 +166,8 @@ struct DownloadRemovalPlan: Sendable {
 }
 
 actor DownloadStore {
-    private let persistence: any DownloadStorePersistence
+    nonisolated private static let log = Logger(subsystem: "iptv", category: "DownloadStore")
+    private let persistence: DatabaseDownloadStorePersistence
     private let now: @Sendable () -> Date
 
     private var groupsByID: [String: DownloadGroupRecord] = [:]
@@ -216,20 +176,10 @@ actor DownloadStore {
     private var lastPersistedProgressAt: [String: Date] = [:]
 
     init(
-        fileURL: URL? = nil,
-        modelContainer: ModelContainer? = nil,
+        modelContainer: ModelContainer,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        if let modelContainer {
-            self.persistence = SwiftDataDownloadStorePersistence(modelContainer: modelContainer)
-        } else {
-            let defaultURL = FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-                .first!
-                .appending(path: "Downloads", directoryHint: .isDirectory)
-                .appending(path: "downloads.json")
-            self.persistence = FileDownloadStorePersistence(fileURL: fileURL ?? defaultURL)
-        }
+        self.persistence = DatabaseDownloadStorePersistence(modelContainer: modelContainer)
         self.now = now
     }
 
@@ -477,7 +427,7 @@ actor DownloadStore {
         } catch {
             groupsByID = [:]
             assetsByID = [:]
-            logger.error("Downloads manifest load failed, resetting state: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Downloads manifest load failed, resetting state: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -532,7 +482,7 @@ actor DownloadStore {
             )
             try await persistence.save(snapshot)
         } catch {
-            logger.error("Downloads manifest persist failed: \(error.localizedDescription, privacy: .public)")
+            Self.log.error("Downloads manifest persist failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 }

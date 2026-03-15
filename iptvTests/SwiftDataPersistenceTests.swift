@@ -15,8 +15,8 @@ struct SwiftDataPersistenceTests {
     @Test
     func favoritesAndWatchActivityPersistAcrossStoreInstances() async throws {
         let container = try makeInMemoryContainer()
-        let favorites = SwiftDataFavoritesStore(modelContainer: container, now: { Date(timeIntervalSince1970: 10) })
-        let watchActivity = SwiftDataWatchActivityStore(modelContainer: container, now: { Date(timeIntervalSince1970: 20) })
+        let favorites = FavoritesPersistence(modelContainer: container, now: { Date(timeIntervalSince1970: 10) })
+        let watchActivity = WatchActivityStore(modelContainer: container, now: { Date(timeIntervalSince1970: 20) })
 
         let favoriteInput = FavoriteInput(
             videoID: 42,
@@ -26,7 +26,7 @@ struct SwiftDataPersistenceTests {
             containerExtension: "mp4",
             rating: 8.2
         )
-        await favorites.add(input: favoriteInput, providerFingerprint: "provider-a")
+        try await favorites.add(input: favoriteInput, providerFingerprint: "provider-a")
 
         let watchInput = WatchActivityInput(
             videoID: 42,
@@ -43,23 +43,23 @@ struct SwiftDataPersistenceTests {
             duration: 300
         )
 
-        let reloadedFavorites = SwiftDataFavoritesStore(modelContainer: container)
-        let favoriteRecords = await reloadedFavorites.loadAll()
+        let reloadedFavorites = FavoritesPersistence(modelContainer: container)
+        let favoriteRecords = try await reloadedFavorites.records(for: "provider-a")
         #expect(favoriteRecords.count == 1)
         #expect(favoriteRecords.first?.providerFingerprint == "provider-a")
         #expect(favoriteRecords.first?.videoID == 42)
 
-        let reloadedWatchActivity = SwiftDataWatchActivityStore(modelContainer: container)
-        let watchRecords = await reloadedWatchActivity.loadAll()
+        let reloadedWatchActivity = WatchActivityStore(modelContainer: container)
+        let watchRecords = await reloadedWatchActivity.load(providerFingerprint: "provider-a")
         #expect(watchRecords.count == 1)
         #expect(watchRecords.first?.providerFingerprint == "provider-a")
         #expect(watchRecords.first?.progressFraction == 0.3)
 
-        await reloadedFavorites.clear(for: "provider-a")
+        try await reloadedFavorites.clear(for: "provider-a")
         await reloadedWatchActivity.clear(for: "provider-a")
 
-        let clearedFavorites = await favorites.loadAll()
-        let clearedWatchActivity = await watchActivity.loadAll()
+        let clearedFavorites = try await favorites.records(for: "provider-a")
+        let clearedWatchActivity = await watchActivity.load(providerFingerprint: "provider-a")
         #expect(clearedFavorites.isEmpty)
         #expect(clearedWatchActivity.isEmpty)
     }
@@ -231,8 +231,8 @@ struct SwiftDataPersistenceTests {
 
         let metadataRootDirectory = temporaryDirectory()
         let metadataStore = OfflineMetadataStore(
-            rootDirectoryURL: metadataRootDirectory,
             modelContainer: container,
+            rootDirectoryURL: metadataRootDirectory,
             session: .shared
         )
 
@@ -269,8 +269,8 @@ struct SwiftDataPersistenceTests {
         #expect(snapshot.movieInfo?.plot == "Stored in SwiftData")
 
         let reloadedMetadataStore = OfflineMetadataStore(
-            rootDirectoryURL: metadataRootDirectory,
             modelContainer: container,
+            rootDirectoryURL: metadataRootDirectory,
             session: .shared
         )
         let restoredSnapshot = await reloadedMetadataStore.snapshot(id: "snapshot-1")

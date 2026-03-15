@@ -34,14 +34,20 @@ actor CatalogueStore {
         let categoryID: String
     }
 
-    private struct RefreshStateSnapshot {
+    fileprivate struct RefreshStateSnapshot {
         let contentType: XtreamContentType
         let categoryID: String
         let lastSuccessfulRefreshAt: Date?
         let nextEligibleRefreshAt: Date?
     }
 
-    private struct SearchDocument: Sendable {
+    private struct SyncObserver {
+        let providerFingerprint: String
+        let scope: SearchMediaScope
+        let continuation: AsyncStream<CatalogueSyncProgress>.Continuation
+    }
+
+    fileprivate struct SearchDocument: Sendable {
         let videoID: Int
         let indexedContentType: XtreamContentType
         let playbackContentType: String
@@ -88,7 +94,7 @@ actor CatalogueStore {
     }
 
     private let providerStore: ProviderStore
-    private let modelContainer: ModelContainer
+    private let persistence: CataloguePersistence
     private let cacheManager: CatalogCacheManager
     private let metadataCacheManager: CatalogMetadataCacheManager
     private let now: @Sendable () -> Date
@@ -97,6 +103,7 @@ actor CatalogueStore {
 
     private var inFlightStreamLoads: [CategoryTaskKey: Task<[CachedVideoDTO], Error>] = [:]
     private var summaryCache: [String: ProviderCatalogueSummary] = [:]
+    private var syncObservers: [UUID: SyncObserver] = [:]
 
     init(
         providerStore: ProviderStore,
@@ -108,12 +115,12 @@ actor CatalogueStore {
         categoryRefreshInterval: TimeInterval = 24 * 60 * 60
     ) {
         self.providerStore = providerStore
-        self.modelContainer = modelContainer
+        self.persistence = CataloguePersistence(modelContainer: modelContainer)
         self.cacheManager = cacheManager ?? CatalogCacheManager(
-            diskStore: SwiftDataStreamListCacheStore(modelContainer: modelContainer)
+            store: StreamListCachePersistence(modelContainer: modelContainer)
         )
         self.metadataCacheManager = metadataCacheManager ?? CatalogMetadataCacheManager(
-            diskStore: SwiftDataCatalogMetadataCacheStore(modelContainer: modelContainer)
+            store: CatalogMetadataCachePersistence(modelContainer: modelContainer)
         )
         self.now = now
         self.categoryListRefreshInterval = categoryListRefreshInterval
@@ -188,7 +195,7 @@ actor CatalogueStore {
 
     func search(_ query: SearchQuery) async throws -> [SearchResultItem] {
         let state = try await providerState()
-        let documents = try loadDocumentsFromSwiftData(
+        let documents = try await loadDocuments(
             providerFingerprint: state.fingerprint,
             acceptedContentTypes: query.scope.acceptedContentTypes
         )
@@ -244,7 +251,7 @@ actor CatalogueStore {
 
     func facetValues(scope: SearchMediaScope) async throws -> SearchFacetValues {
         let state = try await providerState()
-        let documents = try loadDocumentsFromSwiftData(
+        let documents = try await loadDocuments(
             providerFingerprint: state.fingerprint,
             acceptedContentTypes: scope.acceptedContentTypes
         )
@@ -266,31 +273,49 @@ actor CatalogueStore {
 
     func syncProgress(scope: SearchMediaScope) async throws -> CatalogueSyncProgress {
         let state = try await providerState()
-        let indexedCount = try loadIndexedCategories(scope: scope, providerFingerprint: state.fingerprint).count
-        let totalCategories = try loadStoredCategories(
+        return try await syncProgress(scope: scope, providerFingerprint: state.fingerprint)
+    }
+
+    func observeSyncProgress(scope: SearchMediaScope) async throws -> AsyncStream<CatalogueSyncProgress> {
+        let state = try await providerState()
+        let initialProgress = try await syncProgress(scope: scope, providerFingerprint: state.fingerprint)
+        let observerID = UUID()
+        var storedContinuation: AsyncStream<CatalogueSyncProgress>.Continuation?
+        let stream = AsyncStream<CatalogueSyncProgress>(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            storedContinuation = continuation
+        }
+
+        guard let continuation = storedContinuation else {
+            return AsyncStream { continuation in
+                continuation.finish()
+            }
+        }
+
+        continuation.onTermination = { _ in
+            Task { await self.removeSyncObserver(id: observerID) }
+        }
+        syncObservers[observerID] = SyncObserver(
             providerFingerprint: state.fingerprint,
-            acceptedContentTypes: Set(scope.acceptedContentTypes.map(\.rawValue))
-        ).count
-        return CatalogueSyncProgress(
-            syncedCategories: indexedCount,
-            totalCategories: totalCategories,
-            scope: scope
+            scope: scope,
+            continuation: continuation
         )
+        continuation.yield(initialProgress)
+        return stream
     }
 
     func nextRefreshCandidate() async throws -> RefreshCandidate? {
         let state = try await providerState()
         try await refreshCategoryListsIfNeeded(providerState: state)
 
-        let categories = try loadStoredCategories(
+        let categories = try await loadStoredCategories(
             providerFingerprint: state.fingerprint,
             acceptedContentTypes: [XtreamContentType.vod.rawValue, XtreamContentType.series.rawValue]
         )
         guard !categories.isEmpty else { return nil }
 
-        let streamRecords = try loadStoredStreamRecords(providerFingerprint: state.fingerprint)
+        let streamRecords = try await loadStoredStreamRecords(providerFingerprint: state.fingerprint)
         let cachedKeys = Set(streamRecords.map { "\($0.contentType):\($0.categoryID)" })
-        let states = try refreshStates(providerFingerprint: state.fingerprint)
+        let states = try await refreshStates(providerFingerprint: state.fingerprint)
         let currentDate = now()
         let staleThreshold = currentDate.addingTimeInterval(-categoryRefreshInterval)
 
@@ -361,16 +386,16 @@ actor CatalogueStore {
             return cached
         }
 
-        let records = try loadStoredStreamRecords(providerFingerprint: state.fingerprint)
+        let records = try await loadStoredStreamRecords(providerFingerprint: state.fingerprint)
         let movieCount = Set(records.filter { $0.contentType == XtreamContentType.vod.rawValue }.map(\.videoID)).count
         let seriesCount = Set(records.filter { $0.contentType == XtreamContentType.series.rawValue }.map(\.videoID)).count
 
-        let categories = try loadStoredCategories(
+        let categories = try await loadStoredCategories(
             providerFingerprint: state.fingerprint,
             acceptedContentTypes: [XtreamContentType.vod.rawValue, XtreamContentType.series.rawValue]
         )
-        let indexedMovieCategories = try loadIndexedCategories(scope: .movies, providerFingerprint: state.fingerprint).count
-        let indexedSeriesCategories = try loadIndexedCategories(scope: .series, providerFingerprint: state.fingerprint).count
+        let indexedMovieCategories = try await loadIndexedCategories(scope: .movies, providerFingerprint: state.fingerprint).count
+        let indexedSeriesCategories = try await loadIndexedCategories(scope: .series, providerFingerprint: state.fingerprint).count
 
         let summary = ProviderCatalogueSummary(
             movieCount: movieCount,
@@ -391,7 +416,12 @@ actor CatalogueStore {
         guard let state else { return }
         try await cacheManager.removeAll(for: state.fingerprint)
         try await metadataCacheManager.removeAll(for: state.fingerprint)
+        try await removeAllRefreshStates(providerFingerprint: state.fingerprint)
         summaryCache[state.fingerprint] = nil
+        await emitSyncProgressUpdates(
+            providerFingerprint: state.fingerprint,
+            affectedScopes: [.movies, .series, .all]
+        )
     }
 
     private func providerState() async throws -> ProviderState {
@@ -509,6 +539,12 @@ actor CatalogueStore {
             providerFingerprint: state.fingerprint
         )
         summaryCache[state.fingerprint] = nil
+        if Set(previous.map(\.id)) != Set(freshCategories.map(\.id)) {
+            await emitSyncProgressUpdates(
+                providerFingerprint: state.fingerprint,
+                affectedScopes: affectedScopes(for: contentType)
+            )
+        }
         return freshCategories
     }
 
@@ -571,7 +607,7 @@ actor CatalogueStore {
         let task = Task(priority: .utility) { [cacheManager, metadataCacheManager] in
             let previousVideos = try await cacheManager.entry(for: key)?.videos ?? []
             let timestamp = self.now()
-            try self.recordCategoryRefreshAttempt(
+            try await self.recordCategoryRefreshAttempt(
                 providerFingerprint: key.providerFingerprint,
                 contentType: contentType,
                 categoryID: categoryID,
@@ -589,7 +625,7 @@ actor CatalogueStore {
                         return []
                     }
                 }
-                try self.recordCategoryRefreshSuccess(
+                try await self.recordCategoryRefreshSuccess(
                     providerFingerprint: key.providerFingerprint,
                     contentType: contentType,
                     categoryID: categoryID,
@@ -605,7 +641,7 @@ actor CatalogueStore {
                 self.summaryCache[key.providerFingerprint] = nil
                 return fresh
             } catch {
-                try self.recordCategoryRefreshFailure(
+                try await self.recordCategoryRefreshFailure(
                     providerFingerprint: key.providerFingerprint,
                     contentType: contentType,
                     categoryID: categoryID,
@@ -711,7 +747,7 @@ actor CatalogueStore {
             )
             let removedVideos = try await cacheManager.entry(for: key)?.videos ?? []
             try await cacheManager.removeValue(for: key)
-            try deleteCategoryRefreshState(
+            try await deleteCategoryRefreshState(
                 providerFingerprint: providerFingerprint,
                 contentType: contentType,
                 categoryID: removedCategory.id
@@ -758,110 +794,49 @@ actor CatalogueStore {
     private func loadStoredCategories(
         providerFingerprint: String,
         acceptedContentTypes: Set<String>
-    ) throws -> [PersistedCategoryRecord] {
-        let context = ModelContext(modelContainer)
-        return try context.fetch(
-            FetchDescriptor<PersistedCategoryRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint },
-                sortBy: [
-                    SortDescriptor(\.contentType, order: .forward),
-                    SortDescriptor(\.sortIndex, order: .forward)
-                ]
-            )
-        ).filter { acceptedContentTypes.contains($0.contentType) }
-    }
-
-    private func loadStoredStreamRecords(providerFingerprint: String) throws -> [PersistedStreamRecord] {
-        let context = ModelContext(modelContainer)
-        return try context.fetch(
-            FetchDescriptor<PersistedStreamRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
+    ) async throws -> [PersistedCategoryRecord] {
+        try await persistence.loadStoredCategories(
+            providerFingerprint: providerFingerprint,
+            acceptedContentTypes: acceptedContentTypes
         )
     }
 
-    private func loadDocumentsFromSwiftData(
+    private func loadStoredStreamRecords(providerFingerprint: String) async throws -> [PersistedStreamRecord] {
+        try await persistence.loadStoredStreamRecords(providerFingerprint: providerFingerprint)
+    }
+
+    private func loadDocuments(
         providerFingerprint: String,
         acceptedContentTypes: Set<XtreamContentType>
-    ) throws -> [SearchDocument] {
-        let rawAcceptedContentTypes = Set(acceptedContentTypes.map(\.rawValue))
-        let records = try loadStoredStreamRecords(providerFingerprint: providerFingerprint)
-        var documentsByKey: [String: SearchDocument] = [:]
-        documentsByKey.reserveCapacity(records.count)
-
-        for record in records {
-            guard let indexedContentType = XtreamContentType(rawValue: record.contentType),
-                  rawAcceptedContentTypes.contains(indexedContentType.rawValue) else {
-                continue
-            }
-
-            let key = "\(indexedContentType.rawValue):\(record.videoID)"
-            var categoryNamesByID = documentsByKey[key]?.categoryNamesByID ?? [:]
-            var normalizedCategoryNamesByID = documentsByKey[key]?.normalizedCategoryNamesByID ?? [:]
-            categoryNamesByID[record.categoryID] = record.categoryName
-            normalizedCategoryNamesByID[record.categoryID] = record.normalizedCategoryName
-
-            documentsByKey[key] = SearchDocument(
-                videoID: record.videoID,
-                indexedContentType: indexedContentType,
-                playbackContentType: record.playbackContentType,
-                title: record.name,
-                normalizedTitle: record.normalizedTitle,
-                containerExtension: record.containerExtension,
-                coverImageURL: record.coverImageURL,
-                rating: record.rating,
-                addedAtRaw: record.addedAtRaw,
-                addedAt: record.addedAt,
-                language: record.language,
-                normalizedLanguage: record.normalizedLanguage,
-                categoryNamesByID: categoryNamesByID,
-                normalizedCategoryNamesByID: normalizedCategoryNamesByID
-            )
-        }
-
-        return Array(documentsByKey.values)
+    ) async throws -> [SearchDocument] {
+        try await persistence.loadDocuments(
+            providerFingerprint: providerFingerprint,
+            acceptedContentTypes: acceptedContentTypes
+        )
     }
 
     private func loadIndexedCategories(
         scope: SearchMediaScope,
         providerFingerprint: String
-    ) throws -> Set<String> {
-        let context = ModelContext(modelContainer)
-        let rawAcceptedContentTypes = Set(scope.acceptedContentTypes.map(\.rawValue))
-        let records = try context.fetch(
-            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
-        )
-        return Set(
-            records
-                .filter { rawAcceptedContentTypes.contains($0.contentType) && $0.lastSuccessfulRefreshAt != nil }
-                .map(\.categoryID)
+    ) async throws -> Set<String> {
+        try await persistence.loadIndexedCategories(
+            scope: scope,
+            providerFingerprint: providerFingerprint
         )
     }
 
-    private func refreshStates(providerFingerprint: String) throws -> [String: RefreshStateSnapshot] {
-        let context = ModelContext(modelContainer)
-        let records = try context.fetch(
-            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
+    private func syncProgress(
+        scope: SearchMediaScope,
+        providerFingerprint: String
+    ) async throws -> CatalogueSyncProgress {
+        try await persistence.syncProgress(
+            scope: scope,
+            providerFingerprint: providerFingerprint
         )
+    }
 
-        return Dictionary(
-            uniqueKeysWithValues: records.compactMap { record in
-                guard let contentType = XtreamContentType(rawValue: record.contentType) else { return nil }
-                return (
-                    "\(record.contentType):\(record.categoryID)",
-                    RefreshStateSnapshot(
-                        contentType: contentType,
-                        categoryID: record.categoryID,
-                        lastSuccessfulRefreshAt: record.lastSuccessfulRefreshAt,
-                        nextEligibleRefreshAt: record.nextEligibleRefreshAt
-                    )
-                )
-            }
-        )
+    private func refreshStates(providerFingerprint: String) async throws -> [String: RefreshStateSnapshot] {
+        try await persistence.refreshStates(providerFingerprint: providerFingerprint)
     }
 
     private func recordCategoryRefreshAttempt(
@@ -869,31 +844,13 @@ actor CatalogueStore {
         contentType: XtreamContentType,
         categoryID: String,
         at timestamp: Date
-    ) throws {
-        let context = ModelContext(modelContainer)
-        if let record = try refreshStateRecord(
+    ) async throws {
+        try await persistence.recordCategoryRefreshAttempt(
             providerFingerprint: providerFingerprint,
             contentType: contentType,
             categoryID: categoryID,
-            context: context
-        ) {
-            record.lastAttemptedRefreshAt = timestamp
-        } else {
-            context.insert(
-                PersistedCategoryRefreshStateRecord(
-                    id: "\(providerFingerprint)|\(contentType.rawValue)|\(categoryID)",
-                    providerFingerprint: providerFingerprint,
-                    contentType: contentType.rawValue,
-                    categoryID: categoryID,
-                    lastSuccessfulRefreshAt: nil,
-                    lastAttemptedRefreshAt: timestamp,
-                    nextEligibleRefreshAt: nil,
-                    failureCount: 0,
-                    lastError: nil
-                )
-            )
-        }
-        try context.save()
+            at: timestamp
+        )
     }
 
     private func recordCategoryRefreshSuccess(
@@ -901,40 +858,18 @@ actor CatalogueStore {
         contentType: XtreamContentType,
         categoryID: String,
         at timestamp: Date
-    ) throws {
-        let context = ModelContext(modelContainer)
-        let record = try refreshStateRecord(
+    ) async throws {
+        try await persistence.recordCategoryRefreshSuccess(
             providerFingerprint: providerFingerprint,
             contentType: contentType,
             categoryID: categoryID,
-            context: context
-        ) ?? PersistedCategoryRefreshStateRecord(
-            id: "\(providerFingerprint)|\(contentType.rawValue)|\(categoryID)",
-            providerFingerprint: providerFingerprint,
-            contentType: contentType.rawValue,
-            categoryID: categoryID,
-            lastSuccessfulRefreshAt: nil,
-            lastAttemptedRefreshAt: nil,
-            nextEligibleRefreshAt: nil,
-            failureCount: 0,
-            lastError: nil
+            at: timestamp
         )
-
-        if try refreshStateRecord(
+        summaryCache[providerFingerprint] = nil
+        await emitSyncProgressUpdates(
             providerFingerprint: providerFingerprint,
-            contentType: contentType,
-            categoryID: categoryID,
-            context: context
-        ) == nil {
-            context.insert(record)
-        }
-
-        record.lastSuccessfulRefreshAt = timestamp
-        record.lastAttemptedRefreshAt = timestamp
-        record.nextEligibleRefreshAt = timestamp.addingTimeInterval(30 * 60)
-        record.failureCount = 0
-        record.lastError = nil
-        try context.save()
+            affectedScopes: affectedScopes(for: contentType)
+        )
     }
 
     private func recordCategoryRefreshFailure(
@@ -943,75 +878,67 @@ actor CatalogueStore {
         categoryID: String,
         error: String,
         at timestamp: Date
-    ) throws {
-        let context = ModelContext(modelContainer)
-        let record = try refreshStateRecord(
+    ) async throws {
+        try await persistence.recordCategoryRefreshFailure(
             providerFingerprint: providerFingerprint,
             contentType: contentType,
             categoryID: categoryID,
-            context: context
-        ) ?? PersistedCategoryRefreshStateRecord(
-            id: "\(providerFingerprint)|\(contentType.rawValue)|\(categoryID)",
-            providerFingerprint: providerFingerprint,
-            contentType: contentType.rawValue,
-            categoryID: categoryID,
-            lastSuccessfulRefreshAt: nil,
-            lastAttemptedRefreshAt: nil,
-            nextEligibleRefreshAt: nil,
-            failureCount: 0,
-            lastError: nil
+            error: error,
+            at: timestamp
         )
-
-        if try refreshStateRecord(
-            providerFingerprint: providerFingerprint,
-            contentType: contentType,
-            categoryID: categoryID,
-            context: context
-        ) == nil {
-            context.insert(record)
-        }
-
-        record.lastAttemptedRefreshAt = timestamp
-        record.failureCount += 1
-        record.lastError = error
-        let backoff = min(30 * 60.0, 2 * 60.0 * pow(2.0, Double(max(0, record.failureCount - 1))))
-        record.nextEligibleRefreshAt = timestamp.addingTimeInterval(backoff)
-        try context.save()
     }
 
     private func deleteCategoryRefreshState(
         providerFingerprint: String,
         contentType: XtreamContentType,
         categoryID: String
-    ) throws {
-        let context = ModelContext(modelContainer)
-        if let record = try refreshStateRecord(
+    ) async throws {
+        try await persistence.deleteCategoryRefreshState(
             providerFingerprint: providerFingerprint,
             contentType: contentType,
-            categoryID: categoryID,
-            context: context
-        ) {
-            context.delete(record)
-            try context.save()
+            categoryID: categoryID
+        )
+    }
+
+    private func removeAllRefreshStates(providerFingerprint: String) async throws {
+        try await persistence.removeAllRefreshStates(providerFingerprint: providerFingerprint)
+    }
+
+    private func affectedScopes(for contentType: XtreamContentType) -> Set<SearchMediaScope> {
+        switch contentType {
+        case .vod:
+            [.movies, .all]
+        case .series:
+            [.series, .all]
+        case .live:
+            []
         }
     }
 
-    private func refreshStateRecord(
+    private func emitSyncProgressUpdates(
         providerFingerprint: String,
-        contentType: XtreamContentType,
-        categoryID: String,
-        context: ModelContext
-    ) throws -> PersistedCategoryRefreshStateRecord? {
-        let rawContentType = contentType.rawValue
-        return try context.fetch(
-            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
-                predicate: #Predicate {
-                    $0.providerFingerprint == providerFingerprint &&
-                    $0.contentType == rawContentType &&
-                    $0.categoryID == categoryID
-                }
-            )
-        ).first
+        affectedScopes: Set<SearchMediaScope>
+    ) async {
+        guard !affectedScopes.isEmpty else { return }
+
+        let matchingObservers = syncObservers.filter { _, observer in
+            observer.providerFingerprint == providerFingerprint && affectedScopes.contains(observer.scope)
+        }
+        guard !matchingObservers.isEmpty else { return }
+
+        for scope in affectedScopes {
+            guard let progress = try? await syncProgress(scope: scope, providerFingerprint: providerFingerprint) else {
+                continue
+            }
+
+            for observer in matchingObservers.values where observer.scope == scope {
+                observer.continuation.yield(progress)
+            }
+        }
+    }
+
+    private func removeSyncObserver(id: UUID) {
+        syncObservers[id] = nil
     }
 
     private func matchesFilters(
@@ -1161,5 +1088,281 @@ actor CatalogueStore {
     private static func formatRating(_ rating: Double?) -> String? {
         guard let rating else { return nil }
         return rating.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US")))
+    }
+}
+
+@ModelActor
+private actor CataloguePersistence {
+    func loadStoredCategories(
+        providerFingerprint: String,
+        acceptedContentTypes: Set<String>
+    ) throws -> [PersistedCategoryRecord] {
+        try modelContext.fetch(
+            FetchDescriptor<PersistedCategoryRecord>(
+                predicate: #Predicate { $0.providerFingerprint == providerFingerprint },
+                sortBy: [
+                    SortDescriptor(\.contentType, order: .forward),
+                    SortDescriptor(\.sortIndex, order: .forward)
+                ]
+            )
+        ).filter { acceptedContentTypes.contains($0.contentType) }
+    }
+
+    func loadStoredStreamRecords(providerFingerprint: String) throws -> [PersistedStreamRecord] {
+        try modelContext.fetch(
+            FetchDescriptor<PersistedStreamRecord>(
+                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
+            )
+        )
+    }
+
+    func loadDocuments(
+        providerFingerprint: String,
+        acceptedContentTypes: Set<XtreamContentType>
+    ) throws -> [CatalogueStore.SearchDocument] {
+        let rawAcceptedContentTypes = Set(acceptedContentTypes.map(\.rawValue))
+        let records = try loadStoredStreamRecords(providerFingerprint: providerFingerprint)
+        var documentsByKey: [String: CatalogueStore.SearchDocument] = [:]
+        documentsByKey.reserveCapacity(records.count)
+
+        for record in records {
+            guard let indexedContentType = XtreamContentType(rawValue: record.contentType),
+                  rawAcceptedContentTypes.contains(indexedContentType.rawValue) else {
+                continue
+            }
+
+            let key = "\(indexedContentType.rawValue):\(record.videoID)"
+            var categoryNamesByID = documentsByKey[key]?.categoryNamesByID ?? [:]
+            var normalizedCategoryNamesByID = documentsByKey[key]?.normalizedCategoryNamesByID ?? [:]
+            categoryNamesByID[record.categoryID] = record.categoryName
+            normalizedCategoryNamesByID[record.categoryID] = record.normalizedCategoryName
+
+            documentsByKey[key] = CatalogueStore.SearchDocument(
+                videoID: record.videoID,
+                indexedContentType: indexedContentType,
+                playbackContentType: record.playbackContentType,
+                title: record.name,
+                normalizedTitle: record.normalizedTitle,
+                containerExtension: record.containerExtension,
+                coverImageURL: record.coverImageURL,
+                rating: record.rating,
+                addedAtRaw: record.addedAtRaw,
+                addedAt: record.addedAt,
+                language: record.language,
+                normalizedLanguage: record.normalizedLanguage,
+                categoryNamesByID: categoryNamesByID,
+                normalizedCategoryNamesByID: normalizedCategoryNamesByID
+            )
+        }
+
+        return Array(documentsByKey.values)
+    }
+
+    func loadIndexedCategories(
+        scope: SearchMediaScope,
+        providerFingerprint: String
+    ) throws -> Set<String> {
+        let rawAcceptedContentTypes = Set(scope.acceptedContentTypes.map(\.rawValue))
+        let records = try modelContext.fetch(
+            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
+                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
+            )
+        )
+        return Set(
+            records
+                .filter { rawAcceptedContentTypes.contains($0.contentType) && $0.lastSuccessfulRefreshAt != nil }
+                .map(\.categoryID)
+        )
+    }
+
+    func syncProgress(
+        scope: SearchMediaScope,
+        providerFingerprint: String
+    ) throws -> CatalogueSyncProgress {
+        let syncedCategories = try loadIndexedCategories(
+            scope: scope,
+            providerFingerprint: providerFingerprint
+        ).count
+        let totalCategories = try loadStoredCategories(
+            providerFingerprint: providerFingerprint,
+            acceptedContentTypes: Set(scope.acceptedContentTypes.map(\.rawValue))
+        ).count
+        return CatalogueSyncProgress(
+            syncedCategories: syncedCategories,
+            totalCategories: totalCategories,
+            scope: scope
+        )
+    }
+
+    func refreshStates(providerFingerprint: String) throws -> [String: CatalogueStore.RefreshStateSnapshot] {
+        let records = try modelContext.fetch(
+            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
+                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
+            )
+        )
+
+        return Dictionary(
+            uniqueKeysWithValues: records.compactMap { record in
+                guard let contentType = XtreamContentType(rawValue: record.contentType) else { return nil }
+                return (
+                    "\(record.contentType):\(record.categoryID)",
+                    CatalogueStore.RefreshStateSnapshot(
+                        contentType: contentType,
+                        categoryID: record.categoryID,
+                        lastSuccessfulRefreshAt: record.lastSuccessfulRefreshAt,
+                        nextEligibleRefreshAt: record.nextEligibleRefreshAt
+                    )
+                )
+            }
+        )
+    }
+
+    func recordCategoryRefreshAttempt(
+        providerFingerprint: String,
+        contentType: XtreamContentType,
+        categoryID: String,
+        at timestamp: Date
+    ) throws {
+        if let record = try refreshStateRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID
+        ) {
+            record.lastAttemptedRefreshAt = timestamp
+        } else {
+            modelContext.insert(
+                PersistedCategoryRefreshStateRecord(
+                    id: "\(providerFingerprint)|\(contentType.rawValue)|\(categoryID)",
+                    providerFingerprint: providerFingerprint,
+                    contentType: contentType.rawValue,
+                    categoryID: categoryID,
+                    lastSuccessfulRefreshAt: nil,
+                    lastAttemptedRefreshAt: timestamp,
+                    nextEligibleRefreshAt: nil,
+                    failureCount: 0,
+                    lastError: nil
+                )
+            )
+        }
+        try modelContext.save()
+    }
+
+    func recordCategoryRefreshSuccess(
+        providerFingerprint: String,
+        contentType: XtreamContentType,
+        categoryID: String,
+        at timestamp: Date
+    ) throws {
+        let record = try refreshStateRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID
+        ) ?? PersistedCategoryRefreshStateRecord(
+            id: "\(providerFingerprint)|\(contentType.rawValue)|\(categoryID)",
+            providerFingerprint: providerFingerprint,
+            contentType: contentType.rawValue,
+            categoryID: categoryID,
+            lastSuccessfulRefreshAt: nil,
+            lastAttemptedRefreshAt: nil,
+            nextEligibleRefreshAt: nil,
+            failureCount: 0,
+            lastError: nil
+        )
+
+        if try refreshStateRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID
+        ) == nil {
+            modelContext.insert(record)
+        }
+
+        record.lastSuccessfulRefreshAt = timestamp
+        record.lastAttemptedRefreshAt = timestamp
+        record.nextEligibleRefreshAt = timestamp.addingTimeInterval(30 * 60)
+        record.failureCount = 0
+        record.lastError = nil
+        try modelContext.save()
+    }
+
+    func recordCategoryRefreshFailure(
+        providerFingerprint: String,
+        contentType: XtreamContentType,
+        categoryID: String,
+        error: String,
+        at timestamp: Date
+    ) throws {
+        let record = try refreshStateRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID
+        ) ?? PersistedCategoryRefreshStateRecord(
+            id: "\(providerFingerprint)|\(contentType.rawValue)|\(categoryID)",
+            providerFingerprint: providerFingerprint,
+            contentType: contentType.rawValue,
+            categoryID: categoryID,
+            lastSuccessfulRefreshAt: nil,
+            lastAttemptedRefreshAt: nil,
+            nextEligibleRefreshAt: nil,
+            failureCount: 0,
+            lastError: nil
+        )
+
+        if try refreshStateRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID
+        ) == nil {
+            modelContext.insert(record)
+        }
+
+        record.lastAttemptedRefreshAt = timestamp
+        record.failureCount += 1
+        record.lastError = error
+        let backoff = min(30 * 60.0, 2 * 60.0 * pow(2.0, Double(max(0, record.failureCount - 1))))
+        record.nextEligibleRefreshAt = timestamp.addingTimeInterval(backoff)
+        try modelContext.save()
+    }
+
+    func deleteCategoryRefreshState(
+        providerFingerprint: String,
+        contentType: XtreamContentType,
+        categoryID: String
+    ) throws {
+        guard let record = try refreshStateRecord(
+            providerFingerprint: providerFingerprint,
+            contentType: contentType,
+            categoryID: categoryID
+        ) else {
+            return
+        }
+
+        modelContext.delete(record)
+        try modelContext.save()
+    }
+
+    func removeAllRefreshStates(providerFingerprint: String) throws {
+        try modelContext.delete(
+            model: PersistedCategoryRefreshStateRecord.self,
+            where: #Predicate { $0.providerFingerprint == providerFingerprint }
+        )
+        try modelContext.save()
+    }
+
+    private func refreshStateRecord(
+        providerFingerprint: String,
+        contentType: XtreamContentType,
+        categoryID: String
+    ) throws -> PersistedCategoryRefreshStateRecord? {
+        let rawContentType = contentType.rawValue
+        return try modelContext.fetch(
+            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
+                predicate: #Predicate {
+                    $0.providerFingerprint == providerFingerprint &&
+                    $0.contentType == rawContentType &&
+                    $0.categoryID == categoryID
+                }
+            )
+        ).first
     }
 }

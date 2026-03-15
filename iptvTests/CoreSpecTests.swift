@@ -281,7 +281,7 @@ struct CoreSpecTests {
     @Test
     func cacheManagerDeduplicatesInFlightLoads() async throws {
         let store = InMemoryStreamListCacheStore()
-        let manager = CatalogCacheManager(diskStore: store)
+        let manager = CatalogCacheManager(store: store)
         let key = makeCacheKey()
         let invocationCounter = InvocationCounter()
 
@@ -305,7 +305,7 @@ struct CoreSpecTests {
     @Test
     func cacheManagerCompletesBackgroundLoadAfterCallerCancellation() async throws {
         let store = InMemoryStreamListCacheStore()
-        let manager = CatalogCacheManager(diskStore: store)
+        let manager = CatalogCacheManager(store: store)
         let key = makeCacheKey()
 
         let firstLoad = Task {
@@ -335,7 +335,7 @@ struct CoreSpecTests {
     @Test
     func cacheManagerCachesEmptyCategoryResult() async throws {
         let store = InMemoryStreamListCacheStore()
-        let manager = CatalogCacheManager(diskStore: store)
+        let manager = CatalogCacheManager(store: store)
         let key = makeCacheKey()
 
         let firstResult = try await manager.loadStreamList(for: key) {
@@ -368,7 +368,7 @@ struct CoreSpecTests {
             for: key
         )
 
-        let manager = CatalogCacheManager(diskStore: store)
+        let manager = CatalogCacheManager(store: store)
         let invocationCounter = InvocationCounter()
         let result = try await manager.loadStreamList(for: key) {
             await invocationCounter.increment()
@@ -1152,7 +1152,7 @@ private final class InMemoryKeychainStore: KeychainStoring {
     }
 }
 
-private actor InMemoryStreamListCacheStore: StreamListCacheStore {
+private actor InMemoryStreamListCacheStore: StreamListCachePersisting {
     private var storage: [String: StreamListCacheEntry] = [:]
 
     func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry? {

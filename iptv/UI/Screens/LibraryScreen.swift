@@ -170,10 +170,10 @@ struct LibraryScreen: View {
             let providerFingerprint = ProviderCacheFingerprint.make(from: config)
 
             async let favoriteData = favoritesStore.load(providerFingerprint: providerFingerprint)
-            async let watchData = appContainer.watchActivityStore.loadAll()
+            async let watchData = appContainer.watchActivityStore.load(providerFingerprint: providerFingerprint)
 
             let loadedFavorites = await favoriteData
-            let loadedWatchRecords = await watchData.filter { $0.providerFingerprint == providerFingerprint }
+            let loadedWatchRecords = await watchData
 
             favorites = loadedFavorites
             continueWatching = loadedWatchRecords.filter { !$0.isCompleted && $0.progressFraction >= 0.05 }

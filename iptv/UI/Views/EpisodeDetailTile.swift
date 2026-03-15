@@ -11,6 +11,7 @@ import OSLog
 struct EpisodeDetailTile: View {
     let video: Video
 
+    @Environment(AppContainer.self) private var appContainer
     @Environment(Catalog.self) private var catalog
     @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(Player.self) private var player
@@ -932,11 +933,10 @@ struct EpisodeDetailTile: View {
         }
 
         let providerFingerprint = ProviderCacheFingerprint.make(from: config)
-        let records = await DiskWatchActivityStore.shared.loadAll()
-        let relevantRecords = records.filter {
-            $0.providerFingerprint == providerFingerprint
-                && $0.contentType == XtreamContentType.series.rawValue
-        }
+        let relevantRecords = await appContainer.watchActivityStore.load(
+            providerFingerprint: providerFingerprint,
+            contentType: XtreamContentType.series.rawValue
+        )
 
         episodeProgressByID = Dictionary(
             uniqueKeysWithValues: relevantRecords.map { ($0.videoID, $0.progress) }

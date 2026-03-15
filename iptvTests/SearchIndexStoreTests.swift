@@ -13,7 +13,7 @@ import Testing
 struct SearchIndexStoreTests {
     @Test
     func providerIsolation() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.upsert(
             videos: [makeSnapshot(id: 1, name: "Alpha Movie", contentType: "vod")],
@@ -43,7 +43,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func scopeFilteringAndGenreFilters() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
         await store.upsert(
             videos: [makeSnapshot(id: 10, name: "Space Patrol", contentType: "vod")],
             contentType: .vod,
@@ -78,7 +78,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func progressTracksIndexedCategories() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
         await store.upsert(
             videos: [makeSnapshot(id: 1, name: "One", contentType: "vod")],
             contentType: .vod,
@@ -102,7 +102,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func replacingCategoryRemovesTitlesMissingFromLatestSync() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.replaceCategory(
             videos: [
@@ -133,7 +133,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func removingCategoryOnlyDropsDocumentWhenNoOtherCategoryStillReferencesIt() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.replaceCategory(
             videos: [makeSnapshot(id: 7, name: "Shared", contentType: "vod")],
@@ -177,7 +177,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func queryPreservesPlaybackTypeAndStableIdentityAcrossMediaScopes() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.upsert(
             videos: [makeSnapshot(id: 7, name: "Shared ID Movie", contentType: "movie")],
@@ -209,7 +209,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func categoryFilteringRespectsScopeAndSelectedCategory() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.upsert(
             videos: [makeSnapshot(id: 1, name: "Action Movie", contentType: "vod")],
@@ -251,7 +251,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func categoryFilteringCombinesWithTextQuery() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.upsert(
             videos: [
@@ -284,7 +284,7 @@ struct SearchIndexStoreTests {
 
     @Test
     func browseSortsOrderByTitleNewestAndRating() async {
-        let store = SearchIndexStore()
+        let store = makeStore()
 
         await store.upsert(
             videos: [
@@ -319,10 +319,10 @@ struct SearchIndexStoreTests {
 
     @Test
     func persistsProviderSnapshotsAcrossStoreInstances() async throws {
-        let directoryURL = makeTemporaryDirectory()
+        let container = try AppPersistence.makeModelContainer(isStoredInMemoryOnly: true)
         let providerFingerprint = "provider"
 
-        let firstStore = SearchIndexStore(snapshotDirectoryURL: directoryURL)
+        let firstStore = SearchIndexStore(modelContainer: container)
         await firstStore.upsert(
             videos: [makeSnapshot(id: 31, name: "Persisted Movie", contentType: "vod")],
             contentType: .vod,
@@ -331,7 +331,7 @@ struct SearchIndexStoreTests {
             providerFingerprint: providerFingerprint
         )
 
-        let secondStore = SearchIndexStore(snapshotDirectoryURL: directoryURL)
+        let secondStore = SearchIndexStore(modelContainer: container)
         let results = await secondStore.query(
             SearchQuery(text: "persisted", scope: .movies, filters: .default, sort: .title),
             providerFingerprint: providerFingerprint
@@ -344,36 +344,6 @@ struct SearchIndexStoreTests {
 
         #expect(results.map(\.video.id) == [31])
         #expect(progress.indexedCategories == 1)
-    }
-
-    @Test
-    func corruptedSnapshotsAreDroppedDuringHydration() async throws {
-        let directoryURL = makeTemporaryDirectory()
-        let providerFingerprint = "provider"
-
-        let store = SearchIndexStore(snapshotDirectoryURL: directoryURL)
-        await store.upsert(
-            videos: [makeSnapshot(id: 41, name: "Corrupt Me", contentType: "vod")],
-            contentType: .vod,
-            categoryID: "corrupt",
-            categoryName: "Offline",
-            providerFingerprint: providerFingerprint
-        )
-
-        let snapshotDirectory = directoryURL.appending(path: "SearchIndexSnapshots", directoryHint: .isDirectory)
-        let snapshotFile = try #require(
-            FileManager.default.contentsOfDirectory(at: snapshotDirectory, includingPropertiesForKeys: nil).first
-        )
-        try Data("not-json".utf8).write(to: snapshotFile, options: [.atomic])
-
-        let reloadedStore = SearchIndexStore(snapshotDirectoryURL: directoryURL)
-        let results = await reloadedStore.query(
-            SearchQuery(text: "corrupt", scope: .movies, filters: .default, sort: .title),
-            providerFingerprint: providerFingerprint
-        )
-
-        #expect(results.isEmpty)
-        #expect(FileManager.default.fileExists(atPath: snapshotFile.path()) == false)
     }
 
     private func makeSnapshot(
@@ -395,9 +365,9 @@ struct SearchIndexStoreTests {
         )
     }
 
-    private func makeTemporaryDirectory() -> URL {
-        let directoryURL = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        return directoryURL
+    private func makeStore() -> SearchIndexStore {
+        SearchIndexStore(
+            modelContainer: try! AppPersistence.makeModelContainer(isStoredInMemoryOnly: true)
+        )
     }
 }

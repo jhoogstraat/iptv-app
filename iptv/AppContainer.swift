@@ -17,7 +17,7 @@ final class AppContainer {
     let providerStore: ProviderStore
     let catalog: Catalog
     let favoritesStore: FavoritesStore
-    let watchActivityStore: any WatchActivityStoring
+    let watchActivityStore: WatchActivityStore
     let backgroundActivityCenter: BackgroundActivityCenter
     let backgroundCatalogueRefresher: BackgroundCatalogueRefresher
     let downloadCenter: DownloadCenter
@@ -39,12 +39,12 @@ final class AppContainer {
 
         let providerStore = ProviderStore()
         let favoritesStore = FavoritesStore(
-            store: SwiftDataFavoritesStore(modelContainer: resolvedModelContainer)
+            store: FavoritesPersistence(modelContainer: resolvedModelContainer)
         )
         let connectionMonitor = InternetConnectionMonitor.shared
         let backgroundActivityCenter = BackgroundActivityCenter(connectionMonitor: connectionMonitor)
         let backgroundCatalogueRefresher = BackgroundCatalogueRefresher()
-        let watchActivityStore = SwiftDataWatchActivityStore(modelContainer: resolvedModelContainer)
+        let watchActivityStore = WatchActivityStore(modelContainer: resolvedModelContainer)
         let imagePrefetcher = URLSessionImagePrefetcher()
         let player = Player(
             watchActivityStore: watchActivityStore,

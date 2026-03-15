@@ -12,14 +12,14 @@ struct ForYouDependencies {
     let providerConfigurationProvider: any ProviderConfigurationProviding
     let categoryRepository: any CategoryRepository
     let streamRepository: any StreamRepository
-    let watchActivityStore: any WatchActivityStoring
+    let watchActivityStore: WatchActivityStore
     let recommendationProvider: any RecommendationProviding
 
     init(
         providerConfigurationProvider: any ProviderConfigurationProviding,
         categoryRepository: any CategoryRepository,
         streamRepository: any StreamRepository,
-        watchActivityStore: any WatchActivityStoring = DiskWatchActivityStore.shared,
+        watchActivityStore: WatchActivityStore,
         recommendationProvider: any RecommendationProviding = LocalRecommendationProvider()
     ) {
         self.providerConfigurationProvider = providerConfigurationProvider

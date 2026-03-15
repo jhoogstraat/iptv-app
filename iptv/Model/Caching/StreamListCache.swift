@@ -75,143 +75,13 @@ nonisolated struct StreamListCacheEntry: Codable, Sendable {
     }
 }
 
-nonisolated protocol StreamListCacheStore: Sendable {
+nonisolated protocol StreamListCachePersisting: Sendable {
     func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry?
     func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws
     func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry]
     func pruneCacheIfNeeded() async throws
     func removeValue(for key: StreamListCacheKey) async throws
     func removeAll(for providerFingerprint: String) async throws
-}
-
-actor DiskStreamListCacheStore: StreamListCacheStore {
-    private let fileManager = FileManager.default
-    private let directoryURL: URL
-    private let maxCacheBytes: Int
-
-    init(
-        directoryURL: URL? = nil,
-        maxCacheBytes: Int = 100 * 1024 * 1024
-    ) {
-        let baseDirectory = directoryURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        self.directoryURL = baseDirectory.appending(path: "StreamListCache", directoryHint: .isDirectory)
-        self.maxCacheBytes = maxCacheBytes
-    }
-
-    func load(key: StreamListCacheKey) async throws -> StreamListCacheEntry? {
-        try ensureDirectoryExists()
-        let url = fileURL(for: key)
-        guard fileManager.fileExists(atPath: url.path()) else { return nil }
-
-        do {
-            let data = try Data(contentsOf: url, options: .mappedIfSafe)
-            let entry = try JSONDecoder().decode(StreamListCacheEntry.self, from: data)
-            guard entry.schemaVersion == StreamListCacheEntry.schemaVersion, entry.key == key else {
-                try? fileManager.removeItem(at: url)
-                return nil
-            }
-            touchFile(at: url)
-            return entry.touching(at: Date())
-        } catch {
-            try? fileManager.removeItem(at: url)
-            return nil
-        }
-    }
-
-    func save(_ entry: StreamListCacheEntry, for key: StreamListCacheKey) async throws {
-        try ensureDirectoryExists()
-        let url = fileURL(for: key)
-        let data = try JSONEncoder().encode(entry)
-        try data.write(to: url, options: [.atomic])
-        touchFile(at: url)
-        try await pruneCacheIfNeeded()
-    }
-
-    func pruneCacheIfNeeded() async throws {
-        try ensureDirectoryExists()
-
-        var files = try fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey],
-            options: [.skipsHiddenFiles]
-        )
-
-        struct FileRecord {
-            let url: URL
-            let size: Int
-            let modifiedAt: Date
-        }
-
-        var records: [FileRecord] = []
-        records.reserveCapacity(files.count)
-        var totalSize = 0
-
-        for file in files {
-            let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey, .isRegularFileKey])
-            guard values.isRegularFile == true else { continue }
-            let size = values.fileSize ?? 0
-            totalSize += size
-            records.append(FileRecord(url: file, size: size, modifiedAt: values.contentModificationDate ?? .distantPast))
-        }
-
-        guard totalSize > maxCacheBytes else { return }
-
-        records.sort { $0.modifiedAt < $1.modifiedAt }
-
-        for record in records where totalSize > maxCacheBytes {
-            try? fileManager.removeItem(at: record.url)
-            totalSize -= record.size
-        }
-
-        files.removeAll(keepingCapacity: false)
-    }
-
-    func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry] {
-        try ensureDirectoryExists()
-
-        let files = try fileManager.contentsOfDirectory(
-            at: directoryURL,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        )
-
-        let decoder = JSONDecoder()
-        return files.compactMap { file in
-            guard let data = try? Data(contentsOf: file),
-                  let entry = try? decoder.decode(StreamListCacheEntry.self, from: data),
-                  entry.key.providerFingerprint == providerFingerprint else {
-                return nil
-            }
-            return entry
-        }
-    }
-
-    func removeValue(for key: StreamListCacheKey) async throws {
-        let url = fileURL(for: key)
-        guard fileManager.fileExists(atPath: url.path()) else { return }
-        try? fileManager.removeItem(at: url)
-    }
-
-    func removeAll(for providerFingerprint: String) async throws {
-        let providerEntries = try await entries(providerFingerprint: providerFingerprint)
-        for entry in providerEntries {
-            try? fileManager.removeItem(at: fileURL(for: entry.key))
-        }
-    }
-
-    private func fileURL(for key: StreamListCacheKey) -> URL {
-        directoryURL.appending(path: key.fileName)
-    }
-
-    private func ensureDirectoryExists() throws {
-        if !fileManager.fileExists(atPath: directoryURL.path()) {
-            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        }
-    }
-
-    private func touchFile(at url: URL) {
-        try? fileManager.setAttributes([.modificationDate: Date()], ofItemAtPath: url.path())
-    }
 }
 
 actor CatalogCacheManager {
@@ -223,18 +93,18 @@ actor CatalogCacheManager {
     private var memoryCache: [StreamListCacheKey: StreamListCacheEntry] = [:]
     private var inFlightTasks: [StreamListCacheKey: InFlightLoad] = [:]
 
-    private let diskStore: StreamListCacheStore
+    private let store: any StreamListCachePersisting
     private let now: @Sendable () -> Date
 
     init(
-        diskStore: StreamListCacheStore? = nil,
+        store: any StreamListCachePersisting,
         now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.diskStore = diskStore ?? DiskStreamListCacheStore()
+        self.store = store
         self.now = now
 
         Task(priority: .utility) {
-            try? await self.diskStore.pruneCacheIfNeeded()
+            try? await self.store.pruneCacheIfNeeded()
         }
     }
 
@@ -245,7 +115,7 @@ actor CatalogCacheManager {
     }
 
     func pruneCacheIfNeeded() async throws {
-        try await diskStore.pruneCacheIfNeeded()
+        try await store.pruneCacheIfNeeded()
     }
 
     func cachedValue(
@@ -262,11 +132,11 @@ actor CatalogCacheManager {
             )
         }
 
-        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
-        memoryCache[key] = diskEntry
+        guard let storedEntry = try await store.load(key: key) else { return nil }
+        memoryCache[key] = storedEntry
         return CatalogCachedValue(
-            value: diskEntry.videos,
-            savedAt: diskEntry.savedAt
+            value: storedEntry.videos,
+            savedAt: storedEntry.savedAt
         )
     }
 
@@ -283,7 +153,7 @@ actor CatalogCacheManager {
     }
 
     func entries(providerFingerprint: String) async throws -> [StreamListCacheEntry] {
-        try await diskStore.entries(providerFingerprint: providerFingerprint)
+        try await store.entries(providerFingerprint: providerFingerprint)
     }
 
     func entry(for key: StreamListCacheKey) async throws -> StreamListCacheEntry? {
@@ -295,21 +165,21 @@ actor CatalogCacheManager {
             return touched
         }
 
-        guard let diskEntry = try await diskStore.load(key: key) else { return nil }
-        memoryCache[key] = diskEntry
-        return diskEntry
+        guard let storedEntry = try await store.load(key: key) else { return nil }
+        memoryCache[key] = storedEntry
+        return storedEntry
     }
 
     func removeValue(for key: StreamListCacheKey) async throws {
         inFlightTasks[key]?.task.cancel()
         inFlightTasks[key] = nil
         memoryCache[key] = nil
-        try await diskStore.removeValue(for: key)
+        try await store.removeValue(for: key)
     }
 
     func removeAll(for providerFingerprint: String) async throws {
         memoryCache = memoryCache.filter { $0.key.providerFingerprint != providerFingerprint }
-        try await diskStore.removeAll(for: providerFingerprint)
+        try await store.removeAll(for: providerFingerprint)
     }
 
     func loadStreamList(
@@ -360,7 +230,7 @@ actor CatalogCacheManager {
         let currentDate = now()
         let entry = StreamListCacheEntry(key: key, savedAt: currentDate, lastAccessAt: currentDate, videos: videos)
         memoryCache[key] = entry
-        try? await diskStore.save(entry, for: key)
+        try? await store.save(entry, for: key)
     }
 
     private func finishInFlightTask(for key: StreamListCacheKey, loadID: UUID) {

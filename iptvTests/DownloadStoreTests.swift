@@ -12,7 +12,7 @@ import Testing
 struct DownloadStoreTests {
     @Test
     func groupStatusTracksChildAssets() async {
-        let store = DownloadStore(fileURL: temporaryFileURL())
+        let store = makeStore()
         let scope = DownloadScope(profileID: "primary", providerFingerprint: "provider")
 
         let group = DownloadGroupRecord(
@@ -54,7 +54,7 @@ struct DownloadStoreTests {
 
     @Test
     func removeGroupOnlyDeletesSnapshotsWhenUnreferenced() async {
-        let store = DownloadStore(fileURL: temporaryFileURL())
+        let store = makeStore()
         let scope = DownloadScope(profileID: "primary", providerFingerprint: "provider")
 
         let firstGroup = DownloadGroupRecord(
@@ -140,9 +140,9 @@ struct DownloadStoreTests {
         )
     }
 
-    private func temporaryFileURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appending(path: "downloads-tests-\(UUID().uuidString)", directoryHint: .notDirectory)
-            .appendingPathExtension("json")
+    private func makeStore() -> DownloadStore {
+        DownloadStore(
+            modelContainer: try! AppPersistence.makeModelContainer(isStoredInMemoryOnly: true)
+        )
     }
 }

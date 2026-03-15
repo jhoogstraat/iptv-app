@@ -27,7 +27,7 @@ final class ForYouViewModel {
     private let providerConfigurationProvider: any ProviderConfigurationProviding
     private let categoryRepository: any CategoryRepository
     private let streamRepository: any StreamRepository
-    private let watchActivityStore: any WatchActivityStoring
+    private let watchActivityStore: WatchActivityStore
     private let recommendationProvider: any RecommendationProviding
 
     private let vodCategoryLimit: Int
@@ -83,8 +83,7 @@ final class ForYouViewModel {
             }
 
             let providerFingerprint = try currentProviderFingerprint()
-            let records = await watchActivityStore.loadAll()
-                .filter { $0.providerFingerprint == providerFingerprint }
+            let records = await watchActivityStore.load(providerFingerprint: providerFingerprint)
 
             let context = RecommendationContext(
                 providerFingerprint: providerFingerprint,

@@ -6,91 +6,35 @@
 //
 
 import Foundation
+import OSLog
 import SwiftData
 
-private protocol OfflineMetadataStorePersistence: Sendable {
-    func loadSnapshot(id: String) async throws -> OfflineMetadataSnapshot?
-    func save(_ snapshot: OfflineMetadataSnapshot) async throws
-    func removeSnapshot(id: String) async throws
-}
+@ModelActor
+private actor DatabaseOfflineMetadataStorePersistence {
 
-private actor FileOfflineMetadataStorePersistence: OfflineMetadataStorePersistence {
-    private let fileManager = FileManager.default
-    private let rootDirectoryURL: URL
-
-    init(rootDirectoryURL: URL) {
-        self.rootDirectoryURL = rootDirectoryURL
-    }
-
-    func loadSnapshot(id: String) async throws -> OfflineMetadataSnapshot? {
-        let fileURL = snapshotFileURL(for: id)
-        guard fileManager.fileExists(atPath: fileURL.path()) else { return nil }
-        let data = try Data(contentsOf: fileURL)
-        return try JSONDecoder().decode(OfflineMetadataSnapshot.self, from: data)
-    }
-
-    func save(_ snapshot: OfflineMetadataSnapshot) async throws {
-        let directoryURL = snapshotDirectoryURL(for: snapshot.id)
-        if !fileManager.fileExists(atPath: directoryURL.path()) {
-            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        }
-
-        let data = try JSONEncoder().encode(snapshot)
-        try data.write(to: snapshotFileURL(for: snapshot.id), options: [.atomic])
-    }
-
-    func removeSnapshot(id: String) async throws {
-        let directoryURL = snapshotDirectoryURL(for: id)
-        guard fileManager.fileExists(atPath: directoryURL.path()) else { return }
-        try fileManager.removeItem(at: directoryURL)
-    }
-
-    private func snapshotDirectoryURL(for id: String) -> URL {
-        rootDirectoryURL.appending(path: id, directoryHint: .isDirectory)
-    }
-
-    private func snapshotFileURL(for id: String) -> URL {
-        snapshotDirectoryURL(for: id).appending(path: "metadata.json")
-    }
-}
-
-private actor SwiftDataOfflineMetadataStorePersistence: OfflineMetadataStorePersistence {
-    private let modelContainer: ModelContainer
-
-    init(modelContainer: ModelContainer) {
-        self.modelContainer = modelContainer
-    }
-
-    func loadSnapshot(id: String) async throws -> OfflineMetadataSnapshot? {
-        let context = ModelContext(modelContainer)
-        guard let record = try fetchRecord(id: id, context: context) else { return nil }
+    func loadSnapshot(id: String) throws -> OfflineMetadataSnapshot? {
+        guard let record = try fetchRecord(id: id) else { return nil }
         return try Self.snapshot(from: record)
     }
 
-    func save(_ snapshot: OfflineMetadataSnapshot) async throws {
-        let context = ModelContext(modelContainer)
-        if let existing = try fetchRecord(id: snapshot.id, context: context) {
-            context.delete(existing)
-        }
-        context.insert(try Self.record(from: snapshot))
-        try context.save()
+    func save(_ snapshot: OfflineMetadataSnapshot) throws {
+        modelContext.insert(try Self.record(from: snapshot))
+        try modelContext.save()
     }
 
-    func removeSnapshot(id: String) async throws {
-        let context = ModelContext(modelContainer)
-        guard let record = try fetchRecord(id: id, context: context) else { return }
-        context.delete(record)
-        try context.save()
+    func removeSnapshot(id: String) throws {
+        try modelContext.delete(
+            model: PersistedOfflineMetadataStoreRecord.self,
+            where: #Predicate { $0.id == id }
+        )
+        try modelContext.save()
     }
 
-    private func fetchRecord(
-        id: String,
-        context: ModelContext
-    ) throws -> PersistedOfflineMetadataStoreRecord? {
+    private func fetchRecord(id: String) throws -> PersistedOfflineMetadataStoreRecord? {
         let descriptor = FetchDescriptor<PersistedOfflineMetadataStoreRecord>(
             predicate: #Predicate { $0.id == id }
         )
-        return try context.fetch(descriptor).first
+        return try modelContext.fetch(descriptor).first
     }
 
     private static func record(
@@ -156,14 +100,15 @@ private actor SwiftDataOfflineMetadataStorePersistence: OfflineMetadataStorePers
 }
 
 actor OfflineMetadataStore {
+    nonisolated private static let log = Logger(subsystem: "iptv", category: "OfflineMetadataStore")
     private let rootDirectoryURL: URL
     private let fileManager = FileManager.default
     private let session: URLSession
-    private let persistence: any OfflineMetadataStorePersistence
+    private let persistence: DatabaseOfflineMetadataStorePersistence
 
     init(
+        modelContainer: ModelContainer,
         rootDirectoryURL: URL? = nil,
-        modelContainer: ModelContainer? = nil,
         session: URLSession = .shared
     ) {
         let defaultDirectory = FileManager.default
@@ -172,11 +117,7 @@ actor OfflineMetadataStore {
             .appending(path: "DownloadsMetadata", directoryHint: .isDirectory)
         self.rootDirectoryURL = rootDirectoryURL ?? defaultDirectory
         self.session = session
-        if let modelContainer {
-            self.persistence = SwiftDataOfflineMetadataStorePersistence(modelContainer: modelContainer)
-        } else {
-            self.persistence = FileOfflineMetadataStorePersistence(rootDirectoryURL: self.rootDirectoryURL)
-        }
+        self.persistence = DatabaseOfflineMetadataStorePersistence(modelContainer: modelContainer)
     }
 
     func store(prepared: DownloadPreparedMetadata, scope: DownloadScope) async throws -> OfflineMetadataSnapshot {
@@ -214,11 +155,20 @@ actor OfflineMetadataStore {
     }
 
     func snapshot(id: String) async -> OfflineMetadataSnapshot? {
-        try? await persistence.loadSnapshot(id: id)
+        do {
+            return try await persistence.loadSnapshot(id: id)
+        } catch {
+            Self.log.error("Failed to load offline metadata snapshot: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     func removeSnapshot(id: String) async {
-        try? await persistence.removeSnapshot(id: id)
+        do {
+            try await persistence.removeSnapshot(id: id)
+        } catch {
+            Self.log.error("Failed to remove offline metadata snapshot: \(error.localizedDescription, privacy: .public)")
+        }
 
         let directoryURL = snapshotDirectoryURL(for: id)
         if fileManager.fileExists(atPath: directoryURL.path()) {

@@ -84,10 +84,10 @@ final class Catalog {
         self.providerStore = providerStore
         self.modelContainer = modelContainer
         self.cacheManager = cacheManager ?? CatalogCacheManager(
-            diskStore: SwiftDataStreamListCacheStore(modelContainer: modelContainer)
+            store: StreamListCachePersistence(modelContainer: modelContainer)
         )
         self.metadataCacheManager = metadataCacheManager ?? CatalogMetadataCacheManager(
-            diskStore: SwiftDataCatalogMetadataCacheStore(modelContainer: modelContainer)
+            store: CatalogMetadataCachePersistence(modelContainer: modelContainer)
         )
         self.imagePrefetcher = imagePrefetcher ?? NoopImagePrefetcher()
         self.store = CatalogueStore(
@@ -549,17 +549,13 @@ extension Catalog {
                 }
 
                 await startBackgroundRefreshing()
-                let providerFingerprint = (try? currentProviderFingerprint()) ?? ""
-                let stream = await backgroundRefresher.observeProgress(
-                    scope: scope,
-                    providerFingerprint: providerFingerprint
-                ) { [weak self] scope, providerFingerprint in
-                    guard let self else {
-                        return CatalogueSyncProgress(syncedCategories: 0, totalCategories: 0, scope: scope)
+                let stream = (try? await store.observeSyncProgress(scope: scope))
+                    ?? AsyncStream { streamContinuation in
+                        streamContinuation.yield(
+                            CatalogueSyncProgress(syncedCategories: 0, totalCategories: 0, scope: scope)
+                        )
+                        streamContinuation.finish()
                     }
-                    return (try? await self.store.syncProgress(scope: scope))
-                        ?? CatalogueSyncProgress(syncedCategories: 0, totalCategories: 0, scope: scope)
-                }
 
                 for await progress in stream {
                     continuation.yield(progress)

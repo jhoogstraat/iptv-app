@@ -6,14 +6,8 @@
 //
 
 import Foundation
+import OSLog
 import SwiftData
-
-nonisolated protocol SearchIndexSnapshotStore: Sendable {
-    func load(providerFingerprint: String) async throws -> SearchIndexStore.ProviderIndex?
-    func save(_ index: SearchIndexStore.ProviderIndex, providerFingerprint: String) async throws
-    func remove(providerFingerprint: String) async throws
-    func removeAll() async throws
-}
 
 struct SearchVideoSnapshot: Hashable, Sendable {
     let id: Int
@@ -69,6 +63,8 @@ struct SearchVideoSnapshot: Hashable, Sendable {
 }
 
 actor SearchIndexStore {
+    nonisolated private static let log = Logger(subsystem: "iptv", category: "SearchIndexStore")
+
     struct ProviderCounts: Hashable, Sendable {
         let movies: Int
         let series: Int
@@ -129,191 +125,10 @@ actor SearchIndexStore {
         let matchedFields: Set<SearchMatchedField>
     }
 
-    struct ProviderIndex: Codable, Sendable {
-        var documentsByKey: [String: SearchDocument] = [:]
-        var movieKeys: Set<String> = []
-        var seriesKeys: Set<String> = []
-        var indexedMovieCategoryIDs: Set<String> = []
-        var indexedSeriesCategoryIDs: Set<String> = []
-
-        mutating func insertKey(_ key: String, for contentType: XtreamContentType) {
-            switch contentType {
-            case .vod:
-                movieKeys.insert(key)
-            case .series:
-                seriesKeys.insert(key)
-            case .live:
-                break
-            }
-        }
-
-        mutating func markCategoryIndexed(_ categoryID: String, for contentType: XtreamContentType) {
-            guard !categoryID.isEmpty else { return }
-            switch contentType {
-            case .vod:
-                indexedMovieCategoryIDs.insert(categoryID)
-            case .series:
-                indexedSeriesCategoryIDs.insert(categoryID)
-            case .live:
-                break
-            }
-        }
-
-        func removingCategory(contentType: XtreamContentType, categoryID: String) -> ProviderIndex {
-            guard !categoryID.isEmpty else { return self }
-
-            var copy = self
-            let candidateKeys: Set<String>
-            switch contentType {
-            case .vod:
-                candidateKeys = movieKeys
-                copy.indexedMovieCategoryIDs.remove(categoryID)
-            case .series:
-                candidateKeys = seriesKeys
-                copy.indexedSeriesCategoryIDs.remove(categoryID)
-            case .live:
-                candidateKeys = []
-            }
-
-            for key in candidateKeys {
-                guard let document = copy.documentsByKey[key] else { continue }
-                guard document.categoryIDs.contains(categoryID) else { continue }
-
-                var categoryNamesByID = document.categoryNamesByID
-                var normalizedCategoryNamesByID = document.normalizedCategoryNamesByID
-                categoryNamesByID.removeValue(forKey: categoryID)
-                normalizedCategoryNamesByID.removeValue(forKey: categoryID)
-
-                if categoryNamesByID.isEmpty {
-                    copy.documentsByKey.removeValue(forKey: key)
-                    copy.movieKeys.remove(key)
-                    copy.seriesKeys.remove(key)
-                    continue
-                }
-
-                copy.documentsByKey[key] = SearchDocument(
-                    key: document.key,
-                    videoID: document.videoID,
-                    indexedContentType: document.indexedContentType,
-                    playbackContentType: document.playbackContentType,
-                    title: document.title,
-                    normalizedTitle: document.normalizedTitle,
-                    containerExtension: document.containerExtension,
-                    coverImageURL: document.coverImageURL,
-                    rating: document.rating,
-                    addedAtRaw: document.addedAtRaw,
-                    addedAt: document.addedAt,
-                    language: document.language,
-                    normalizedLanguage: document.normalizedLanguage,
-                    categoryNamesByID: categoryNamesByID,
-                    normalizedCategoryNamesByID: normalizedCategoryNamesByID
-                )
-            }
-
-            return copy
-        }
-    }
-
-    struct ProviderIndexSnapshot: Codable, Sendable {
-        static let schemaVersion = 2
-
-        let schemaVersion: Int
-        let providerFingerprint: String
-        let index: ProviderIndex
-
-        init(providerFingerprint: String, index: ProviderIndex) {
-            self.schemaVersion = Self.schemaVersion
-            self.providerFingerprint = providerFingerprint
-            self.index = index
-        }
-    }
-
-    actor DiskSnapshotStore: SearchIndexSnapshotStore {
-        private let fileManager = FileManager.default
-        private let directoryURL: URL
-        private let encoder = JSONEncoder()
-        private let decoder = JSONDecoder()
-
-        init(directoryURL: URL? = nil) {
-            let baseDirectory = directoryURL ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            self.directoryURL = baseDirectory.appending(path: "SearchIndexSnapshots", directoryHint: .isDirectory)
-        }
-
-        func load(providerFingerprint: String) async throws -> ProviderIndex? {
-            try ensureDirectoryExists()
-
-            let fileURL = fileURL(for: providerFingerprint)
-            guard fileManager.fileExists(atPath: fileURL.path()) else { return nil }
-
-            do {
-                let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
-                let snapshot = try decoder.decode(ProviderIndexSnapshot.self, from: data)
-                guard snapshot.schemaVersion == ProviderIndexSnapshot.schemaVersion,
-                      snapshot.providerFingerprint == providerFingerprint else {
-                    try? fileManager.removeItem(at: fileURL)
-                    return nil
-                }
-                return snapshot.index
-            } catch {
-                try? fileManager.removeItem(at: fileURL)
-                return nil
-            }
-        }
-
-        func save(_ index: ProviderIndex, providerFingerprint: String) async throws {
-            try ensureDirectoryExists()
-            let snapshot = ProviderIndexSnapshot(providerFingerprint: providerFingerprint, index: index)
-            let data = try encoder.encode(snapshot)
-            try data.write(to: fileURL(for: providerFingerprint), options: [.atomic])
-        }
-
-        func remove(providerFingerprint: String) async throws {
-            let fileURL = fileURL(for: providerFingerprint)
-            guard fileManager.fileExists(atPath: fileURL.path()) else { return }
-            try? fileManager.removeItem(at: fileURL)
-        }
-
-        func removeAll() async throws {
-            guard fileManager.fileExists(atPath: directoryURL.path()) else { return }
-            let files = try fileManager.contentsOfDirectory(
-                at: directoryURL,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )
-            for file in files {
-                try? fileManager.removeItem(at: file)
-            }
-        }
-
-        private func ensureDirectoryExists() throws {
-            if !fileManager.fileExists(atPath: directoryURL.path()) {
-                try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-            }
-        }
-
-        private func fileURL(for providerFingerprint: String) -> URL {
-            directoryURL.appending(path: providerFingerprint.snapshotFileName)
-        }
-    }
-
-    private var indexesByProvider: [String: ProviderIndex] = [:]
-    private var hydratedProviders: Set<String> = []
-    private let snapshotStore: (any SearchIndexSnapshotStore)?
-    private let modelContainer: ModelContainer?
-
-    init() {
-        self.snapshotStore = DiskSnapshotStore()
-        self.modelContainer = nil
-    }
-
-    init(snapshotDirectoryURL: URL) {
-        self.snapshotStore = DiskSnapshotStore(directoryURL: snapshotDirectoryURL)
-        self.modelContainer = nil
-    }
+    private let persistence: SearchIndexPersistence
 
     init(modelContainer: ModelContainer) {
-        self.snapshotStore = nil
-        self.modelContainer = modelContainer
+        self.persistence = SearchIndexPersistence(modelContainer: modelContainer)
     }
 
     func replaceCategory(
@@ -323,71 +138,17 @@ actor SearchIndexStore {
         categoryName: String,
         providerFingerprint: String
     ) async {
-        if let modelContainer {
-            try? replaceCategoryInSwiftData(
+        do {
+            try await persistence.replaceCategory(
                 videos: videos,
                 contentType: contentType,
                 categoryID: categoryID,
                 categoryName: categoryName,
-                providerFingerprint: providerFingerprint,
-                modelContainer: modelContainer
+                providerFingerprint: providerFingerprint
             )
-            return
+        } catch {
+            Self.log.error("Failed to replace search category: \(error.localizedDescription, privacy: .public)")
         }
-
-        guard contentType == .vod || contentType == .series else { return }
-        await ensureLoaded(providerFingerprint: providerFingerprint)
-
-        let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedCategoryName = Self.normalize(cleanedCategoryName)
-
-        var providerIndex = indexesByProvider[providerFingerprint] ?? ProviderIndex()
-        providerIndex = providerIndex.removingCategory(
-            contentType: contentType,
-            categoryID: cleanedCategoryID
-        )
-
-        for video in videos {
-            let key = Self.makeKey(contentType: contentType, videoID: video.id)
-            let playbackContentType = Self.playbackContentType(from: video.contentType, indexedAs: contentType)
-            let language = video.language?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let normalizedLanguage = language.map(Self.normalize)
-            let addedAtRaw = video.addedAtRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            var categoryNamesByID = providerIndex.documentsByKey[key]?.categoryNamesByID ?? [:]
-            var normalizedCategoryNamesByID = providerIndex.documentsByKey[key]?.normalizedCategoryNamesByID ?? [:]
-
-            if !cleanedCategoryID.isEmpty {
-                categoryNamesByID[cleanedCategoryID] = cleanedCategoryName
-                normalizedCategoryNamesByID[cleanedCategoryID] = normalizedCategoryName
-            }
-
-            let document = SearchDocument(
-                key: key,
-                videoID: video.id,
-                indexedContentType: contentType,
-                playbackContentType: playbackContentType,
-                title: video.name,
-                normalizedTitle: Self.normalize(video.name),
-                containerExtension: video.containerExtension,
-                coverImageURL: video.coverImageURL,
-                rating: video.rating,
-                addedAtRaw: addedAtRaw,
-                addedAt: Self.parseDate(addedAtRaw),
-                language: language,
-                normalizedLanguage: normalizedLanguage,
-                categoryNamesByID: categoryNamesByID,
-                normalizedCategoryNamesByID: normalizedCategoryNamesByID
-            )
-
-            providerIndex.documentsByKey[key] = document
-            providerIndex.insertKey(key, for: contentType)
-        }
-
-        providerIndex.markCategoryIndexed(cleanedCategoryID, for: contentType)
-        indexesByProvider[providerFingerprint] = providerIndex
-        try? await snapshotStore?.save(providerIndex, providerFingerprint: providerFingerprint)
     }
 
     func upsert(
@@ -411,50 +172,22 @@ actor SearchIndexStore {
         categoryID: String,
         providerFingerprint: String
     ) async {
-        if let modelContainer {
-            try? removeCategoryFromSwiftData(
+        do {
+            try await persistence.removeCategory(
                 contentType: contentType,
                 categoryID: categoryID,
-                providerFingerprint: providerFingerprint,
-                modelContainer: modelContainer
+                providerFingerprint: providerFingerprint
             )
-            return
+        } catch {
+            Self.log.error("Failed to remove search category: \(error.localizedDescription, privacy: .public)")
         }
-
-        guard contentType == .vod || contentType == .series else { return }
-        await ensureLoaded(providerFingerprint: providerFingerprint)
-
-        var providerIndex = indexesByProvider[providerFingerprint] ?? ProviderIndex()
-        providerIndex = providerIndex.removingCategory(
-            contentType: contentType,
-            categoryID: categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
-        )
-        indexesByProvider[providerFingerprint] = providerIndex
-        try? await snapshotStore?.save(providerIndex, providerFingerprint: providerFingerprint)
     }
 
     func query(_ query: SearchQuery, providerFingerprint: String) async -> [SearchResultItem] {
-        let documents: [SearchDocument]
-        if let modelContainer {
-            documents = (try? loadDocumentsFromSwiftData(
-                providerFingerprint: providerFingerprint,
-                acceptedContentTypes: query.scope.acceptedContentTypes,
-                modelContainer: modelContainer
-            )) ?? []
-        } else {
-            await ensureLoaded(providerFingerprint: providerFingerprint)
-            guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
-            let candidateKeys: Set<String>
-            switch query.scope {
-            case .all:
-                candidateKeys = providerIndex.movieKeys.union(providerIndex.seriesKeys)
-            case .movies:
-                candidateKeys = providerIndex.movieKeys
-            case .series:
-                candidateKeys = providerIndex.seriesKeys
-            }
-            documents = candidateKeys.compactMap { providerIndex.documentsByKey[$0] }
-        }
+        let documents = (try? await persistence.loadDocuments(
+            providerFingerprint: providerFingerprint,
+            acceptedContentTypes: query.scope.acceptedContentTypes
+        )) ?? []
 
         let now = Date()
         let normalizedQuery = Self.normalize(query.text)
@@ -515,29 +248,10 @@ actor SearchIndexStore {
     }
 
     func facetValues(scope: SearchMediaScope, providerFingerprint: String) async -> SearchFacetValues {
-        let documents: [SearchDocument]
-        if let modelContainer {
-            documents = (try? loadDocumentsFromSwiftData(
-                providerFingerprint: providerFingerprint,
-                acceptedContentTypes: scope.acceptedContentTypes,
-                modelContainer: modelContainer
-            )) ?? []
-        } else {
-            await ensureLoaded(providerFingerprint: providerFingerprint)
-            guard let providerIndex = indexesByProvider[providerFingerprint] else {
-                return SearchFacetValues(genres: [], languages: [])
-            }
-            let candidateKeys: Set<String>
-            switch scope {
-            case .all:
-                candidateKeys = providerIndex.movieKeys.union(providerIndex.seriesKeys)
-            case .movies:
-                candidateKeys = providerIndex.movieKeys
-            case .series:
-                candidateKeys = providerIndex.seriesKeys
-            }
-            documents = candidateKeys.compactMap { providerIndex.documentsByKey[$0] }
-        }
+        let documents = (try? await persistence.loadDocuments(
+            providerFingerprint: providerFingerprint,
+            acceptedContentTypes: scope.acceptedContentTypes
+        )) ?? []
 
         var genres = Set<String>()
         var languages = Set<String>()
@@ -555,328 +269,37 @@ actor SearchIndexStore {
     }
 
     func indexedCategories(scope: SearchMediaScope, providerFingerprint: String) async -> Set<String> {
-        if let modelContainer {
-            return (try? loadIndexedCategoriesFromSwiftData(
-                scope: scope,
-                providerFingerprint: providerFingerprint,
-                modelContainer: modelContainer
-            )) ?? []
-        }
-
-        await ensureLoaded(providerFingerprint: providerFingerprint)
-        guard let providerIndex = indexesByProvider[providerFingerprint] else { return [] }
-        switch scope {
-        case .movies:
-            return providerIndex.indexedMovieCategoryIDs
-        case .series:
-            return providerIndex.indexedSeriesCategoryIDs
-        case .all:
-            return providerIndex.indexedMovieCategoryIDs.union(providerIndex.indexedSeriesCategoryIDs)
-        }
+        (try? await persistence.loadIndexedCategories(
+            scope: scope,
+            providerFingerprint: providerFingerprint
+        )) ?? []
     }
 
     func providerCounts(providerFingerprint: String) async -> ProviderCounts {
-        if let modelContainer {
-            let documents = (try? loadDocumentsFromSwiftData(
-                providerFingerprint: providerFingerprint,
-                acceptedContentTypes: [.vod, .series],
-                modelContainer: modelContainer
-            )) ?? []
-            return ProviderCounts(
-                movies: documents.filter { $0.indexedContentType == .vod }.count,
-                series: documents.filter { $0.indexedContentType == .series }.count
-            )
-        }
-
-        await ensureLoaded(providerFingerprint: providerFingerprint)
-        guard let providerIndex = indexesByProvider[providerFingerprint] else {
-            return ProviderCounts(movies: 0, series: 0)
-        }
+        let documents = (try? await persistence.loadDocuments(
+            providerFingerprint: providerFingerprint,
+            acceptedContentTypes: [.vod, .series]
+        )) ?? []
         return ProviderCounts(
-            movies: providerIndex.movieKeys.count,
-            series: providerIndex.seriesKeys.count
+            movies: documents.filter { $0.indexedContentType == .vod }.count,
+            series: documents.filter { $0.indexedContentType == .series }.count
         )
     }
 
     func clear(providerFingerprint: String) async {
-        if let modelContainer {
-            try? clearSwiftData(providerFingerprint: providerFingerprint, modelContainer: modelContainer)
-            return
+        do {
+            try await persistence.clear(providerFingerprint: providerFingerprint)
+        } catch {
+            Self.log.error("Failed to clear provider search index: \(error.localizedDescription, privacy: .public)")
         }
-
-        indexesByProvider[providerFingerprint] = nil
-        hydratedProviders.insert(providerFingerprint)
-        try? await snapshotStore?.remove(providerFingerprint: providerFingerprint)
     }
 
     func clearAll() async {
-        if let modelContainer {
-            try? clearSwiftData(providerFingerprint: nil, modelContainer: modelContainer)
-            return
+        do {
+            try await persistence.clear(providerFingerprint: nil)
+        } catch {
+            Self.log.error("Failed to clear search index: \(error.localizedDescription, privacy: .public)")
         }
-
-        indexesByProvider.removeAll()
-        hydratedProviders.removeAll()
-        try? await snapshotStore?.removeAll()
-    }
-
-    private func ensureLoaded(providerFingerprint: String) async {
-        guard modelContainer == nil else { return }
-        guard !hydratedProviders.contains(providerFingerprint) else { return }
-        hydratedProviders.insert(providerFingerprint)
-        indexesByProvider[providerFingerprint] = try? await snapshotStore?.load(providerFingerprint: providerFingerprint)
-    }
-
-    private func loadDocumentsFromSwiftData(
-        providerFingerprint: String,
-        acceptedContentTypes: Set<XtreamContentType>,
-        modelContainer: ModelContainer
-    ) throws -> [SearchDocument] {
-        let context = ModelContext(modelContainer)
-        let rawAcceptedContentTypes = Set(acceptedContentTypes.map(\.rawValue))
-        let records = try context.fetch(
-            FetchDescriptor<PersistedStreamRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
-        )
-
-        var documentsByKey: [String: SearchDocument] = [:]
-        documentsByKey.reserveCapacity(records.count)
-
-        for record in records {
-            guard let indexedContentType = XtreamContentType(rawValue: record.contentType),
-                  rawAcceptedContentTypes.contains(indexedContentType.rawValue) else {
-                continue
-            }
-
-            let key = Self.makeKey(contentType: indexedContentType, videoID: record.videoID)
-            var categoryNamesByID = documentsByKey[key]?.categoryNamesByID ?? [:]
-            var normalizedCategoryNamesByID = documentsByKey[key]?.normalizedCategoryNamesByID ?? [:]
-
-            categoryNamesByID[record.categoryID] = record.categoryName
-            normalizedCategoryNamesByID[record.categoryID] = record.normalizedCategoryName
-
-            documentsByKey[key] = SearchDocument(
-                key: key,
-                videoID: record.videoID,
-                indexedContentType: indexedContentType,
-                playbackContentType: record.playbackContentType,
-                title: record.name,
-                normalizedTitle: record.normalizedTitle,
-                containerExtension: record.containerExtension,
-                coverImageURL: record.coverImageURL,
-                rating: record.rating,
-                addedAtRaw: record.addedAtRaw,
-                addedAt: record.addedAt,
-                language: record.language,
-                normalizedLanguage: record.normalizedLanguage,
-                categoryNamesByID: categoryNamesByID,
-                normalizedCategoryNamesByID: normalizedCategoryNamesByID
-            )
-        }
-
-        return Array(documentsByKey.values)
-    }
-
-    private func loadIndexedCategoriesFromSwiftData(
-        scope: SearchMediaScope,
-        providerFingerprint: String,
-        modelContainer: ModelContainer
-    ) throws -> Set<String> {
-        let context = ModelContext(modelContainer)
-        let rawAcceptedContentTypes = Set(scope.acceptedContentTypes.map(\.rawValue))
-        let records = try context.fetch(
-            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
-                predicate: #Predicate { $0.providerFingerprint == providerFingerprint }
-            )
-        )
-
-        return Set(
-            records
-                .filter { record in
-                    rawAcceptedContentTypes.contains(record.contentType) &&
-                    record.lastSuccessfulRefreshAt != nil
-                }
-                .map(\.categoryID)
-        )
-    }
-
-    private func replaceCategoryInSwiftData(
-        videos: [SearchVideoSnapshot],
-        contentType: XtreamContentType,
-        categoryID: String,
-        categoryName: String,
-        providerFingerprint: String,
-        modelContainer: ModelContainer
-    ) throws {
-        guard contentType == .vod || contentType == .series else { return }
-
-        let context = ModelContext(modelContainer)
-        let rawContentType = contentType.rawValue
-        let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
-        let cleanedCategoryName = categoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedCategoryName = Self.normalize(cleanedCategoryName)
-        let now = Date()
-
-        for record in try context.fetch(
-            FetchDescriptor<PersistedStreamRecord>(
-                predicate: #Predicate {
-                    $0.providerFingerprint == providerFingerprint &&
-                    $0.contentType == rawContentType &&
-                    $0.categoryID == cleanedCategoryID
-                }
-            )
-        ) {
-            context.delete(record)
-        }
-
-        for (index, video) in videos.enumerated() {
-            let language = video.language?.trimmingCharacters(in: .whitespacesAndNewlines)
-                ?? LanguageTaggedText(video.name).languageCode
-            let addedAtRaw = video.addedAtRaw?.trimmingCharacters(in: .whitespacesAndNewlines)
-            context.insert(
-                PersistedStreamRecord(
-                    id: "\(providerFingerprint)|\(rawContentType)|\(cleanedCategoryID)|\(video.id)",
-                    providerFingerprint: providerFingerprint,
-                    contentType: rawContentType,
-                    categoryID: cleanedCategoryID,
-                    categoryName: cleanedCategoryName,
-                    normalizedCategoryName: normalizedCategoryName,
-                    pageToken: nil,
-                    videoID: video.id,
-                    sortIndex: index,
-                    name: video.name,
-                    normalizedTitle: Self.normalize(video.name),
-                    language: language,
-                    normalizedLanguage: language.map(Self.normalize),
-                    containerExtension: video.containerExtension,
-                    playbackContentType: Self.playbackContentType(from: video.contentType, indexedAs: contentType),
-                    coverImageURL: video.coverImageURL,
-                    tmdbId: nil,
-                    rating: video.rating,
-                    addedAtRaw: addedAtRaw,
-                    addedAt: Self.parseDate(addedAtRaw),
-                    savedAt: now,
-                    lastAccessAt: now
-                )
-            )
-        }
-
-        try upsertRefreshState(
-            context: context,
-            providerFingerprint: providerFingerprint,
-            contentType: rawContentType,
-            categoryID: cleanedCategoryID,
-            at: now,
-            error: nil
-        )
-        try context.save()
-    }
-
-    private func removeCategoryFromSwiftData(
-        contentType: XtreamContentType,
-        categoryID: String,
-        providerFingerprint: String,
-        modelContainer: ModelContainer
-    ) throws {
-        guard contentType == .vod || contentType == .series else { return }
-
-        let context = ModelContext(modelContainer)
-        let rawContentType = contentType.rawValue
-        let cleanedCategoryID = categoryID.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        for record in try context.fetch(
-            FetchDescriptor<PersistedStreamRecord>(
-                predicate: #Predicate {
-                    $0.providerFingerprint == providerFingerprint &&
-                    $0.contentType == rawContentType &&
-                    $0.categoryID == cleanedCategoryID
-                }
-            )
-        ) {
-            context.delete(record)
-        }
-
-        for record in try context.fetch(
-            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
-                predicate: #Predicate {
-                    $0.providerFingerprint == providerFingerprint &&
-                    $0.contentType == rawContentType &&
-                    $0.categoryID == cleanedCategoryID
-                }
-            )
-        ) {
-            context.delete(record)
-        }
-
-        try context.save()
-    }
-
-    private func clearSwiftData(providerFingerprint: String?, modelContainer: ModelContainer) throws {
-        let context = ModelContext(modelContainer)
-
-        for record in try context.fetch(FetchDescriptor<PersistedStreamRecord>()) {
-            if providerFingerprint == nil || record.providerFingerprint == providerFingerprint {
-                context.delete(record)
-            }
-        }
-
-        for record in try context.fetch(FetchDescriptor<PersistedCategoryRefreshStateRecord>()) {
-            if providerFingerprint == nil || record.providerFingerprint == providerFingerprint {
-                context.delete(record)
-            }
-        }
-
-        try context.save()
-    }
-
-    private func upsertRefreshState(
-        context: ModelContext,
-        providerFingerprint: String,
-        contentType: String,
-        categoryID: String,
-        at date: Date,
-        error: String?
-    ) throws {
-        let existing = try context.fetch(
-            FetchDescriptor<PersistedCategoryRefreshStateRecord>(
-                predicate: #Predicate {
-                    $0.providerFingerprint == providerFingerprint &&
-                    $0.contentType == contentType &&
-                    $0.categoryID == categoryID
-                }
-            )
-        ).first
-
-        if let existing {
-            existing.lastAttemptedRefreshAt = date
-            if let error {
-                existing.failureCount += 1
-                existing.lastError = error
-                let backoff = min(900.0, 15.0 * pow(2.0, Double(existing.failureCount)))
-                existing.nextEligibleRefreshAt = date.addingTimeInterval(backoff)
-            } else {
-                existing.lastSuccessfulRefreshAt = date
-                existing.failureCount = 0
-                existing.lastError = nil
-                existing.nextEligibleRefreshAt = date.addingTimeInterval(6 * 60 * 60)
-            }
-            return
-        }
-
-        context.insert(
-            PersistedCategoryRefreshStateRecord(
-                id: "\(providerFingerprint)|\(contentType)|\(categoryID)",
-                providerFingerprint: providerFingerprint,
-                contentType: contentType,
-                categoryID: categoryID,
-                lastSuccessfulRefreshAt: error == nil ? date : nil,
-                lastAttemptedRefreshAt: date,
-                nextEligibleRefreshAt: error == nil ? date.addingTimeInterval(6 * 60 * 60) : date.addingTimeInterval(15),
-                failureCount: error == nil ? 0 : 1,
-                lastError: error
-            )
-        )
     }
 
     private static func formatRating(_ rating: Double?) -> String? {
@@ -1071,16 +494,5 @@ actor SearchIndexStore {
             }
         }
         return nil
-    }
-}
-
-private extension String {
-    nonisolated
-    var snapshotFileName: String {
-        let encoded = Data(utf8).base64EncodedString()
-            .replacingOccurrences(of: "/", with: "_")
-            .replacingOccurrences(of: "+", with: "-")
-            .replacingOccurrences(of: "=", with: "")
-        return encoded + ".json"
     }
 }

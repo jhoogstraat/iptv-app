@@ -115,7 +115,7 @@ final class Player {
     }
 
     private let backendFactory: PlaybackBackendFactory
-    private let watchActivityStore: any WatchActivityStoring
+    private let watchActivityStore: WatchActivityStore?
     private let providerFingerprintProvider: @MainActor () -> String?
     private let defaults: UserDefaults
     private var backend: (any PlaybackBackend)?
@@ -132,12 +132,12 @@ final class Player {
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
-        watchActivityStore: (any WatchActivityStoring)? = nil,
+        watchActivityStore: WatchActivityStore? = nil,
         providerFingerprintProvider: @escaping @MainActor () -> String? = { nil },
         defaults: UserDefaults = .standard
     ) {
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()
-        self.watchActivityStore = watchActivityStore ?? DiskWatchActivityStore.shared
+        self.watchActivityStore = watchActivityStore
         self.providerFingerprintProvider = providerFingerprintProvider
         self.defaults = defaults
     }
@@ -882,6 +882,7 @@ final class Player {
 
     private func persistProgressIfNeeded() {
         guard let currentItem else { return }
+        guard let watchActivityStore else { return }
         guard let providerFingerprint = providerFingerprintProvider() else { return }
 
         let key = makePersistenceKey(for: currentItem)
@@ -918,6 +919,7 @@ final class Player {
 
     private func markCurrentItemCompleted() {
         guard let currentItem else { return }
+        guard let watchActivityStore else { return }
         guard let providerFingerprint = providerFingerprintProvider() else { return }
 
         let input = WatchActivityInput(

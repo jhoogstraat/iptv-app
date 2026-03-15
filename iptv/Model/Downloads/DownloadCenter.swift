@@ -42,16 +42,16 @@ final class DownloadCenter {
         providerStore: ProviderStore,
         catalog: Catalog,
         backgroundActivityCenter: BackgroundActivityCenter,
-        store: DownloadStore? = nil,
+        store: DownloadStore,
+        metadataStore: OfflineMetadataStore,
         assetStore: OfflineAssetStore? = nil,
-        metadataStore: OfflineMetadataStore? = nil,
         sessionClient: DownloadSessionClient? = nil
     ) {
         self.providerStore = providerStore
         self.catalog = catalog
-        self.store = store ?? DownloadStore()
+        self.store = store
         self.assetStore = assetStore ?? OfflineAssetStore()
-        self.metadataStore = metadataStore ?? OfflineMetadataStore()
+        self.metadataStore = metadataStore
         self.activityBridge = DownloadActivityBridge(activityCenter: backgroundActivityCenter)
 
         self.playbackSourceResolver = PlaybackSourceResolver(

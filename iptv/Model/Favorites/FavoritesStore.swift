@@ -9,7 +9,7 @@ import Foundation
 import Observation
 import OSLog
 
-struct FavoriteInput: Hashable, Sendable {
+nonisolated struct FavoriteInput: Hashable, Sendable {
     let videoID: Int
     let contentType: String
     let title: String
@@ -18,7 +18,7 @@ struct FavoriteInput: Hashable, Sendable {
     let rating: Double?
 }
 
-struct FavoriteRecord: Codable, Hashable, Sendable, Identifiable {
+nonisolated struct FavoriteRecord: Codable, Hashable, Sendable, Identifiable {
     let providerFingerprint: String
     let videoID: Int
     let contentType: String
@@ -32,7 +32,7 @@ struct FavoriteRecord: Codable, Hashable, Sendable, Identifiable {
         Self.makeKey(providerFingerprint: providerFingerprint, contentType: contentType, videoID: videoID)
     }
 
-    static func makeKey(providerFingerprint: String, contentType: String, videoID: Int) -> String {
+    nonisolated static func makeKey(providerFingerprint: String, contentType: String, videoID: Int) -> String {
         "\(providerFingerprint)|\(contentType)|\(videoID)"
     }
 
@@ -62,134 +62,36 @@ struct FavoriteRecord: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
-protocol FavoriteStoring: Sendable {
-    func loadAll() async -> [FavoriteRecord]
-    func contains(providerFingerprint: String, contentType: String, videoID: Int) async -> Bool
-    func add(input: FavoriteInput, providerFingerprint: String) async
-    func remove(input: FavoriteInput, providerFingerprint: String) async
-    func clear(for providerFingerprint: String) async
-}
-
-actor DiskFavoritesStore: FavoriteStoring {
-    static let shared = DiskFavoritesStore()
-
-    private let fileURL: URL
-    private let now: @Sendable () -> Date
-    private var didLoad = false
-    private var recordsByKey: [String: FavoriteRecord] = [:]
-
-    init(
-        fileURL: URL? = nil,
-        now: @escaping @Sendable () -> Date = Date.init
-    ) {
-        let defaultURL = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
-            .first!
-            .appending(path: "Favorites", directoryHint: .isDirectory)
-            .appending(path: "favorites.json")
-        self.fileURL = fileURL ?? defaultURL
-        self.now = now
-    }
-
-    func loadAll() async -> [FavoriteRecord] {
-        await ensureLoaded()
-        return recordsByKey.values.sorted { $0.createdAt > $1.createdAt }
-    }
-
-    func contains(providerFingerprint: String, contentType: String, videoID: Int) async -> Bool {
-        await ensureLoaded()
-        let key = FavoriteRecord.makeKey(
-            providerFingerprint: providerFingerprint,
-            contentType: contentType,
-            videoID: videoID
-        )
-        return recordsByKey[key] != nil
-    }
-
-    func add(input: FavoriteInput, providerFingerprint: String) async {
-        await ensureLoaded()
-        let key = FavoriteRecord.makeKey(
-            providerFingerprint: providerFingerprint,
-            contentType: input.contentType,
-            videoID: input.videoID
-        )
-        recordsByKey[key] = FavoriteRecord.from(input: input, providerFingerprint: providerFingerprint, createdAt: now())
-        await persist()
-    }
-
-    func remove(input: FavoriteInput, providerFingerprint: String) async {
-        await ensureLoaded()
-        let key = FavoriteRecord.makeKey(
-            providerFingerprint: providerFingerprint,
-            contentType: input.contentType,
-            videoID: input.videoID
-        )
-        recordsByKey[key] = nil
-        await persist()
-    }
-
-    func clear(for providerFingerprint: String) async {
-        await ensureLoaded()
-        recordsByKey = recordsByKey.filter { $0.value.providerFingerprint != providerFingerprint }
-        await persist()
-    }
-
-    private func ensureLoaded() async {
-        guard !didLoad else { return }
-        didLoad = true
-
-        do {
-            let directoryURL = fileURL.deletingLastPathComponent()
-            if !FileManager.default.fileExists(atPath: directoryURL.path()) {
-                try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-            }
-
-            guard FileManager.default.fileExists(atPath: fileURL.path()) else {
-                recordsByKey = [:]
-                return
-            }
-
-            let data = try Data(contentsOf: fileURL)
-            let records = try JSONDecoder().decode([FavoriteRecord].self, from: data)
-            recordsByKey = Dictionary(uniqueKeysWithValues: records.map { ($0.id, $0) })
-        } catch {
-            recordsByKey = [:]
-            logger.error("Favorites load failed, resetting file: \(error.localizedDescription, privacy: .public)")
-            try? FileManager.default.removeItem(at: fileURL)
-        }
-    }
-
-    private func persist() async {
-        do {
-            let records = recordsByKey.values.sorted { $0.createdAt > $1.createdAt }
-            let data = try JSONEncoder().encode(records)
-            try data.write(to: fileURL, options: [.atomic])
-        } catch {
-            logger.error("Favorites persist failed: \(error.localizedDescription, privacy: .public)")
-        }
-    }
-}
-
 @MainActor
 @Observable
 final class FavoritesStore {
-    private let store: any FavoriteStoring
+    private let store: FavoritesPersistence
     private(set) var revision = 0
 
-    init(store: (any FavoriteStoring)? = nil) {
-        self.store = store ?? DiskFavoritesStore.shared
+    init(store: FavoritesPersistence) {
+        self.store = store
     }
 
     func load(providerFingerprint: String) async -> [FavoriteRecord] {
-        await store.loadAll().filter { $0.providerFingerprint == providerFingerprint }
+        do {
+            return try await store.records(for: providerFingerprint)
+        } catch {
+            logger.error("Failed to load favorites: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
     }
 
     func contains(video: Video, providerFingerprint: String) async -> Bool {
-        await store.contains(
-            providerFingerprint: providerFingerprint,
-            contentType: video.contentType,
-            videoID: video.id
-        )
+        do {
+            return try await store.contains(
+                providerFingerprint: providerFingerprint,
+                contentType: video.contentType,
+                videoID: video.id
+            )
+        } catch {
+            logger.error("Failed to check favorite status: \(error.localizedDescription, privacy: .public)")
+            return false
+        }
     }
 
     func setFavorite(video: Video, providerFingerprint: String, isFavorite: Bool) async {
@@ -202,11 +104,15 @@ final class FavoritesStore {
             rating: video.rating
         )
 
-        if isFavorite {
-            await store.add(input: input, providerFingerprint: providerFingerprint)
-        } else {
-            await store.remove(input: input, providerFingerprint: providerFingerprint)
+        do {
+            if isFavorite {
+                try await store.add(input: input, providerFingerprint: providerFingerprint)
+            } else {
+                try await store.remove(input: input, providerFingerprint: providerFingerprint)
+            }
+            revision += 1
+        } catch {
+            logger.error("Failed to update favorite state: \(error.localizedDescription, privacy: .public)")
         }
-        revision += 1
     }
 }
