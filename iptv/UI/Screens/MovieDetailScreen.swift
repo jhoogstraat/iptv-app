@@ -342,7 +342,7 @@ struct MovieDetailScreen: View {
             }
 
             Text(displayTitle)
-                .font(.system(size: usesCompactDetailLayout ? 42 : 56, weight: .heavy, design: .rounded))
+                .font(.system(size: usesCompactDetailLayout ? 42 : 56, weight: .heavy))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white)
                 .shadow(color: Color.black.opacity(0.24), radius: 14, y: 8)
