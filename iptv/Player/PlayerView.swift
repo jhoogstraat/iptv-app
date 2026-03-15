@@ -475,41 +475,32 @@ struct PlayerView: View {
 
     #if os(iOS)
     private var mobileControlsOverlay: some View {
-        VStack(spacing: 0) {
-            topBar
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
+        GeometryReader { proxy in
+            VStack(spacing: 0) {
+                topBar
+                    .padding(.horizontal, 20)
+                    .padding(.top, 16)
 
-            Spacer()
+                Spacer()
 
-            VStack(alignment: .leading, spacing: 16) {
-                infoPanel
+                VStack(alignment: .leading, spacing: 16) {
+                    infoPanel
 
-                timelineControls
+                    timelineControls
 
-                transportStrip
+                    transportStrip
 
-                HStack(spacing: 10) {
-                    favoriteControlButton
-                    audioControlChip
-                    subtitleControlChip
-                    moreControlChip
-                    if player.episodeOptions.count > 1 {
-                        controlChip("Episodes", icon: "list.number") {
-                            mobileSheet = .episodes
-                        }
-                        .accessibilityIdentifier("player.chip.episodes")
+                    mobileActionControls(availableWidth: max(proxy.size.width - 40, 0))
+
+                    if player.outputRoutes.count > 1 {
+                        outputRouteSummary
                     }
-                }
 
-                if player.outputRoutes.count > 1 {
-                    outputRouteSummary
+                    statusMessages
                 }
-
-                statusMessages
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(20)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .foregroundStyle(.white)
     }
@@ -645,10 +636,81 @@ struct PlayerView: View {
         .buttonStyle(.plain)
         #endif
         .disabled(player.currentItem == nil)
+        .accessibilityLabel(isFavorite ? "Remove Favorite" : "Add Favorite")
         .accessibilityIdentifier("player.favorite")
     }
 
     #if os(iOS)
+    @ViewBuilder
+    private func mobileActionControls(availableWidth: CGFloat) -> some View {
+        if availableWidth < 430 {
+            compactMobileActionRow
+        } else {
+            mobileControlChipRow
+        }
+    }
+
+    private var mobileControlChipRow: some View {
+        HStack(spacing: 10) {
+            favoriteControlButton
+            audioControlChip
+            subtitleControlChip
+            moreControlChip
+            if player.episodeOptions.count > 1 {
+                controlChip("Episodes", icon: "list.number") {
+                    mobileSheet = .episodes
+                }
+                .accessibilityIdentifier("player.chip.episodes")
+            }
+        }
+    }
+
+    private var compactMobileActionRow: some View {
+        HStack(alignment: .center, spacing: 10) {
+            favoriteControlButton
+
+            compactMobileControlGroup {
+                compactIconControlButton(
+                    systemImage: "speaker.wave.2",
+                    accessibilityLabel: "Audio",
+                    accessibilityIdentifier: "player.chip.audio"
+                ) {
+                    mobileSheet = .audio
+                }
+
+                compactIconControlButton(
+                    systemImage: "captions.bubble",
+                    accessibilityLabel: "Subtitles",
+                    accessibilityIdentifier: "player.chip.subtitles"
+                ) {
+                    mobileSheet = .subtitles
+                }
+
+                compactIconControlButton(
+                    systemImage: "ellipsis",
+                    accessibilityLabel: "More",
+                    accessibilityIdentifier: "player.chip.more"
+                ) {
+                    mobileSheet = .more
+                }
+            }
+
+            if player.episodeOptions.count > 1 {
+                compactMobileControlGroup {
+                    compactIconControlButton(
+                        systemImage: "list.number",
+                        accessibilityLabel: "Episodes",
+                        accessibilityIdentifier: "player.chip.episodes"
+                    ) {
+                        mobileSheet = .episodes
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
     private var audioControlChip: some View {
         controlChip("Audio", icon: "speaker.wave.2") {
             mobileSheet = .audio
@@ -743,6 +805,33 @@ struct PlayerView: View {
                 .background(.white.opacity(0.14))
                 .clipShape(Capsule())
         }
+    }
+
+    private func compactMobileControlGroup<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        HStack(spacing: 14) {
+            content()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.white.opacity(0.14))
+        .clipShape(Capsule())
+    }
+
+    private func compactIconControlButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.title3.weight(.semibold))
+                .frame(width: 28, height: 28)
+        }
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
     #endif
 
