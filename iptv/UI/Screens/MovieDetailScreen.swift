@@ -317,7 +317,8 @@ struct MovieDetailScreen: View {
             height: heroHeight,
             topInset: topInset,
             collapseProgress: heroCollapseProgress,
-            scrollOffset: heroScrollOffset
+            scrollOffset: heroScrollOffset,
+            artworkContentMode: usesCompactDetailLayout ? .fit : .fill
         )
     }
 
@@ -325,36 +326,44 @@ struct MovieDetailScreen: View {
         VStack(spacing: DetailSpacing.md) {
             Spacer()
 
-            if let heroTitleArtworkURL {
-                AsyncImage(url: heroTitleArtworkURL) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .interpolation(.high)
-                            .aspectRatio(contentMode: .fit)
-                    default:
-                        EmptyView()
+            VStack(spacing: DetailSpacing.md) {
+                if let heroTitleArtworkURL {
+                    AsyncImage(url: heroTitleArtworkURL) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .interpolation(.high)
+                                .aspectRatio(contentMode: .fit)
+                        default:
+                            EmptyView()
+                        }
                     }
+                    .frame(maxWidth: usesCompactDetailLayout ? 220 : 280, maxHeight: usesCompactDetailLayout ? 84 : 96)
+                    .frame(maxWidth: .infinity)
+                    .shadow(color: Color.black.opacity(0.28), radius: 20, y: 10)
                 }
-                .frame(maxWidth: 240, maxHeight: 96)
-                .shadow(color: Color.black.opacity(0.28), radius: 20, y: 10)
-            }
 
-            Text(displayTitle)
-                .font(.system(size: usesCompactDetailLayout ? 42 : 56, weight: .heavy))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white)
-                .shadow(color: Color.black.opacity(0.24), radius: 14, y: 8)
-
-            heroMetaRow
-
-            if let heroGenreText {
-                Text(heroGenreText)
-                    .font(.title3.weight(.medium))
+                Text(displayTitle)
+                    .font(.system(size: usesCompactDetailLayout ? 38 : 56, weight: .heavy))
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.white.opacity(0.92))
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(.white)
+                    .shadow(color: Color.black.opacity(0.24), radius: 14, y: 8)
+
+                heroMetaRow
+
+                if let heroGenreText {
+                    Text(heroGenreText)
+                        .font(.title3.weight(.medium))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(.white.opacity(0.92))
+                }
             }
+            .frame(maxWidth: usesCompactDetailLayout ? 320 : 760)
+            .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, minHeight: heroHeight + topInset, alignment: .bottom)
         .padding(.horizontal, usesCompactDetailLayout ? 24 : 32)
@@ -370,9 +379,12 @@ struct MovieDetailScreen: View {
             HStack(spacing: DetailSpacing.sm) {
                 heroMetaItems
             }
+            .frame(maxWidth: .infinity, alignment: .center)
+
             VStack(spacing: DetailSpacing.xs) {
                 heroMetaItems
             }
+            .frame(maxWidth: .infinity, alignment: .center)
         }
     }
 

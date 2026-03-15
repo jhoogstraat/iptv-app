@@ -269,6 +269,23 @@ struct DetailHeroBackdrop: View {
     let topInset: CGFloat
     let collapseProgress: CGFloat
     let scrollOffset: CGFloat
+    let artworkContentMode: ContentMode
+
+    init(
+        artworkURL: URL?,
+        height: CGFloat,
+        topInset: CGFloat,
+        collapseProgress: CGFloat,
+        scrollOffset: CGFloat,
+        artworkContentMode: ContentMode = .fill
+    ) {
+        self.artworkURL = artworkURL
+        self.height = height
+        self.topInset = topInset
+        self.collapseProgress = collapseProgress
+        self.scrollOffset = scrollOffset
+        self.artworkContentMode = artworkContentMode
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -318,9 +335,11 @@ struct DetailHeroBackdrop: View {
             AsyncImage(url: artworkURL) { phase in
                 switch phase {
                 case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
+                    if artworkContentMode == .fit {
+                        image.boundedCoverArtwork()
+                    } else {
+                        image.boundedFillArtwork()
+                    }
                 default:
                     Color.white.opacity(0.05)
                 }
