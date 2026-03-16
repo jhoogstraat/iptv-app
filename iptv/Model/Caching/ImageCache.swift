@@ -9,8 +9,8 @@ import Foundation
 
 enum SharedImageURLCache {
     static func configureIfNeeded(
-        memoryCapacity: Int = 96 * 1024 * 1024,
-        diskCapacity: Int = 512 * 1024 * 1024
+        memoryCapacity: Int = 96 * 1024 * 1024, // 96mb
+        diskCapacity: Int = 512 * 1024 * 1024 // 512mb
     ) {
         let current = URLCache.shared
         let targetMemory = max(current.memoryCapacity, memoryCapacity)
