@@ -36,7 +36,11 @@ final class ForYouViewModel {
     var phase: Phase = .idle
     var hero: ForYouItem?
     var sections: [ForYouSection] = []
+    var isRefreshing = false
     var lastRefresh: Date?
+
+    private var lastLoadedProviderFingerprint: String?
+    private var activeLoadID = UUID()
 
     init(
         dependencies: ForYouDependencies,
@@ -53,62 +57,100 @@ final class ForYouViewModel {
     }
 
     func load(policy: CatalogLoadPolicy = .readThrough) async {
+        let loadID = UUID()
+
         guard providerConfigurationProvider.hasProviderConfiguration else {
             phase = .idle
             hero = nil
             sections = []
+            isRefreshing = false
+            lastLoadedProviderFingerprint = nil
             return
         }
 
         do {
-            phase = .loading
+            let providerFingerprint = try currentProviderFingerprint()
+            let hasExistingContent = hero != nil || !sections.isEmpty
+            let isLoadedPhase: Bool
+            if case .loaded = phase {
+                isLoadedPhase = true
+            } else {
+                isLoadedPhase = false
+            }
 
-            let vodOutcome = await loadCategories(
+            let shouldSkipWarmRead = policy == .readThrough
+                && lastLoadedProviderFingerprint == providerFingerprint
+                && isLoadedPhase
+                && hasExistingContent
+
+            guard !shouldSkipWarmRead else { return }
+
+            let shouldShowBlockingLoading = !hasExistingContent || lastLoadedProviderFingerprint != providerFingerprint
+            activeLoadID = loadID
+            isRefreshing = true
+
+            if shouldShowBlockingLoading {
+                phase = .loading
+            }
+
+            defer {
+                if activeLoadID == loadID {
+                    isRefreshing = false
+                }
+            }
+
+            async let vodOutcome = loadCategories(
                 policy: policy,
                 contentType: .vod,
                 limit: vodCategoryLimit
             )
-            let seriesOutcome = await loadCategories(
+            async let seriesOutcome = loadCategories(
                 policy: policy,
                 contentType: .series,
                 limit: seriesCategoryLimit
             )
+            async let watchRecords = watchActivityStore.load(providerFingerprint: providerFingerprint)
 
-            if vodOutcome.error is CancellationError || seriesOutcome.error is CancellationError {
+            let (resolvedVodOutcome, resolvedSeriesOutcome, records) = await (vodOutcome, seriesOutcome, watchRecords)
+
+            if resolvedVodOutcome.error is CancellationError || resolvedSeriesOutcome.error is CancellationError {
                 throw CancellationError()
             }
 
-            if vodOutcome.categories.isEmpty, seriesOutcome.categories.isEmpty {
-                throw vodOutcome.error ?? seriesOutcome.error ?? CatalogError.missingProviderConfiguration
+            if resolvedVodOutcome.categories.isEmpty, resolvedSeriesOutcome.categories.isEmpty {
+                throw resolvedVodOutcome.error ?? resolvedSeriesOutcome.error ?? CatalogError.missingProviderConfiguration
             }
-
-            let providerFingerprint = try currentProviderFingerprint()
-            let records = await watchActivityStore.load(providerFingerprint: providerFingerprint)
 
             let context = RecommendationContext(
                 providerFingerprint: providerFingerprint,
                 watchRecords: records,
-                vodCategories: vodOutcome.categories,
-                seriesCategories: seriesOutcome.categories,
-                vodCatalog: vodOutcome.categories.reduce(into: [:]) { partialResult, category in
+                vodCategories: resolvedVodOutcome.categories,
+                seriesCategories: resolvedSeriesOutcome.categories,
+                vodCatalog: resolvedVodOutcome.categories.reduce(into: [:]) { partialResult, category in
                     partialResult[category] = streamRepository.videos(in: category, contentType: .vod)
                 },
-                seriesCatalog: seriesOutcome.categories.reduce(into: [:]) { partialResult, category in
+                seriesCatalog: resolvedSeriesOutcome.categories.reduce(into: [:]) { partialResult, category in
                     partialResult[category] = streamRepository.videos(in: category, contentType: .series)
                 }
             )
 
             let output = try await recommendationProvider.build(context: context)
+            guard activeLoadID == loadID else { return }
 
             hero = output.hero
             sections = output.sections
             lastRefresh = Date()
+            lastLoadedProviderFingerprint = providerFingerprint
             phase = .loaded
         } catch is CancellationError {
+            guard activeLoadID == loadID else { return }
             logger.debug("ForYou load cancelled")
         } catch {
+            guard activeLoadID == loadID else { return }
             logger.error("ForYou load failed: \(error.localizedDescription, privacy: .public)")
-            phase = .failed(error)
+            if hero == nil && sections.isEmpty {
+                phase = .failed(error)
+            }
         }
     }
 

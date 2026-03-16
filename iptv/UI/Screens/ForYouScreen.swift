@@ -9,8 +9,6 @@ import SwiftUI
 import OSLog
 
 struct ForYouScreen: View {
-    let isActive: Bool
-
     @Environment(AppContainer.self) private var appContainer
     @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(ProviderStore.self) private var providerStore
@@ -20,10 +18,7 @@ struct ForYouScreen: View {
     @State private var isPresentingSettings = false
     @State private var selectedDetailVideo: Video?
     @State private var playError: String?
-
-    init(isActive: Bool = true) {
-        self.isActive = isActive
-    }
+    @State private var didBootstrapViewModel = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +41,7 @@ struct ForYouScreen: View {
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
+                        .disabled(viewModel?.isRefreshing == true)
                     }
                 }
             }
@@ -70,20 +66,14 @@ struct ForYouScreen: View {
                 }
             }
         }
-        .task(id: "\(providerStore.revision)|\(isActive)") {
+        .onAppear {
             ensureViewModel()
-            guard isActive else { return }
-
-            guard providerStore.hasConfiguration else {
-                await MainActor.run {
-                    viewModel?.phase = .idle
-                    viewModel?.hero = nil
-                    viewModel?.sections = []
-                }
-                return
-            }
-
-            await viewModel?.load(policy: .readThrough)
+            guard !didBootstrapViewModel else { return }
+            didBootstrapViewModel = true
+            Task { await syncForCurrentProvider() }
+        }
+        .onChange(of: providerStore.revision) { _, _ in
+            Task { await syncForCurrentProvider() }
         }
     }
 
@@ -201,6 +191,20 @@ struct ForYouScreen: View {
         if viewModel == nil {
             viewModel = appContainer.makeForYouViewModel()
         }
+    }
+
+    private func syncForCurrentProvider() async {
+        ensureViewModel()
+        guard providerStore.hasConfiguration else {
+            await MainActor.run {
+                viewModel?.phase = .idle
+                viewModel?.hero = nil
+                viewModel?.sections = []
+            }
+            return
+        }
+
+        await viewModel?.load(policy: .readThrough)
     }
 
     @ViewBuilder

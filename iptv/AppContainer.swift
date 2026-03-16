@@ -82,6 +82,11 @@ final class AppContainer {
         self.searchProviderStore = providerStore
 
         configureUITestLaunchState()
+        
+        if let config = try? providerStore.requiredConfiguration() {
+            // TODO: Do something with fingerprint
+            ProviderCacheFingerprint.make(from: config)
+        }
     }
 
     func makeSearchViewModel() -> SearchScreenViewModel {
@@ -90,10 +95,6 @@ final class AppContainer {
             providerStore: searchProviderStore,
             favoritesStore: searchFavoritesStore
         )
-    }
-
-    func makeMoviesViewModel(contentType: XtreamContentType) -> MoviesScreenViewModel {
-        MoviesScreenViewModel(contentType: contentType, catalog: catalog)
     }
 
     func makeForYouViewModel() -> ForYouViewModel {

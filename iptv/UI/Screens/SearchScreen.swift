@@ -8,14 +8,13 @@
 import SwiftUI
 
 struct SearchScreen: View {
-    let isActive: Bool
-
     @Environment(AppContainer.self) private var appContainer
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
 
     @State private var viewModel: SearchScreenViewModel?
     @State private var isShowingFilters = false
+    @State private var didBootstrapViewModel = false
 
     private var queryBinding: Binding<String> {
         Binding(
@@ -25,10 +24,6 @@ struct SearchScreen: View {
                 viewModel?.scheduleSearch()
             }
         )
-    }
-
-    init(isActive: Bool = true) {
-        self.isActive = isActive
     }
 
     var body: some View {
@@ -76,14 +71,19 @@ struct SearchScreen: View {
                         }
                 }
             }
-            .task(id: "\(providerStore.revision)|\(isActive)") {
+            .onAppear {
                 ensureViewModel()
-                guard isActive else { return }
+                guard !didBootstrapViewModel else { return }
+                didBootstrapViewModel = true
                 viewModel?.start()
             }
-            .task(id: favoritesStore.revision) {
-                guard isActive, providerStore.hasConfiguration else { return }
-                await viewModel?.refreshFavoritesOnly()
+            .onChange(of: providerStore.revision) { _, _ in
+                ensureViewModel()
+                viewModel?.start()
+            }
+            .onChange(of: favoritesStore.revision) { _, _ in
+                guard providerStore.hasConfiguration else { return }
+                Task { await viewModel?.refreshFavoritesOnly() }
             }
         }
     }

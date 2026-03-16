@@ -6,405 +6,263 @@
 //
 
 import SwiftUI
+import SwiftData
 
-struct MoviesScreen: View {
-    private enum BrowseLayout {
-        static let standardPosterWidth: CGFloat = 170
-        static let minimumPosterWidth: CGFloat = 150
-        static let posterAspectRatio: CGFloat = 2 / 3
+struct ObservedCategoryRow: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let groupedDisplayName: String
+    let languageGroupCode: String?
+
+    init(
+        id: String,
+        name: String,
+        groupedDisplayName: String,
+        languageGroupCode: String?
+    ) {
+        self.id = id
+        self.name = name
+        self.groupedDisplayName = groupedDisplayName
+        self.languageGroupCode = languageGroupCode
     }
 
-    let contentType: XtreamContentType
-    let isActive: Bool
+    init(record: PersistedCategoryRecord) {
+        let tagged = LanguageTaggedText(record.name)
+        self.id = record.categoryID
+        self.name = record.name
+        self.groupedDisplayName = tagged.groupedDisplayName
+        self.languageGroupCode = tagged.languageCode
+    }
 
-    @Environment(AppContainer.self) private var appContainer
-    @Environment(Catalog.self) private var catalog
-    @Environment(ProviderStore.self) private var providerStore
+    func asCategory() -> Category {
+        Category(id: id, name: name)
+    }
+}
 
-    @State private var viewModel: MoviesScreenViewModel?
-    @State private var isPresentingSettings = false
+struct ObservedStreamRow: Identifiable, Hashable {
+    let id: Int
+    let title: String
+    let normalizedTitle: String
+    let artworkURL: URL?
+    let ratingText: String?
+    let languageText: String?
+    let containerExtension: String
+    let contentType: String
+    let coverImageURL: String?
+    let tmdbId: String?
+    let rating: Double?
+    let addedAtRaw: String?
 
-    init(contentType: XtreamContentType = .vod, isActive: Bool = true) {
+    init(
+        id: Int,
+        title: String,
+        normalizedTitle: String,
+        artworkURL: URL?,
+        ratingText: String?,
+        languageText: String?,
+        containerExtension: String,
+        contentType: String,
+        coverImageURL: String?,
+        tmdbId: String?,
+        rating: Double?,
+        addedAtRaw: String?
+    ) {
+        self.id = id
+        self.title = title
+        self.normalizedTitle = normalizedTitle
+        self.artworkURL = artworkURL
+        self.ratingText = ratingText
+        self.languageText = languageText
+        self.containerExtension = containerExtension
         self.contentType = contentType
-        self.isActive = isActive
+        self.coverImageURL = coverImageURL
+        self.tmdbId = tmdbId
+        self.rating = rating
+        self.addedAtRaw = addedAtRaw
     }
 
-    var body: some View {
-        NavigationStack {
-            Group {
-                if !providerStore.hasConfiguration {
-                    missingProviderView
-                } else if let viewModel {
-                    contentForState(viewModel)
-                } else {
-                    ProgressView()
-                }
-            }
-            .navigationTitle(screenTitle)
-            .searchable(text: queryBinding, prompt: "Search \(screenTitle)")
-            .withBackgroundActivityToolbar()
-            .toolbar {
-                if providerStore.hasConfiguration, let viewModel, !viewModel.categories.isEmpty {
-                    ToolbarItem(placement: .principal) {
-                        categoryTitleMenu(viewModel)
-                    }
+    init(record: PersistedStreamRecord) {
+        let resolvedLanguage = record.language ?? LanguageTaggedText(record.name).languageCode
 
-                    ToolbarItem(placement: .primaryAction) {
-                        sortMenu(viewModel)
-                    }
-                }
-            }
-            #if !os(macOS)
-            .sheet(isPresented: $isPresentingSettings) {
-                NavigationStack {
-                    SettingsScreen()
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Done") {
-                                    isPresentingSettings = false
-                                }
-                            }
-                        }
-                }
-                .environment(providerStore)
-            }
-            #endif
+        self.id = record.videoID
+        self.title = record.name
+        self.normalizedTitle = record.normalizedTitle.isEmpty
+            ? normalizedBrowseText(record.name)
+            : record.normalizedTitle
+        self.artworkURL = record.coverImageURL.flatMap(URL.init(string:))
+        self.ratingText = record.rating.map {
+            $0.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US")))
         }
-        .task(id: "\(providerStore.revision)|\(contentType.rawValue)|\(isActive)") {
-            ensureViewModel()
-            guard isActive else { return }
-
-            guard providerStore.hasConfiguration else {
-                viewModel?.reset()
-                catalog.reset()
-                return
-            }
-
-            await viewModel?.load(policy: .readThrough)
-        }
+        self.languageText = resolvedLanguage
+        self.containerExtension = record.containerExtension
+        self.contentType = record.playbackContentType
+        self.coverImageURL = record.coverImageURL
+        self.tmdbId = record.tmdbId
+        self.rating = record.rating
+        self.addedAtRaw = record.addedAtRaw
     }
 
-    @ViewBuilder
-    private func contentForState(_ viewModel: MoviesScreenViewModel) -> some View {
-        switch viewModel.phase {
-            case .idle, .loadingCatalog:
-                ProgressView()
-
-            case .error(let error):
-                VStack(spacing: 12) {
-                    Text(error.localizedDescription)
-                        .multilineTextAlignment(.center)
-                    Button("Retry") {
-                        Task { await viewModel.load(policy: .forceRefresh) }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
-
-            case .done:
-                if viewModel.categories.isEmpty {
-                    VStack(spacing: 12) {
-                        Text(emptyCatalogMessage)
-                        Button("Refresh") {
-                            Task { await viewModel.load(policy: .forceRefresh) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .padding()
-                } else {
-                    browseContent(viewModel)
-                }
-        }
-    }
-
-    @ViewBuilder
-    private func browseContent(_ viewModel: MoviesScreenViewModel) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let error = viewModel.selectedCategoryError {
-                VStack(spacing: 12) {
-                    Text(error.localizedDescription)
-                        .multilineTextAlignment(.center)
-                    Button("Retry Category") {
-                        Task { await viewModel.refreshSelectedCategory() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
-            } else if viewModel.isSelectedCategoryLoading {
-                ScrollView {
-                    BrowseSkeletonGrid(columns: gridColumns)
-                        .padding(.horizontal)
-                        .padding(.bottom, 20)
-                }
-                .scrollIndicators(.hidden)
-            } else if viewModel.browseResults.isEmpty {
-                ContentUnavailableView(
-                    "No Results",
-                    systemImage: "film",
-                    description: Text(emptyBrowseMessage(for: viewModel))
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
-                        ForEach(viewModel.browseResults) { item in
-                            NavigationLink {
-                                destination(for: item, viewModel: viewModel)
-                            } label: {
-                                browseTile(for: item)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom, 20)
-                }
-            }
-        }
-    }
-
-    private func categoryTitleMenu(_ viewModel: MoviesScreenViewModel) -> some View {
-        Menu {
-            ForEach(viewModel.categoryMenuSections) { section in
-                if let title = section.title {
-                    Section(title) {
-                        categoryButtons(
-                            for: section.items,
-                            selectedCategoryID: viewModel.selectedCategoryID,
-                            viewModel: viewModel
-                        )
-                    }
-                } else {
-                    categoryButtons(
-                        for: section.items,
-                        selectedCategoryID: viewModel.selectedCategoryID,
-                        viewModel: viewModel
-                    )
-                }
-            }
-        } label: {
-            categorySelectorLabel(title: navigationBarTitle(for: viewModel))
-        }
-        .buttonStyle(.plain)
-        .help("Category: \(selectedCategoryName(for: viewModel))")
-    }
-
-    @ViewBuilder
-    private func categorySelectorLabel(title: String) -> some View {
-        #if os(macOS)
-        Text(title)
-            .font(.headline)
-            .lineLimit(1)
-            .padding(.horizontal, categorySelectorHorizontalPadding)
-            .padding(.vertical, categorySelectorVerticalPadding)
-        .background(
-            Capsule(style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-        )
-        #else
-        Text(title)
-            .font(.headline)
-            .lineLimit(1)
-            .padding(.horizontal, categorySelectorHorizontalPadding)
-            .padding(.vertical, categorySelectorVerticalPadding)
-        #endif
-    }
-
-    @ViewBuilder
-    private func categoryButtons(
-        for items: [MoviesScreenViewModel.CategoryMenuItem],
-        selectedCategoryID: String?,
-        viewModel: MoviesScreenViewModel
-    ) -> some View {
-        ForEach(items) { item in
-            Button {
-                Task { await viewModel.selectCategory(id: item.category.id) }
-            } label: {
-                if item.category.id == selectedCategoryID {
-                    Label(item.title, systemImage: "checkmark")
-                } else {
-                    Text(item.title)
-                }
-            }
-        }
-    }
-
-    private func sortMenu(_ viewModel: MoviesScreenViewModel) -> some View {
-        Menu {
-            Section("Sort") {
-                Text(viewModel.browseSort.displayName)
-            }
-
-            Picker("Sort", selection: sortBinding(for: viewModel)) {
-                ForEach(BrowseSort.allCases, id: \.self) { sort in
-                    Text(sort.displayName)
-                        .tag(sort)
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-        }
-        .help("Sort: \(viewModel.browseSort.displayName)")
-    }
-
-    private func destination(for item: MoviesBrowseItem, viewModel: MoviesScreenViewModel) -> some View {
-        guard let video = viewModel.video(for: item) else {
-            return AnyView(
-                ScopedPlaceholderView(
-                    title: "Title Unavailable",
-                    message: "The selected item is no longer available in the current category."
-                )
-                .navigationTitle(item.title)
-            )
-        }
-
-        switch contentType {
-        case .vod:
-            return AnyView(MovieDetailScreen(video: video))
-        case .series:
-            return AnyView(
-                EpisodeDetailTile(video: video)
-                    .navigationTitle(video.name)
-            )
-        case .live:
-            return AnyView(
-                ScopedPlaceholderView(
-                    title: "Live Episodes Are Unavailable",
-                    message: "Episode detail only applies to series content."
-                )
-                .navigationTitle(video.name)
-            )
-        }
-    }
-
-    private var missingProviderView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "key.horizontal.fill")
-                .font(.largeTitle)
-            Text("Configure Provider")
-                .font(.title3.weight(.semibold))
-            Text("Add your provider credentials in Settings before browsing \(screenTitle.lowercased()).")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            #if os(macOS)
-            SettingsLink {
-                Text("Configure Provider")
-            }
-                .buttonStyle(.borderedProminent)
-            #else
-            Button("Configure Provider") {
-                isPresentingSettings = true
-            }
-            .buttonStyle(.borderedProminent)
-            #endif
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func browseTile(for item: MoviesBrowseItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            BrowsePosterTile(item: item)
-                .aspectRatio(BrowseLayout.posterAspectRatio, contentMode: .fit)
-                .clipShape(.rect(cornerRadius: 8))
-
-            Text(item.title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.primary)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-        }
-    }
-
-    private func ensureViewModel() {
-        if viewModel == nil {
-            viewModel = appContainer.makeMoviesViewModel(contentType: contentType)
-        }
-    }
-
-    private var queryBinding: Binding<String> {
-        Binding(
-            get: { viewModel?.queryText ?? "" },
-            set: { newValue in
-                viewModel?.queryText = newValue
-            }
+    func asVideo() -> Video {
+        Video(
+            id: id,
+            name: title,
+            containerExtension: containerExtension,
+            contentType: contentType,
+            coverImageURL: coverImageURL,
+            tmdbId: tmdbId,
+            rating: rating,
+            addedAtRaw: addedAtRaw
         )
     }
+}
 
-    private func selectedCategoryBinding(for viewModel: MoviesScreenViewModel) -> Binding<String?> {
-        Binding(
-            get: { viewModel.selectedCategoryID },
-            set: { newValue in
-                Task { await viewModel.selectCategory(id: newValue) }
-            }
-        )
+struct MoviesCategoryMenuSection: Identifiable, Equatable {
+    let title: String?
+    let items: [MoviesCategoryMenuItem]
+
+    var id: String {
+        title ?? "__ungrouped__"
     }
+}
 
-    private func sortBinding(for viewModel: MoviesScreenViewModel) -> Binding<BrowseSort> {
-        Binding(
-            get: { viewModel.browseSort },
-            set: { newValue in
-                viewModel.browseSort = newValue
-            }
-        )
+struct MoviesCategoryMenuItem: Identifiable, Equatable {
+    let category: ObservedCategoryRow
+    let title: String
+
+    var id: String {
+        category.id
     }
+}
 
-    private func selectedCategoryName(for viewModel: MoviesScreenViewModel) -> String {
-        viewModel.selectedCategory?.name ?? "No Category Selected"
-    }
+func buildMoviesCategoryMenuSections(from categories: [ObservedCategoryRow]) -> [MoviesCategoryMenuSection] {
+    var ungroupedItems: [MoviesCategoryMenuItem] = []
+    var groupedItemsByLanguage: [String: [MoviesCategoryMenuItem]] = [:]
+    var languageOrder: [String] = []
 
-    private func navigationBarTitle(for viewModel: MoviesScreenViewModel) -> String {
-        viewModel.selectedCategory?.name ?? screenTitle
-    }
+    for category in categories {
+        let item = MoviesCategoryMenuItem(category: category, title: category.groupedDisplayName)
 
-    private func emptyBrowseMessage(for viewModel: MoviesScreenViewModel) -> String {
-        guard let category = viewModel.selectedCategory else {
-            return "No category is available."
+        guard let languageCode = category.languageGroupCode else {
+            ungroupedItems.append(item)
+            continue
         }
 
-        let trimmedQuery = viewModel.queryText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmedQuery.isEmpty {
-            return "No titles are available in \(category.name)."
+        if groupedItemsByLanguage[languageCode] == nil {
+            languageOrder.append(languageCode)
         }
-
-        return "No titles match \"\(trimmedQuery)\" in \(category.name)."
+        groupedItemsByLanguage[languageCode, default: []].append(item)
     }
 
-    private var gridColumns: [GridItem] {
+    var sections: [MoviesCategoryMenuSection] = []
+    if !ungroupedItems.isEmpty {
+        sections.append(MoviesCategoryMenuSection(title: nil, items: ungroupedItems))
+    }
+
+    for languageCode in languageOrder {
+        guard let items = groupedItemsByLanguage[languageCode], !items.isEmpty else { continue }
+        sections.append(MoviesCategoryMenuSection(title: languageCode, items: items))
+    }
+
+    return sections
+}
+
+func filterMoviesBrowseRows(_ rows: [ObservedStreamRow], queryText: String) -> [ObservedStreamRow] {
+    let normalizedQuery = normalizedBrowseText(queryText)
+    guard !normalizedQuery.isEmpty else { return rows }
+    return rows.filter { $0.normalizedTitle.localizedCaseInsensitiveContains(normalizedQuery) }
+}
+
+private func normalizedBrowseText(_ value: String) -> String {
+    value
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+}
+
+private func streamSortDescriptors(for browseSort: BrowseSort) -> [SortDescriptor<PersistedStreamRecord>] {
+    switch browseSort {
+    case .title:
         [
-            GridItem(
-                .adaptive(
-                    minimum: BrowseLayout.minimumPosterWidth,
-                    maximum: BrowseLayout.standardPosterWidth
-                ),
-                spacing: 16,
-                alignment: .top
-            )
+            SortDescriptor(\PersistedStreamRecord.name, order: .forward),
+            SortDescriptor(\PersistedStreamRecord.videoID, order: .forward)
+        ]
+    case .newest:
+        [
+            SortDescriptor(\PersistedStreamRecord.addedAt, order: .reverse),
+            SortDescriptor(\PersistedStreamRecord.rating, order: .reverse),
+            SortDescriptor(\PersistedStreamRecord.name, order: .forward),
+            SortDescriptor(\PersistedStreamRecord.videoID, order: .forward)
+        ]
+    case .rating:
+        [
+            SortDescriptor(\PersistedStreamRecord.rating, order: .reverse),
+            SortDescriptor(\PersistedStreamRecord.addedAt, order: .reverse),
+            SortDescriptor(\PersistedStreamRecord.name, order: .forward),
+            SortDescriptor(\PersistedStreamRecord.videoID, order: .forward)
         ]
     }
+}
 
-    private var categorySelectorHorizontalPadding: CGFloat {
-        #if os(macOS)
-        18
-        #else
-        10
-        #endif
+struct MoviesProviderRequestState: Equatable {
+    var didRequestCategories = false
+    var isLoadingCategories = false
+    var categoryLoadErrorMessage: String?
+    var requestedCategoryIDs: Set<String> = []
+    var loadingCategoryIDs: Set<String> = []
+    var categoryLoadErrors: [String: String] = [:]
+}
+
+struct BrowseScreen: View {
+    let contentType: XtreamContentType
+
+    @State var selectedCategoryID: String?
+    @State var queryText: String
+    @State var browseSort: BrowseSort = .title
+    @State private var requestState: MoviesProviderRequestState = MoviesProviderRequestState()
+    
+    @Environment(ProviderStore.self) private var providerStore
+    @Environment(Catalog.self) private var catalog
+
+    @Query private var categoryRecords: [PersistedCategoryRecord]
+
+    private var providerFingerprint: String
+    
+    init(_ contentType: XtreamContentType, provider: String) {
+        self.contentType = contentType
+        self.providerFingerprint = provider
+        self.queryText = ""
+        
+        _categoryRecords = Query(
+            filter: #Predicate<PersistedCategoryRecord> { record in
+                record.providerFingerprint == provider &&
+                record.contentType == contentType.rawValue
+            },
+            sort: [
+                SortDescriptor(\PersistedCategoryRecord.sortIndex, order: .forward),
+                SortDescriptor(\PersistedCategoryRecord.name, order: .forward)
+            ]
+        )
     }
 
-    private var categorySelectorVerticalPadding: CGFloat {
-        #if os(macOS)
-        6
-        #else
-        4
-        #endif
+    @MainActor
+    private var categories: [ObservedCategoryRow] {
+        categoryRecords.map(ObservedCategoryRow.init)
     }
 
+    private var selectedCategory: ObservedCategoryRow? {
+        guard let selectedCategoryID else { return nil }
+        return categories.first { $0.id == selectedCategoryID }
+    }
+
+    private var categoryMenuSections: [MoviesCategoryMenuSection] {
+        buildMoviesCategoryMenuSections(from: categories)
+    }
+
+    private var categoryIDs: [String] {
+        categories.map(\.id)
+    }
+    
+
+    
     private var screenTitle: String {
         switch contentType {
         case .vod:
@@ -426,10 +284,393 @@ struct MoviesScreen: View {
             "No channels were returned by the provider."
         }
     }
+
+    var body: some View {
+        NavigationStack {
+            if categories.isEmpty {
+                categoriesEmptyState
+            } else if let selectedCategory {
+                MoviesObservedCategoryGrid(
+                    providerFingerprint: providerFingerprint,
+                    category: selectedCategory,
+                    contentType: contentType,
+                    queryText: queryText,
+                    requestState: $requestState,
+                    browseSort: browseSort
+                )
+            } else {
+                ProgressView()
+            }
+        }
+        .navigationTitle(screenTitle)
+        .searchable(text: $queryText, prompt: "Search \(screenTitle)")
+        .withBackgroundActivityToolbar()
+        .toolbar {
+            if !categories.isEmpty {
+                ToolbarItem(placement: .principal) {
+                    categoryTitleMenu
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    sortMenu
+                }
+            }
+        }
+        .task(id: "\(providerFingerprint)|\(contentType.rawValue)|categories:\(categories.isEmpty)") {
+            if categories.isEmpty {
+                await requestCategoriesIfNeeded(policy: .readThrough)
+            }
+        }
+        .onChange(of: categoryIDs, initial: true) { _, _ in
+            reconcileSelection()
+        }
+    }
+
+    @ViewBuilder
+    private var categoriesEmptyState: some View {
+        if let categoryLoadErrorMessage = requestState.categoryLoadErrorMessage {
+            VStack(spacing: 12) {
+                Text(categoryLoadErrorMessage)
+                    .multilineTextAlignment(.center)
+                Button("Retry") {
+                    Task { await requestCategories(policy: .forceRefresh) }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        } else if requestState.isLoadingCategories || !requestState.didRequestCategories {
+            ProgressView()
+        } else {
+            VStack(spacing: 12) {
+                Text(emptyCatalogMessage)
+                Button("Refresh") {
+                    Task { await requestCategories(policy: .forceRefresh) }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding()
+        }
+    }
+
+    private var categoryTitleMenu: some View {
+        Menu {
+            ForEach(categoryMenuSections) { section in
+                if let title = section.title {
+                    Section(title) {
+                        categoryButtons(for: section.items)
+                    }
+                } else {
+                    categoryButtons(for: section.items)
+                }
+            }
+        } label: {
+            categorySelectorLabel(title: selectedCategory?.name ?? screenTitle)
+        }
+        .buttonStyle(.plain)
+        .help("Category: \(selectedCategory?.name ?? "No Category Selected")")
+    }
+
+    @ViewBuilder
+    private func categoryButtons(for items: [MoviesCategoryMenuItem]) -> some View {
+        ForEach(items) { item in
+            Button {
+                selectedCategoryID = item.category.id
+            } label: {
+                if item.category.id == selectedCategoryID {
+                    Label(item.title, systemImage: "checkmark")
+                } else {
+                    Text(item.title)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categorySelectorLabel(title: String) -> some View {
+        #if os(macOS)
+        Text(title)
+            .font(.headline)
+            .lineLimit(1)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+            )
+        #else
+        Text(title)
+            .font(.headline)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+        #endif
+    }
+
+    private var sortMenu: some View {
+        Menu {
+            Section("Sort") {
+                Text(browseSort.displayName)
+            }
+
+            Picker("Sort", selection: $browseSort) {
+                ForEach(BrowseSort.allCases, id: \.self) { sort in
+                    Text(sort.displayName)
+                        .tag(sort)
+                }
+            }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+        }
+        .help("Sort: \(browseSort.displayName)")
+    }
+
+    private func reconcileSelection() {
+        guard !categories.isEmpty else {
+            selectedCategoryID = nil
+            return
+        }
+
+        if let selectedCategoryID,
+           categories.contains(where: { $0.id == selectedCategoryID }) {
+            return
+        }
+
+        selectedCategoryID = categories.first?.id
+    }
+
+    private func requestCategoriesIfNeeded(policy: CatalogLoadPolicy) async {
+        guard !requestState.isLoadingCategories else { return }
+        if policy == .readThrough, requestState.didRequestCategories {
+            return
+        }
+        await requestCategories(policy: policy)
+    }
+
+    private func requestCategories(policy: CatalogLoadPolicy) async {
+        requestState.didRequestCategories = true
+        requestState.isLoadingCategories = true
+        requestState.categoryLoadErrorMessage = nil
+
+        defer { requestState.isLoadingCategories = false }
+
+        do {
+            try await catalog.getCategories(for: contentType, policy: policy)
+        } catch is CancellationError {
+        } catch {
+            requestState.categoryLoadErrorMessage = error.localizedDescription
+        }
+    }
+}
+
+private struct MoviesObservedCategoryGrid: View {
+    private enum BrowseLayout {
+        static let standardPosterWidth: CGFloat = 170
+        static let minimumPosterWidth: CGFloat = 150
+        static let posterAspectRatio: CGFloat = 2 / 3
+    }
+
+    let providerFingerprint: String
+    let category: ObservedCategoryRow
+    let contentType: XtreamContentType
+    let queryText: String
+    @Binding var requestState: MoviesProviderRequestState
+    let browseSort: BrowseSort
+
+    @Environment(Catalog.self) private var catalog
+
+    @Query private var streamRecords: [PersistedStreamRecord]
+
+    init(
+        providerFingerprint: String,
+        category: ObservedCategoryRow,
+        contentType: XtreamContentType,
+        queryText: String,
+        requestState: Binding<MoviesProviderRequestState>,
+        browseSort: BrowseSort
+    ) {
+        self.providerFingerprint = providerFingerprint
+        self.category = category
+        self.contentType = contentType
+        self.queryText = queryText
+        self._requestState = requestState
+        self.browseSort = browseSort
+
+        let fingerprint = providerFingerprint
+        let contentTypeRawValue = contentType.rawValue
+        let categoryID = category.id
+        _streamRecords = Query(
+            filter: #Predicate<PersistedStreamRecord> { record in
+                record.providerFingerprint == fingerprint &&
+                record.contentType == contentTypeRawValue &&
+                record.categoryID == categoryID
+            },
+            sort: streamSortDescriptors(for: browseSort)
+        )
+    }
+
+    var body: some View {
+        content
+            .task(id: "\(providerFingerprint)|\(category.id)|\(streamRecords.isEmpty)") {
+                if streamRecords.isEmpty {
+                    await requestStreamsIfNeeded(policy: .readThrough)
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if let errorMessage = requestState.categoryLoadErrors[category.id] {
+            VStack(spacing: 12) {
+                Text(errorMessage)
+                    .multilineTextAlignment(.center)
+                Button("Retry Category") {
+                    Task { await requestStreams(policy: .forceRefresh) }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding()
+        } else if isLoadingSelectedCategory {
+            ScrollView {
+                BrowseSkeletonGrid(columns: gridColumns)
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
+            }
+            .scrollIndicators(.hidden)
+        } else if streamRecords.isEmpty, !hasRequestedCategory {
+            ScrollView {
+                BrowseSkeletonGrid(columns: gridColumns)
+                    .padding(.horizontal)
+                    .padding(.bottom, 20)
+            }
+            .scrollIndicators(.hidden)
+        } else if filteredRows.isEmpty {
+            ContentUnavailableView(
+                "No Results",
+                systemImage: "film",
+                description: Text(emptyBrowseMessage)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
+                    ForEach(filteredRows) { row in
+                        NavigationLink {
+                            destination(for: row)
+                        } label: {
+                            browseTile(for: row)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 20)
+            }
+        }
+    }
+
+    @MainActor
+    private var filteredRows: [ObservedStreamRow] {
+        filterMoviesBrowseRows(streamRecords.map(ObservedStreamRow.init), queryText: queryText)
+    }
+
+    private var isLoadingSelectedCategory: Bool {
+        requestState.loadingCategoryIDs.contains(category.id)
+    }
+
+    private var hasRequestedCategory: Bool {
+        requestState.requestedCategoryIDs.contains(category.id)
+    }
+
+    private var emptyBrowseMessage: String {
+        let trimmedQuery = queryText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedQuery.isEmpty {
+            return hasRequestedCategory
+                ? "No titles are available in \(category.name)."
+                : "Loading \(category.name)..."
+        }
+
+        return "No titles match \"\(trimmedQuery)\" in \(category.name)."
+    }
+
+    private var gridColumns: [GridItem] {
+        [
+            GridItem(
+                .adaptive(
+                    minimum: BrowseLayout.minimumPosterWidth,
+                    maximum: BrowseLayout.standardPosterWidth
+                ),
+                spacing: 16,
+                alignment: .top
+            )
+        ]
+    }
+
+    private func browseTile(for row: ObservedStreamRow) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            BrowsePosterTile(item: row)
+                .aspectRatio(BrowseLayout.posterAspectRatio, contentMode: .fit)
+                .clipShape(.rect(cornerRadius: 8))
+
+            Text(row.title)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.primary)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+        }
+    }
+
+    private func destination(for row: ObservedStreamRow) -> some View {
+        let video = row.asVideo()
+        switch contentType {
+        case .vod:
+            return AnyView(MovieDetailScreen(video: video))
+        case .series:
+            return AnyView(
+                EpisodeDetailTile(video: video)
+                    .navigationTitle(video.name)
+            )
+        case .live:
+            return AnyView(
+                ScopedPlaceholderView(
+                    title: "Live Episodes Are Unavailable",
+                    message: "Episode detail only applies to series content."
+                )
+                .navigationTitle(video.name)
+            )
+        }
+    }
+
+    private func requestStreamsIfNeeded(policy: CatalogLoadPolicy) async {
+        guard !isLoadingSelectedCategory else { return }
+        if policy == .readThrough, hasRequestedCategory {
+            return
+        }
+        await requestStreams(policy: policy)
+    }
+
+    private func requestStreams(policy: CatalogLoadPolicy) async {
+        requestState.requestedCategoryIDs.insert(category.id)
+        requestState.loadingCategoryIDs.insert(category.id)
+        requestState.categoryLoadErrors[category.id] = nil
+
+        defer { requestState.loadingCategoryIDs.remove(category.id) }
+
+        do {
+            try await catalog.getStreams(in: category.asCategory(), contentType: contentType, policy: policy)
+        } catch is CancellationError {
+        } catch {
+            requestState.categoryLoadErrors[category.id] = error.localizedDescription
+        }
+    }
 }
 
 private struct BrowsePosterTile: View {
-    let item: MoviesBrowseItem
+    let item: ObservedStreamRow
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -562,6 +803,5 @@ private struct ShimmerEffect: ViewModifier {
 }
 
 #Preview(traits: .previewData, .fixedLayout(width: 1000, height: 500)) {
-    MoviesScreen()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    BrowseScreen(.vod, provider: "")
 }
