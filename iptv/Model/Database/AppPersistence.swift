@@ -10,21 +10,14 @@ import SwiftData
 
 enum AppPersistence {
     static let schema = Schema([
-        Video.self,
         Category.self,
-        VideoInfo.self,
-        PersistedCategoryRecord.self,
-        PersistedStreamRecord.self,
-        PersistedCategoryRefreshStateRecord.self,
-        PersistedMovieDetailRecord.self,
-        PersistedSeriesDetailRecord.self,
-        PersistedSearchDocumentRecord.self,
-        PersistedSearchIndexedCategoryRecord.self,
-        PersistedFavoriteStoreRecord.self,
-        PersistedWatchActivityStoreRecord.self,
-        PersistedDownloadGroupStoreRecord.self,
-        PersistedDownloadAssetStoreRecord.self,
-        PersistedOfflineMetadataStoreRecord.self
+        Movie.self,
+        Series.self,
+        Media.self,
+        MovieMedia.self,
+        EpisodeMedia.self,
+        Download.self,
+        WatchActivity.self,
     ])
 
     static func makeModelContainer(
