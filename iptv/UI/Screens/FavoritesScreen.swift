@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-struct LibraryScreen: View {
+struct FavoritesScreen: View {
     @Environment(AppContainer.self) private var appContainer
     @Environment(ProviderStore.self) private var providerStore
     @Environment(FavoritesStore.self) private var favoritesStore
@@ -188,5 +188,5 @@ struct LibraryScreen: View {
 }
 
 #Preview(traits: .previewData) {
-    LibraryScreen()
+    FavoritesScreen()
 }

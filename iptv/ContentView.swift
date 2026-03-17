@@ -64,7 +64,7 @@ struct ContentView: View {
                 
                 TabSection("Library") {
                     Tab(Tabs.favorites.name, systemImage: Tabs.favorites.symbol, value: Tabs.favorites) {
-                        LibraryScreen()
+                        FavoritesScreen()
                     }
                     .customizationID(Tabs.favorites.customizationID)
                     
