@@ -18,9 +18,7 @@ struct PlayerView: View {
     static let identifier = "PlayerView"
 
     @Environment(Player.self) private var player
-    @Environment(Catalog.self) private var catalog
-    @Environment(ProviderStore.self) private var providerStore
-    @Environment(FavoritesStore.self) private var favoritesStore
+    @Environment(SessionManager.self) private var sessionManager
 
     @State private var isShowingControls = true
     @State private var scrubTime: Double?
@@ -59,44 +57,21 @@ struct PlayerView: View {
             }
         )
     }
-
-    private var currentVideoInfo: VideoInfo? {
-        guard let currentItem = player.currentItem, currentItem.xtreamContentType == .vod else { return nil }
-        return catalog.vodInfo[currentItem]
-    }
-
-    private var currentSeriesInfo: XtreamSeries? {
-        guard let currentItem = player.currentItem, currentItem.xtreamContentType == .series else { return nil }
-        return catalog.cachedSeriesInfo(for: currentItem)
-    }
-
+    
     private var eyebrowText: String? {
-        if let genre = currentVideoInfo?.genre.nonEmptyTrimmed {
+        if let genre = player.currentItem?.genre {
             return genre
         }
-
-        if let genre = currentSeriesInfo?.info.genre.nonEmptyTrimmed {
-            return genre
+        
+        if let category = player.currentItem?.category.name {
+            return category
         }
-
-        let categoryNames = player.currentItem?.categories
-            .map(\.name)
-            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            ?? []
-
-        return categoryNames.first
+        
+        return nil
     }
 
     private var synopsisText: String? {
-        if let plot = currentVideoInfo?.plot.nonEmptyTrimmed {
-            return plot
-        }
-
-        if let plot = currentSeriesInfo?.info.plot.nonEmptyTrimmed {
-            return plot
-        }
-
-        return nil
+        player.currentItem?.plot
     }
 
     private var primaryDisplayQuality: QualityVariant? {
@@ -114,16 +89,16 @@ struct PlayerView: View {
             badges.append(OverlayBadge(label: backend))
         }
 
-        if let resolution = primaryDisplayQuality?.resolution?.nonEmptyTrimmed ?? currentVideoInfo?.videoResolution.nonEmptyTrimmed {
+        if let resolution = primaryDisplayQuality?.resolution ?? player.currentItem?.source.resolution {
             badges.append(OverlayBadge(label: resolution))
         }
 
-        let frameRate = primaryDisplayQuality?.frameRate ?? currentVideoInfo?.videoFrameRate
+        let frameRate = primaryDisplayQuality?.frameRate ?? player.currentItem?.source.framerate
         if let frameRate, frameRate > 0 {
             badges.append(OverlayBadge(label: "\(frameRate.formatted(.number.precision(.fractionLength(0)))) FPS"))
         }
 
-        if let audio = preferredAudioBadgeText?.nonEmptyTrimmed {
+        if let audio = preferredAudioBadgeText {
             badges.append(OverlayBadge(label: audio))
         }
 
@@ -131,7 +106,7 @@ struct PlayerView: View {
     }
 
     private var preferredAudioBadgeText: String? {
-        if let description = currentVideoInfo?.audioDescription.nonEmptyTrimmed {
+        if let description = player.currentItem?.source.audioDescription {
             return description
         }
 
@@ -147,8 +122,7 @@ struct PlayerView: View {
     }
 
     private var displayTitle: String {
-        guard let rawTitle = player.currentItem?.name else { return "No item loaded" }
-        return LanguageTaggedText(rawTitle).displayName
+        player.currentItem?.name ?? "No item loaded"
     }
 
     private var controlsFadeAnimation: Animation {
@@ -191,7 +165,6 @@ struct PlayerView: View {
             player.refreshOutputRoutes()
         }
         .onChange(of: player.currentItem?.id) { _, _ in
-            scheduleFavoriteStateRefresh()
             player.refreshOutputRoutes()
         }
         #if os(iOS) || os(tvOS)
@@ -202,9 +175,6 @@ struct PlayerView: View {
         .onDisappear {
             hideControlsTask?.cancel()
             favoriteStateTask?.cancel()
-        }
-        .task {
-            scheduleFavoriteStateRefresh()
         }
         #if os(tvOS)
         .onPlayPauseCommand {
@@ -463,7 +433,8 @@ struct PlayerView: View {
 
                 if player.canRetryEpisodeSwitch {
                     Button("Retry") {
-                        player.retryEpisodeSwitch()
+                        print("TODO")
+//                        player.retryEpisodeSwitch()
                     }
                     .buttonStyle(.bordered)
                     .accessibilityIdentifier("player.retryEpisodeSwitch")
@@ -753,11 +724,11 @@ struct PlayerView: View {
             }
             .disabled(player.currentItem == nil)
 
-            if player.episodeOptions.count > 1 {
-                Menu("Episodes") {
-                    episodeMenuContent
-                }
-            }
+//            if player.episodeOptions.count > 1 {
+//                Menu("Episodes") {
+//                    episodeMenuContent
+//                }
+//            }
         }
         .menuStyle(.borderlessButton)
     }
@@ -1198,28 +1169,28 @@ struct PlayerView: View {
         }
     }
 
-    @ViewBuilder
-    private var episodeListRows: some View {
-        if player.episodeOptions.count > 1 {
-            ForEach(player.episodeOptions, id: \.id) { episode in
-                Button {
-                    player.quickSwitchEpisode(id: episode.id)
-                } label: {
-                    HStack {
-                        Text(episode.name)
-                            .lineLimit(1)
-                        Spacer()
-                        if episode.id == player.currentItem?.id {
-                            Image(systemName: "play.fill")
-                        }
-                    }
-                }
-            }
-        } else {
-            Text("No alternate episodes available")
-                .foregroundStyle(.secondary)
-        }
-    }
+//    @ViewBuilder
+//    private var episodeListRows: some View {
+//        if player.episodeOptions.count > 1 {
+//            ForEach(player.episodeOptions, id: \.id) { episode in
+//                Button {
+//                    player.quickSwitchEpisode(id: episode.id)
+//                } label: {
+//                    HStack {
+//                        Text(episode.name)
+//                            .lineLimit(1)
+//                        Spacer()
+//                        if episode.id == player.currentItem?.id {
+//                            Image(systemName: "play.fill")
+//                        }
+//                    }
+//                }
+//            }
+//        } else {
+//            Text("No alternate episodes available")
+//                .foregroundStyle(.secondary)
+//        }
+//    }
 
     #if os(macOS)
     @ViewBuilder
@@ -1358,18 +1329,18 @@ struct PlayerView: View {
         }
     }
 
-    @ViewBuilder
-    private var episodeMenuContent: some View {
-        if player.episodeOptions.count > 1 {
-            ForEach(player.episodeOptions, id: \.id) { episode in
-                Button(episode.name) {
-                    player.quickSwitchEpisode(id: episode.id)
-                }
-            }
-        } else {
-            Text("None")
-        }
-    }
+//    @ViewBuilder
+//    private var episodeMenuContent: some View {
+//        if player.episodeOptions.count > 1 {
+//            ForEach(player.episodeOptions, id: \.id) { episode in
+//                Button(episode.name) {
+//                    player.quickSwitchEpisode(id: episode.id)
+//                }
+//            }
+//        } else {
+//            Text("None")
+//        }
+//    }
     #endif
 
     private func menuLabel(_ title: String, selected: Bool) -> String {
@@ -1455,37 +1426,8 @@ struct PlayerView: View {
         #endif
     }
 
-    private func scheduleFavoriteStateRefresh() {
-        favoriteStateTask?.cancel()
-        favoriteStateTask = Task {
-            guard let video = player.currentItem,
-                  let config = try? providerStore.requiredConfiguration()
-            else {
-                guard !Task.isCancelled else { return }
-                isFavorite = false
-                return
-            }
-
-            let expectedVideoID = video.id
-            let fingerprint = ProviderCacheFingerprint.make(from: config)
-            let contains = await favoritesStore.contains(video: video, providerFingerprint: fingerprint)
-
-            guard !Task.isCancelled else { return }
-            guard player.currentItem?.id == expectedVideoID else { return }
-            isFavorite = contains
-        }
-    }
-
     private func toggleFavorite() async {
-        guard let video = player.currentItem,
-              let config = try? providerStore.requiredConfiguration()
-        else { return }
-
-        let fingerprint = ProviderCacheFingerprint.make(from: config)
-        let targetState = !isFavorite
-        await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: targetState)
-        guard player.currentItem?.id == video.id else { return }
-        isFavorite = targetState
+        player.currentItem?.isFavorite.toggle()
     }
 
     #if os(iOS)
@@ -1583,13 +1525,6 @@ private enum TVControlFocus: Hashable {
 private struct OverlayBadge: Identifiable {
     let id = UUID()
     let label: String
-}
-
-private extension String {
-    var nonEmptyTrimmed: String? {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }
 
 #if os(iOS) || os(tvOS)

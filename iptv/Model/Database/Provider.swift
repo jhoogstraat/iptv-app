@@ -9,7 +9,11 @@ import Foundation
 import SwiftData
 
 @Model class Provider: Identifiable {
-    init() {}
+    var name: String
+    
+    init(name: String) {
+        self.name = name
+    }
 }
 
 @available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
@@ -21,12 +25,16 @@ import SwiftData
     var movies: [Movie]
     var series: [Series]
     
-    init(endpoint: URL, username: String, password: String, movies: [Movie] = [], series: [Series] = []) {
+    var isValid: Bool {
+         !username.isEmpty && !password.isEmpty
+    }
+    
+    init(name: String, endpoint: URL, username: String, password: String, movies: [Movie] = [], series: [Series] = []) {
         self.endpoint = endpoint
         self.username = username
         self.password = password
         self.movies = movies
         self.series = series
-        super.init()
+        super.init(name: name)
     }
 }

@@ -13,88 +13,131 @@ import SwiftData
     
     var name: String
     var plot: String?
-    var runtimeMinutes: Int?
-    var releaseDate: String?
+    var runtime: Duration?
+    var releaseDate: Date?
     var ageRating: String?
     var country: String?
     var director: String?
+    var cast: String?
     var rating: Double?
+    var genre: String?
+    var language: String?
     
-    var url: String
-    var coverImageURL: String?
-    var streamBitrate: Int?
-    var audioDescription: String?
-    var videoResolution: String?
-    var videoFrameRate: Double?
-    
-    var next: Media?
-    var previous: Media?
+    var sourceId: String?
     var tmdbId: String?
+    var coverImageURL: URL?
+    var heroImageURL: URL?
     
-    var favorite: Bool = false
+
+    @Relationship(deleteRule: .cascade, inverse: \WatchActivity.media)
+    var activity: WatchActivity?
+    
+    var category: Category
+    
+    var isFavorite: Bool = false
     var added: Date
-    var lastAccess: Date?
     
-    init(name: String, plot: String? = nil, runtimeMinutes: Int? = nil, releaseDate: String? = nil, ageRating: String? = nil, country: String? = nil, director: String? = nil, rating: Double? = nil, url: String, coverImageURL: String? = nil, streamBitrate: Int? = nil, audioDescription: String? = nil, videoResolution: String? = nil, videoFrameRate: Double? = nil, next: Media? = nil, previous: Media? = nil, tmdbId: String? = nil, favorite: Bool, added: Date, lastAccess: Date? = nil) {
+    init(name: String, plot: String? = nil, runtime: Duration? = nil, releaseDate: Date? = nil, ageRating: String? = nil, country: String? = nil, director: String? = nil, cast: String? = nil, rating: Double? = nil, genre: String? = nil, language: String? = nil, sourceId: String? = nil, tmdbId: String? = nil, coverImageURL: URL? = nil, heroImageURL: URL? = nil, activity: WatchActivity? = nil, category: Category, isFavorite: Bool = false, added: Date) {
         self.name = name
         self.plot = plot
-        self.runtimeMinutes = runtimeMinutes
+        self.runtime = runtime
         self.releaseDate = releaseDate
         self.ageRating = ageRating
         self.country = country
         self.director = director
+        self.cast = cast
         self.rating = rating
-        self.url = url
-        self.coverImageURL = coverImageURL
-        self.streamBitrate = streamBitrate
-        self.audioDescription = audioDescription
-        self.videoResolution = videoResolution
-        self.videoFrameRate = videoFrameRate
-        self.next = next
-        self.previous = previous
+        self.genre = genre
+        self.language = language
+        self.sourceId = sourceId
         self.tmdbId = tmdbId
-        self.favorite = favorite
+        self.coverImageURL = coverImageURL
+        self.heroImageURL = heroImageURL
+        self.activity = activity
+        self.category = category
+        self.isFavorite = isFavorite
         self.added = added
-        self.lastAccess = lastAccess
+    }
+    
+}
+
+@available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
+@Model final class Movie: PlayableMedia {
+    
+    init(name: String, coverImageURL: URL?, tmdbId: String?, rating: Double?, source: MediaSource, category: Category) {
+        super.init(name: name, coverImageURL: coverImageURL, tmdbId: tmdbId, rating: rating, source: source, category: category)
     }
 }
 
 @available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
-@Model final class MovieMedia: Media {
+@Model final class Series: Media {
     
-    @Relationship
-    var movie: Category
+    @Relationship(deleteRule: .cascade, inverse: \Season.series)
+    var seasons: [Season]
     
-    init(name: String, coverImageURL: String?, tmdbId: String?, rating: Double?, url: String, movie: Movie, previous: Media? = nil, next: Media? = nil) {
-        self.movie = movie
-        super.init(name: name, url: url, next: next, previous: previous, favorite: false, added: .now)
+    @Relationship(deleteRule: .cascade, inverse: \Episode.series)
+    var episodes: [Episode]
+    
+    init(name: String, coverImageURL: URL?, tmdbId: String?, rating: Double?, category: Category, seasons: [Season], episodes: [Episode]) {
+        self.seasons = seasons
+        self.episodes = episodes
+        super.init(name: name, rating: rating, tmdbId: tmdbId, coverImageURL: coverImageURL, category: category, added: .now)
     }
 }
 
 @available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
-@Model final class EpisodeMedia: Media {
-    
-    @Relationship
-    var series: Category
-    
+@Model final class Season: Media {
     var season: Int
     
-    init(name: String, coverImageURL: String?, tmdbId: String?, rating: Double?, url: String, series: Series, season: Int, previous: Media? = nil, next: Media? = nil) {
+    var series: Series
+    
+    @Relationship(inverse: \Episode.season)
+    var episodes: [Episode]
+    
+    init(name: String, coverImageURL: URL?, tmdbId: String?, rating: Double?, url: String, source: MediaSource, category: Category, series: Series, episodes: [Episode], season: Int, ) {
         self.series = series
+        self.episodes = episodes
         self.season = season
-        super.init(name: name, url: url, next: next, previous: previous, favorite: false, added: .now)
+        super.init(name: name, rating: rating, tmdbId: tmdbId, coverImageURL: coverImageURL, category: category, added: .now)
     }
 }
 
-extension MovieMedia {
+@available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
+@Model final class Episode: PlayableMedia {
+    var episode: Int
+    
+    var series: Series
+    var season: Season
+    
+    init(name: String, coverImageURL: URL?, tmdbId: String?, rating: Double?, source: MediaSource, category: Category, series: Series, season: Season, episode: Int) {
+        self.series = series
+        self.season = season
+        self.episode = episode
+        super.init(name: name, coverImageURL: coverImageURL, tmdbId: tmdbId, rating: rating, source: source, category: category)
+    }
+}
+
+@available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
+@Model class PlayableMedia: Media {
+
+    @Relationship(deleteRule: .cascade, inverse: \MediaSource.media)
+    var source: MediaSource!
+    
+    @Relationship(inverse: \Download.media)
+    var download: Download?
+    
+    init(name: String, coverImageURL: URL?, tmdbId: String?, rating: Double?, source: MediaSource, category: Category, download: Download? = nil) {
+        self.source = source
+        self.download = download
+        super.init(name: name, rating: rating, tmdbId: tmdbId, coverImageURL: coverImageURL, category: category, added: .now)
+    }
+}
+
+extension Media {
     var formattedRating: String? {
         if let rating = rating {
             return rating.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "en_US")))
         }
         return nil
-    }
-    
-    var language: String? {
-        LanguageTaggedText(name).languageCode
     }
 }

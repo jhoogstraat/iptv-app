@@ -12,18 +12,14 @@ import SwiftUI
 struct PlayerWindow: Scene {
     /// An object that controls the video playback behavior.
     var player: Player
-    var catalog: Catalog
-    var providerStore: ProviderStore
-    var favoritesStore: FavoritesStore
+    var sessionManager: ProviderStore
 
     var body: some Scene {
         // The macOS client presents the player view in a separate window.
         WindowGroup(id: PlayerView.identifier) {
             PlayerView()
                 .environment(player)
-                .environment(catalog)
-                .environment(providerStore)
-                .environment(favoritesStore)
+                .environment(sessionManager)
                 .onAppear {
                     player.play()
                 }
@@ -124,15 +120,16 @@ struct PlayerWindow: Scene {
                 .disabled(player.currentItem == nil)
 
                 Menu("Episodes") {
-                    if player.episodeOptions.count > 1 {
-                        ForEach(player.episodeOptions, id: \.id) { episode in
-                            Button(menuLabel(episode.name, selected: episode.id == player.currentItem?.id)) {
-                                player.quickSwitchEpisode(id: episode.id)
-                            }
-                        }
-                    } else {
-                        Text("None")
-                    }
+                    Text("TODO")
+//                    if player.episodeOptions.count > 1 {
+//                        ForEach(player.episodeOptions, id: \.id) { episode in
+//                            Button(menuLabel(episode.name, selected: episode.id == player.currentItem?.id)) {
+//                                player.quickSwitchEpisode(id: episode.id)
+//                            }
+//                        }
+//                    } else {
+//                        Text("None")
+//                    }
                 }
                 .disabled(player.currentItem == nil)
 

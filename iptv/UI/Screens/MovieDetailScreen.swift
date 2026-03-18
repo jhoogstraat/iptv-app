@@ -15,19 +15,15 @@ private enum MovieDetailState {
 }
 
 struct MovieDetailScreen: View {
-    let video: Video
+    let movie: Movie
 
-    @Environment(Catalog.self) private var catalog
-    @Environment(DownloadCenter.self) private var downloadCenter
     @Environment(Player.self) private var player
-    @Environment(ProviderStore.self) private var providerStore
-    @Environment(FavoritesStore.self) private var favoritesStore
+    @Environment(SessionManager.self) private var sessionManager
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var state: MovieDetailState = .fetching
     @State private var playError: String?
     @State private var isFavorite = false
-    @State private var offlineInfo: VideoInfo?
     @State private var offlineArtworkURL: URL?
     @State private var heroCollapseProgress: CGFloat = 0
     @State private var heroScrollOffset: CGFloat = 0
@@ -35,21 +31,13 @@ struct MovieDetailScreen: View {
     @State private var isLoadingOtherSources = false
     @State private var otherSources: [DetailAlternativeSource] = []
     @State private var otherSourcesError: String?
-
-    private var info: VideoInfo? {
-        catalog.vodInfo[video]
-    }
-
-    private var resolvedInfo: VideoInfo? {
-        info ?? offlineInfo
-    }
-
+    
     private var displayTitle: String {
-        LanguageTaggedText(video.name).groupedDisplayName
+        movie.name
     }
 
     private var heroLanguageText: String? {
-        LanguageTaggedText(video.name).languageCode
+        movie.name
     }
 
     var body: some View {
@@ -63,7 +51,7 @@ struct MovieDetailScreen: View {
                     Text(error.localizedDescription)
                         .multilineTextAlignment(.center)
                     Button("Retry") {
-                        Task { await loadInfo(policy: .forceRefresh) }
+                        print("TODO")
                     }
                     .buttonStyle(DetailActionStyle(variant: .primary))
                 }
@@ -82,18 +70,15 @@ struct MovieDetailScreen: View {
         #endif
         .withBackgroundActivityToolbar()
         .sheet(isPresented: $isShowingOtherSources) {
-            DetailAlternativeSourcesSheet(
-                title: "Other Sources",
-                isLoading: isLoadingOtherSources,
-                errorMessage: otherSourcesError,
-                sources: otherSources,
-                onRetry: { triggerOtherSourcesLookup() },
-                destination: { MovieDetailScreen(video: $0) }
-            )
-        }
-        .task {
-            await loadInfo(policy: .readThrough)
-            await loadFavoriteState()
+            Text("Not yet implemented")
+//            DetailAlternativeSourcesSheet(
+//                title: "Other Sources",
+//                isLoading: isLoadingOtherSources,
+//                errorMessage: otherSourcesError,
+//                sources: otherSources,
+//                onRetry: { triggerOtherSourcesLookup() },
+//                destination: { MovieDetailScreen(movie: $0) }
+//            )
         }
     }
 
@@ -133,8 +118,8 @@ struct MovieDetailScreen: View {
                                 ratingSection
                             }
 
-                            section("Cast", text: resolvedInfo?.cast ?? "No cast information available.")
-                            section("Director", text: resolvedInfo?.director ?? "No director information available.")
+//                            section("Cast", text: movie.cast ?? "No cast information available.")
+                            section("Director", text: movie.director ?? "No director information available.")
                             section("About", text: aboutText)
                         }
                         .background(Color.black)
@@ -182,16 +167,12 @@ struct MovieDetailScreen: View {
     }
 
     private var downloadButton: some View {
-        DownloadStatusBadge(
-            selection: .movie(video),
-            showsTitle: false,
-            presentation: .detailAction(.icon)
-        )
+        DownloadStatusBadge()
     }
 
     private var favoriteButton: some View {
         Button {
-            Task { await toggleFavorite() }
+            movie.isFavorite.toggle()
         } label: {
             Image(systemName: isFavorite ? "heart.fill" : "heart")
         }
@@ -215,7 +196,7 @@ struct MovieDetailScreen: View {
 
     private var scoreBadges: [DetailScoreBadgeModel] {
         [
-            DetailScoreSource.catalog.badgeModel(value: resolvedInfo?.rating)
+            DetailScoreSource.catalog.badgeModel(value: movie.rating)
         ]
         .compactMap { $0 }
     }
@@ -225,15 +206,15 @@ struct MovieDetailScreen: View {
     }
 
     private var heroArtworkURL: URL? {
-        offlineArtworkURL ?? resolvedInfo?.images.first ?? URL(string: video.coverImageURL ?? "")
+        offlineArtworkURL ?? movie.coverImageURL
     }
 
     private var collapsedArtworkURL: URL? {
-        URL(string: video.coverImageURL ?? "") ?? heroArtworkURL
+        movie.coverImageURL ?? heroArtworkURL
     }
 
     private var heroTitleArtworkURL: URL? {
-        guard let coverURL = URL(string: video.coverImageURL ?? ""),
+        guard let coverURL = movie.coverImageURL,
               coverURL != heroArtworkURL else {
             return nil
         }
@@ -241,7 +222,7 @@ struct MovieDetailScreen: View {
     }
 
     private var heroGenreText: String? {
-        let genres = resolvedInfo?.genre
+        let genres = movie.genre?
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -251,18 +232,11 @@ struct MovieDetailScreen: View {
     }
 
     private var heroYearText: String? {
-        yearText(from: resolvedInfo?.releaseDate)
+        movie.releaseDate?.formatted(date: .abbreviated, time: .omitted)
     }
 
     private var heroRuntimeText: String? {
-        if let durationLabel = resolvedInfo?.durationLabel,
-           !durationLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return durationLabel
-        }
-        if let runtimeMinutes = resolvedInfo?.runtimeMinutes {
-            return "\(runtimeMinutes) min"
-        }
-        return nil
+        movie.runtime?.formatted()
     }
 
     private var heroScoreText: String? {
@@ -270,7 +244,7 @@ struct MovieDetailScreen: View {
     }
 
     private var overviewText: some View {
-        Text(resolvedInfo?.plot ?? "No synopsis available.")
+        Text(movie.plot ?? "No synopsis available.")
             .font(.title3.weight(.regular))
             .lineSpacing(6)
             .foregroundStyle(.white)
@@ -286,12 +260,15 @@ struct MovieDetailScreen: View {
 
     private var aboutText: String {
         var lines: [String] = []
-        if let country = resolvedInfo?.country, !country.isEmpty {
+        
+        if let country = movie.country, !country.isEmpty {
             lines.append("Country: \(country)")
         }
-        if let runtimeMinutes = resolvedInfo?.runtimeMinutes {
-            lines.append("Runtime: \(runtimeMinutes) min")
+        
+        if let runtime = movie.runtime {
+            lines.append("Runtime: \(runtime.formatted()) min")
         }
+        
         return lines.joined(separator: "\n")
     }
 
@@ -415,70 +392,11 @@ struct MovieDetailScreen: View {
         return min(max(-minY / distance, 0), 1)
     }
 
-    private func yearText(from rawValue: String?) -> String? {
-        guard let rawValue else { return nil }
-        let digits = rawValue.filter(\.isNumber)
-        guard digits.count >= 4 else { return nil }
-        return String(digits.prefix(4))
-    }
-
-    private func loadInfo(policy: CatalogLoadPolicy = .readThrough) async {
-        guard policy == .forceRefresh || (info == nil && offlineInfo == nil) else {
-            state = .done
-            return
-        }
-
-        do {
-            state = .fetching
-            try await catalog.getVodInfo(video, policy: policy)
-            offlineArtworkURL = await downloadCenter.offlineArtworkURL(
-                for: video,
-                candidates: [info?.images.first?.absoluteString, video.coverImageURL]
-            )
-            state = .done
-        } catch {
-            if let offlineInfo = await downloadCenter.offlineMovieInfo(for: video) {
-                self.offlineInfo = offlineInfo
-                offlineArtworkURL = await downloadCenter.offlineArtworkURL(
-                    for: video,
-                    candidates: [offlineInfo.images.first?.absoluteString, video.coverImageURL]
-                )
-                state = .done
-            } else {
-                logger.error("Failed to load movie detail for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-                state = .error(error)
-            }
-        }
-    }
-
     private func startPlayback() {
         Task {
-            do {
-                let source = try await downloadCenter.playbackSource(for: video)
-                playError = nil
-                player.load(video, source, presentation: .fullWindow)
-            } catch {
-                playError = error.localizedDescription
-                logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
+            playError = nil
+            player.load(movie, presentation: .fullWindow)
         }
-    }
-
-    private func loadFavoriteState() async {
-        guard let config = try? providerStore.requiredConfiguration() else {
-            isFavorite = false
-            return
-        }
-        let fingerprint = ProviderCacheFingerprint.make(from: config)
-        isFavorite = await favoritesStore.contains(video: video, providerFingerprint: fingerprint)
-    }
-
-    private func toggleFavorite() async {
-        guard let config = try? providerStore.requiredConfiguration() else { return }
-        let fingerprint = ProviderCacheFingerprint.make(from: config)
-        let targetState = !isFavorite
-        await favoritesStore.setFavorite(video: video, providerFingerprint: fingerprint, isFavorite: targetState)
-        isFavorite = targetState
     }
 
     private func triggerOtherSourcesLookup() {
@@ -491,27 +409,28 @@ struct MovieDetailScreen: View {
     }
 
     private func loadOtherSources() async {
-        isLoadingOtherSources = true
-        otherSourcesError = nil
-
-        do {
-            otherSources = try await loadDetailAlternativeSources(
-                for: video,
-                preferredTitle: video.name,
-                catalog: catalog
-            )
-        } catch {
-            otherSources = []
-            otherSourcesError = error.localizedDescription
-        }
-
-        isLoadingOtherSources = false
+        // TODO: Implement
+//        isLoadingOtherSources = true
+//        otherSourcesError = nil
+//
+//        do {
+//            otherSources = try await loadDetailAlternativeSources(
+//                for: video,
+//                preferredTitle: video.name,
+//                catalog: catalog
+//            )
+//        } catch {
+//            otherSources = []
+//            otherSourcesError = error.localizedDescription
+//        }
+//
+//        isLoadingOtherSources = false
     }
 }
 
 #Preview(traits: .previewData) {
     NavigationStack {
-        MovieDetailScreen(video: .init(id: 0, name: "EN - Title of the movie", containerExtension: "mkv", contentType: "movie", coverImageURL: "error_url", tmdbId: nil, rating: 7.7))
+//        MovieDetailScreen(video: .init(id: 0, name: "EN - Title of the movie", containerExtension: "mkv", contentType: "movie", coverImageURL: "error_url", tmdbId: nil, rating: 7.7))
     }
     .frame(width: 390, height: 844)
 }

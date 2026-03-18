@@ -39,13 +39,7 @@ enum ProviderConfigError: LocalizedError {
     }
 }
 
-protocol KeychainStoring {
-    func set(_ value: String, for key: String) throws
-    func get(_ key: String) throws -> String?
-    func delete(_ key: String) throws
-}
-
-struct KeychainStore: KeychainStoring {
+struct KeychainStore {
     private let service = "com.jhoogstraat.iptv.provider"
     private let disallowAuthenticationUI: Bool
 
@@ -138,7 +132,7 @@ final class ProviderStore {
     }
 
     private let defaults: UserDefaults
-    private let keychain: KeychainStoring
+    private let keychain: KeychainStore
     private let forceMissingConfigurationForUITests: Bool
 
     private(set) var baseURLInput: String
@@ -146,7 +140,7 @@ final class ProviderStore {
     private(set) var revision = 0
     private(set) var lastValidationError: String?
 
-    init(defaults: UserDefaults = .standard, keychain: KeychainStoring? = nil) {
+    init(defaults: UserDefaults = .standard, keychain: KeychainStore? = nil) {
         self.defaults = defaults
         self.keychain = keychain ?? KeychainStore()
         let processInfo = ProcessInfo.processInfo
@@ -179,35 +173,6 @@ final class ProviderStore {
 
     func password() -> String {
         (try? keychain.get(Keys.password)) ?? ""
-    }
-
-    func excludedCategoryPrefixes() -> [String] {
-        guard let fingerprint = try? currentProviderFingerprint() else { return [] }
-        return storedExcludedCategoryPrefixes(for: fingerprint)
-    }
-
-    func excludedCategoryPrefixesInput() -> String {
-        excludedCategoryPrefixes().joined(separator: ", ")
-    }
-
-    func saveExcludedCategoryPrefixes(_ rawValue: String) throws {
-        let fingerprint = try currentProviderFingerprint()
-        let normalizedPrefixes = Self.normalizeExcludedCategoryPrefixes(rawValue)
-        let key = excludedCategoryPrefixesKey(for: fingerprint)
-
-        if normalizedPrefixes.isEmpty {
-            defaults.removeObject(forKey: key)
-        } else {
-            defaults.set(normalizedPrefixes, forKey: key)
-        }
-
-        revision += 1
-        refresh()
-    }
-
-    func isExcludedCategoryPrefix(_ prefix: String?) -> Bool {
-        guard let prefix else { return false }
-        return Set(excludedCategoryPrefixes()).contains(prefix.uppercased())
     }
 
     func save(baseURL: String, username: String, password: String) throws {
@@ -262,10 +227,6 @@ final class ProviderStore {
             throw ProviderConfigError.missingConfiguration
         }
         return config
-    }
-
-    private func currentProviderFingerprint() throws -> String {
-        ProviderCacheFingerprint.make(from: try requiredConfiguration())
     }
 
     private func excludedCategoryPrefixesKey(for fingerprint: String) -> String {

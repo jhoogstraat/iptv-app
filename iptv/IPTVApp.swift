@@ -8,37 +8,33 @@
 import SwiftUI
 import SwiftData
 import OSLog
+import Nuke
 
 @main
 struct IPTVApp: App {
     /// An object that manages the model storage configuration.
     private let modelContainer: ModelContainer
-
-    @State private var appContainer: AppContainer
+    
+    private let sessionManager: SessionManager
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(appContainer)
-                .environment(appContainer.player)
-                .environment(appContainer.providerStore)
-                .environment(appContainer.catalog)
-                .environment(appContainer.favoritesStore)
-                .environment(appContainer.backgroundActivityCenter)
-                .environment(appContainer.downloadCenter)
-                .modelContainer(modelContainer)
-                #if os(macOS)
-                .toolbar(removing: .title)
-                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-                #endif
-                // Set minimum window size
-                #if os(macOS) || os(visionOS)
-                .frame(minWidth: 600, maxWidth: .infinity, minHeight: 960, maxHeight: .infinity)
-                #endif
-                // Use a dark color scheme on supported platforms.
-                #if os(iOS) || os(macOS)
-                .preferredColorScheme(.dark)
-                #endif
+            if let session = sessionManager.session {
+                ContentView()
+                    .environment(session)
+                    .modelContainer(modelContainer)
+#if os(macOS)
+                    .toolbar(removing: .title)
+                    .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+#endif
+
+#if os(macOS) || os(visionOS)
+                    .frame(minWidth: 600, maxWidth: .infinity, minHeight: 960, maxHeight: .infinity)
+#endif
+                    .preferredColorScheme(.dark)
+            } else {
+                Text("Login Screen")
+            }
         }
         #if !os(tvOS)
         .windowResizability(.contentSize)
@@ -46,32 +42,27 @@ struct IPTVApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsScreen()
-                .environment(appContainer.providerStore)
-                .environment(appContainer.catalog)
+            SettingsScreen(sessionManager: sessionManager)
         }
         #endif
         
         // The video player window
         #if os(macOS)
-        PlayerWindow(
-            player: appContainer.player,
-            catalog: appContainer.catalog,
-            providerStore: appContainer.providerStore,
-            favoritesStore: appContainer.favoritesStore
-        )
+        // TODO: Implement player
+//        PlayerWindow()
         #endif
     }
     
     /// Load video metadata and initialize the model container and video player model.
     init() {
-        do {
-            let appContainer = try AppContainer()
-            self._appContainer = State(initialValue: appContainer)
-            self.modelContainer = appContainer.modelContainer
-        } catch {
-            fatalError(error.localizedDescription)
-        }
+        let modelContainer = try! AppPersistence.makeModelContainer(isStoredInMemoryOnly: false)
+        let sessionManager = SessionManager(userDefaults: UserDefaults.standard, modelContainer: modelContainer)
+        
+        sessionManager.load(key: .activeSession)
+        ImagePipeline.Configuration.isSignpostLoggingEnabled = true
+        
+        self.modelContainer = modelContainer
+        self.sessionManager = sessionManager
     }
 }
 

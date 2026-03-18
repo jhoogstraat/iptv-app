@@ -8,13 +8,13 @@
 import SwiftUI
 
 struct ForYouHeroView: View {
-    let item: ForYouItem
+    let item: Media
     let onPlay: () -> Void
     let onDetails: () -> Void
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: item.artworkURL) { phase in
+            AsyncImage(url: item.coverImageURL) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -43,11 +43,11 @@ struct ForYouHeroView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                Text(item.video.name)
+                Text(item.name)
                     .font(.title.weight(.bold))
                     .lineLimit(2)
 
-                metadataLine
+//                metadataLine
 
                 HStack(spacing: 12) {
                     Button(action: onPlay) {
@@ -70,23 +70,23 @@ struct ForYouHeroView: View {
         .clipShape(.rect(cornerRadius: 16))
     }
 
-    private var metadataLine: some View {
-        HStack(spacing: 8) {
-            switch item.badge {
-            case .rating(let value):
-                Label(value, systemImage: "star.fill")
-                    .labelStyle(.titleAndIcon)
-            case .language(let value):
-                Text(value.uppercased())
-            case .isNew:
-                Text("NEW")
-            case .series:
-                Text("SERIES")
-            case .none:
-                EmptyView()
-            }
-        }
-        .font(.footnote.weight(.semibold))
-        .foregroundStyle(.secondary)
-    }
+//    private var metadataLine: some View {
+//        HStack(spacing: 8) {
+//            switch item.badge {
+//            case .rating(let value):
+//                Label(value, systemImage: "star.fill")
+//                    .labelStyle(.titleAndIcon)
+//            case .language(let value):
+//                Text(value.uppercased())
+//            case .isNew:
+//                Text("NEW")
+//            case .series:
+//                Text("SERIES")
+//            case .none:
+//                EmptyView()
+//            }
+//        }
+//        .font(.footnote.weight(.semibold))
+//        .foregroundStyle(.secondary)
+//    }
 }

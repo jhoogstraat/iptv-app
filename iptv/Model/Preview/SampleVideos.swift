@@ -6,5 +6,5 @@
 //
 
 extension SampleData {
-    @MainActor static let videos: [Video] = []
+    @MainActor static let movies: [Movie] = []
 }

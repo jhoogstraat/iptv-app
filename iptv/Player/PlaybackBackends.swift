@@ -146,7 +146,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         player.delegate = self
     }
 
-    func canPlay(url: URL, contentType: String, containerExtension: String?) -> Bool {
+    func canPlay(url: URL) -> Bool {
         let scheme = url.scheme?.lowercased() ?? ""
         return ["http", "https", "rtsp", "file"].contains(scheme) || !scheme.isEmpty
     }
@@ -638,15 +638,8 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         }
     }
 
-    func canPlay(url: URL, contentType: String, containerExtension: String?) -> Bool {
-        let supportedExtensions: Set<String> = [
-            "m3u8", "mp4", "m4v", "mov", "mp3", "aac", "ac3", "wav"
-        ]
-
-        guard let ext = containerExtension?.lowercased(), !ext.isEmpty else {
-            return false
-        }
-        return supportedExtensions.contains(ext)
+    func canPlay(url: URL) -> Bool {
+        ["m3u8", "mp4", "m4v", "mov", "mp3", "aac", "ac3", "wav"].contains(url.pathExtension.lowercased())
     }
 
     func load(url: URL, autoplay: Bool) throws {
