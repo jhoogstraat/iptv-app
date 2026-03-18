@@ -29,19 +29,19 @@ class SessionManager {
     }
     
     func load(key: UserDefaultKey) {
-        guard let id = userDefaults.object(for: key) as? Provider.ID, let provider: Provider = modelContainer.mainContext.registeredModel(for: id) else { return }
+        guard let id = userDefaults.string(for: key), let uuid = UUID(uuidString: id), let provider = Provider.with(id: uuid, in: modelContainer.mainContext) else { return }
         
         self.session = self.build(for: provider)
     }
     
     func initialize(provider: Provider) {
         self.modelContainer.mainContext.insert(provider)
-        userDefaults.set(provider.id, for: .activeSession)
+        userDefaults.set(provider.id.uuidString, for: .activeSession)
         self.session = self.build(for: provider)
     }
     
-    func change(to provider: Provider.ID) {
-        guard let provider: Provider = modelContainer.mainContext.registeredModel(for: provider) else { return }
+    func change(to id: Provider.ID) {
+        guard let provider = Provider.with(id: id, in: modelContainer.mainContext) else { return }
         
         userDefaults.set(provider, forKey: activeProviderKey)
         self.session = self.build(for: provider)
