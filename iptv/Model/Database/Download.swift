@@ -9,8 +9,8 @@ import Foundation
 import SwiftData
 
 @Model final class Download {
-    @Relationship
-    var origin: Media
+
+    var media: PlayableMedia
     
     var url: URL
     
@@ -20,8 +20,8 @@ import SwiftData
     var createdAt: Date
     var updatedAt: Date
 
-    init(origin: Media, url: URL, bytesWritten: Int64, expectedBytes: Int64? = nil, createdAt: Date, updatedAt: Date, attempts: Int = 0) {
-        self.origin = origin
+    init(media: PlayableMedia, url: URL, bytesWritten: Int64, expectedBytes: Int64? = nil, createdAt: Date, updatedAt: Date, attempts: Int = 0) {
+        self.media = media
         self.url = url
         self.bytesWritten = bytesWritten
         self.expectedBytes = expectedBytes

@@ -11,20 +11,15 @@ import Foundation
 /// A view that presents the app's user interface.
 struct ContentView: View {
     /// Keep track of tab view customizations in app storage.
-    #if !os(macOS) && !os(tvOS)
+#if !os(macOS) && !os(tvOS)
     @AppStorage("sidebarCustomizations") var tabViewCustomization: TabViewCustomization
-    #endif
+#endif
     
-    @Environment(Catalog.self) private var catalog
-    @Environment(BackgroundActivityCenter.self) private var backgroundActivityCenter
-    @Environment(ProviderStore.self) private var providerStore
+    @Environment(ActiveSession.self) private var session
     
     @State private var selectedTab: Tabs = .home
     
     var body: some View {
-        if !providerStore.hasConfiguration {
-            missingProviderView
-        } else {
             TabView(selection: $selectedTab) {
                 Tab(Tabs.home.name, systemImage: Tabs.home.symbol, value: .home) {
                     ForYouScreen()
@@ -44,12 +39,12 @@ struct ContentView: View {
                 
                 TabSection("Watch") {
                     Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
-                        BrowseScreen(.vod, provider: "TODO")
+                        BrowseScreen()
                     }
                     .customizationID(Tabs.movies.customizationID)
                     
                     Tab(Tabs.series.name, systemImage: Tabs.series.symbol, value: Tabs.series) {
-                        BrowseScreen(.series, provider: "TODO")
+                        BrowseScreen()
                     }
                     .customizationID(Tabs.series.customizationID)
                     
@@ -92,39 +87,10 @@ struct ContentView: View {
             .withVideoPlayer()
 #if os(macOS)
             .overlay(alignment: .bottomTrailing) {
-                BackgroundActivityIndicatorView(activityCenter: backgroundActivityCenter)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 16)
+                // TODO: Activity view indicator
             }
 #endif
-        }
-    }
-    
-    @ViewBuilder
-    private var missingProviderView: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "key.horizontal.fill")
-                .font(.largeTitle)
-            Text("Configure Provider")
-                .font(.title3.weight(.semibold))
-            Text("Add your provider credentials in Settings.")
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 420)
-            #if os(macOS)
-            SettingsLink {
-                Text("Configure Provider")
-            }
-                .buttonStyle(.borderedProminent)
-            #else
-            Button("Configure Provider") {
-                isPresentingSettings = true
-            }
-            .buttonStyle(.borderedProminent)
-            #endif
-        }
-        .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
     }
 }
 

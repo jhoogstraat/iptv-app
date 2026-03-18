@@ -37,7 +37,7 @@ protocol PlaybackBackend: AnyObject {
     var id: PlaybackBackendID { get }
     var isAvailable: Bool { get }
 
-    func canPlay(url: URL, contentType: String, containerExtension: String?) -> Bool
+    func canPlay(url: URL) -> Bool
     func load(url: URL, autoplay: Bool) throws
     func play()
     func pause()
@@ -121,16 +121,11 @@ struct PlaybackBackendFactory {
         self.builders = [{ VLCPlaybackBackend() }, { AVPlaybackBackend() }]
     }
 
-    func selectBackend(
-        for url: URL,
-        contentType: String,
-        containerExtension: String?,
-        excluding excluded: Set<PlaybackBackendID> = []
-    ) -> (any PlaybackBackend)? {
+    func selectBackend(for url: URL) -> (any PlaybackBackend)? {
         for builder in builders {
             let backend = builder()
-            guard !excluded.contains(backend.id), backend.isAvailable else { continue }
-            guard backend.canPlay(url: url, contentType: contentType, containerExtension: containerExtension) else { continue }
+            guard backend.isAvailable else { continue }
+            guard backend.canPlay(url: url) else { continue }
             return backend
         }
         return nil

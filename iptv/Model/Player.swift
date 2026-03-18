@@ -36,9 +36,7 @@ final class Player {
     private(set) var isBuffering = false
     private(set) var isPlaybackComplete = false
     private(set) var presentation: Presentation = .inline
-    private(set) var currentItem: Video?
-    private(set) var currentURL: URL?
-    private(set) var currentPlaybackSource: PlaybackSource?
+    private(set) var currentItem: PlayableMedia?
     private(set) var currentTime: Double = 0
     private(set) var duration: Double?
     private(set) var errorMessage: String?
@@ -70,8 +68,6 @@ final class Player {
 
     private(set) var controlMessage: String?
     private(set) var canRetryEpisodeSwitch = false
-
-    private(set) var episodeOptions: [Video] = []
 
     var progressFraction: Double {
         guard let duration, duration > 0 else { return 0 }
@@ -115,8 +111,6 @@ final class Player {
     }
 
     private let backendFactory: PlaybackBackendFactory
-    private let watchActivityStore: WatchActivityStore?
-    private let providerFingerprintProvider: @MainActor () -> String?
     private let defaults: UserDefaults
     private var backend: (any PlaybackBackend)?
     private var eventTask: Task<Void, Never>?
@@ -127,18 +121,14 @@ final class Player {
     private var preferredSubtitleLanguageCode: String?
     private var subtitleEnabledByDefault = false
     private var didApplyTrackPreferencesForCurrentItem = false
-    private var episodeSourceResolver: ((Video) async throws -> PlaybackSource)?
     private var lastEpisodeSwitchAttemptID: Int?
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
-        watchActivityStore: WatchActivityStore? = nil,
         providerFingerprintProvider: @escaping @MainActor () -> String? = { nil },
         defaults: UserDefaults = .standard
     ) {
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()
-        self.watchActivityStore = watchActivityStore
-        self.providerFingerprintProvider = providerFingerprintProvider
         self.defaults = defaults
     }
 
@@ -155,10 +145,8 @@ final class Player {
     }
 
     /// Loads a stream for playback in the requested presentation.
-    func load(_ video: Video, _ source: PlaybackSource, presentation: Presentation, autoplay: Bool = true) {
-        currentItem = video
-        currentURL = source.url
-        currentPlaybackSource = source
+    func load(_ media: PlayableMedia, presentation: Presentation, autoplay: Bool = true) {
+        currentItem = media
         shouldAutoPlay = autoplay
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -172,29 +160,17 @@ final class Player {
         self.presentation = presentation
         didApplyTrackPreferencesForCurrentItem = false
 
-        let key = makePersistenceKey(for: video)
-        lastPersistedProgressByVideoKey[key] = nil
-
-        if episodeOptions.isEmpty || !episodeOptions.contains(where: { $0.id == video.id }) {
-            episodeOptions = [video]
-        }
-
         loadSavedPreferencesForCurrentProfile()
 
         do {
-            try activateBackend(for: video, url: source.url)
+            try activateBackend(for: media)
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            try backend?.load(url: source.url, autoplay: autoplay)
+            try backend?.load(url: media.source.url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
         } catch {
             processTerminalFailure(error)
         }
-    }
-
-    /// Loads a stream URL directly for playback in the requested presentation.
-    func load(_ video: Video, _ url: URL, presentation: Presentation, autoplay: Bool = true) {
-        load(video, .streaming(url), presentation: presentation, autoplay: autoplay)
     }
 
     /// Clears any loaded media and resets the player model to its default state.
@@ -213,8 +189,6 @@ final class Player {
         rendererRevision += 1
 
         currentItem = nil
-        currentURL = nil
-        currentPlaybackSource = nil
         shouldAutoPlay = true
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -247,9 +221,6 @@ final class Player {
         audioDelayMilliseconds = 0
         volume = 1
         brightness = 0.5
-
-        episodeOptions = []
-        episodeSourceResolver = nil
 
         didApplyTrackPreferencesForCurrentItem = false
         lastPersistedProgressByVideoKey.removeAll()
@@ -470,51 +441,61 @@ final class Player {
         }
     }
 
-    func configureEpisodeSwitcher(
-        episodes: [Video],
-        resolver: @escaping (Video) async throws -> PlaybackSource
-    ) {
-        episodeOptions = episodes
-        episodeSourceResolver = resolver
-    }
+//    func configureEpisodeSwitcher(
+//        episodes: [Video],
+//        resolver: @escaping (Video) async throws -> PlaybackSource
+//    ) {
+//        episodeOptions = episodes
+//        episodeSourceResolver = resolver
+//    }
 
-    func quickSwitchEpisode(id: Int) {
-        guard let target = episodeOptions.first(where: { $0.id == id }) else { return }
-        guard let resolver = episodeSourceResolver else {
-            setUnsupportedFeatureMessage("Episode quick switch")
-            return
-        }
+//    func quickSwitchEpisode(id: Int) {
+//        guard let target = episodeOptions.first(where: { $0.id == id }) else { return }
+//        guard let resolver = episodeSourceResolver else {
+//            setUnsupportedFeatureMessage("Episode quick switch")
+//            return
+//        }
+//
+//        lastEpisodeSwitchAttemptID = id
+//        Task { @MainActor [weak self] in
+//            guard let self else { return }
+//            do {
+//                let source = try await resolver(target)
+//                self.canRetryEpisodeSwitch = false
+//                self.controlMessage = nil
+//                self.load(target, source, presentation: self.presentation, autoplay: true)
+//            } catch {
+//                self.controlMessage = "Could not switch episode. Try again."
+//                self.canRetryEpisodeSwitch = true
+//                logger.error("Episode quick switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+//            }
+//        }
+//    }
 
-        lastEpisodeSwitchAttemptID = id
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let source = try await resolver(target)
-                self.canRetryEpisodeSwitch = false
-                self.controlMessage = nil
-                self.load(target, source, presentation: self.presentation, autoplay: true)
-            } catch {
-                self.controlMessage = "Could not switch episode. Try again."
-                self.canRetryEpisodeSwitch = true
-                logger.error("Episode quick switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    func retryEpisodeSwitch() {
-        guard canRetryEpisodeSwitch, let id = lastEpisodeSwitchAttemptID else { return }
-        quickSwitchEpisode(id: id)
-    }
+//    func retryEpisodeSwitch() {
+//        guard canRetryEpisodeSwitch, let id = lastEpisodeSwitchAttemptID else { return }
+//        quickSwitchEpisode(id: id)
+//    }
 
     // MARK: - Internals
 
-    private func activateBackend(for video: Video, url: URL, excluding excluded: Set<PlaybackBackendID> = []) throws {
-        guard let selected = backendFactory.selectBackend(
-            for: url,
-            contentType: video.contentType,
-            containerExtension: video.containerExtension,
-            excluding: excluded
-        ) else {
+    private func activateBackend(for media: PlayableMedia, excluding excluded: Set<PlaybackBackendID> = []) throws {
+        guard let selected = backendFactory.selectBackend(for: media.source.url) else {
+            throw PlaybackRuntimeError.noRendererAvailable
+        }
+
+        eventTask?.cancel()
+        eventTask = nil
+        backend?.stop()
+
+        backend = selected
+        activeBackendID = selected.id
+        rendererRevision += 1
+        bindEvents(for: selected)
+    }
+    
+    private func activateBackend(for media: Episode, excluding excluded: Set<PlaybackBackendID> = []) throws {
+        guard let selected = backendFactory.selectBackend(for: media.source.url) else {
             throw PlaybackRuntimeError.noRendererAvailable
         }
 
@@ -662,14 +643,14 @@ final class Player {
         didApplyTrackPreferencesForCurrentItem = true
 
         if let preferredAudioLanguageCode,
-           let match = audioTracks.first(where: { language($0.languageCode, matches: preferredAudioLanguageCode) }) {
+           let match = audioTracks.first {
             selectedAudioTrackID = match.id
             backend?.selectAudioTrack(id: match.id)
         }
 
         if subtitleEnabledByDefault {
             if let preferredSubtitleLanguageCode,
-               let match = subtitleTracks.first(where: { language($0.languageCode, matches: preferredSubtitleLanguageCode) }) {
+               let match = subtitleTracks.first {
                 selectedSubtitleTrackID = match.id
                 backend?.selectSubtitleTrack(id: match.id)
             } else if let fallback = subtitleTracks.first {
@@ -695,14 +676,9 @@ final class Player {
         case .quality:
             guard !capabilities.supportsQualitySelection else { return nil }
 
-            if currentPlaybackSource?.origin == .offline {
-                return "Quality: offline downloads are single local files, so adaptive quality variants are no longer available."
-            }
-
-            if activeBackendID == .av, !isAdaptiveStream {
-                let descriptor = currentStreamDescriptor
-                return "Quality: AVPlayer can only switch variants on adaptive manifests such as HLS. The current source is \(descriptor), so there is only one playable rendition."
-            }
+//            if currentPlaybackSource?.origin == .offline {
+//                return "Quality: offline downloads are single local files, so adaptive quality variants are no longer available."
+//            }
 
             return "Quality: the current stream/backend does not expose multiple selectable video variants."
 
@@ -736,9 +712,7 @@ final class Player {
     }
 
     private func loadSavedPreferencesForCurrentProfile() {
-        let keyPrefix = profilePreferencePrefix()
-
-        if let storedSpeed = defaults.object(forKey: "\(keyPrefix).defaultSpeed") as? Double,
+        if let storedSpeed = defaults.object(forKey: "defaultSpeed") as? Double,
            storedSpeed.isFinite,
            storedSpeed > 0 {
             playbackSpeed = storedSpeed
@@ -746,50 +720,31 @@ final class Player {
             playbackSpeed = 1
         }
 
-        if let rawAspect = defaults.string(forKey: "\(keyPrefix).defaultAspectRatio"),
+        if let rawAspect = defaults.string(forKey: "defaultAspectRatio"),
            let mode = PlayerAspectRatioMode(rawValue: rawAspect) {
             aspectRatioMode = mode
         } else {
             aspectRatioMode = .fit
         }
 
-        if let storedDelay = defaults.object(forKey: "\(keyPrefix).defaultAudioDelayMs") as? Int {
+        if let storedDelay = defaults.object(forKey: "defaultAudioDelayMs") as? Int {
             audioDelayMilliseconds = storedDelay
         } else {
             audioDelayMilliseconds = 0
         }
 
-        preferredAudioLanguageCode = defaults.string(forKey: "\(keyPrefix).preferredAudioLanguage")
-        preferredSubtitleLanguageCode = defaults.string(forKey: "\(keyPrefix).preferredSubtitleLanguage")
+        preferredAudioLanguageCode = defaults.string(forKey: "preferredAudioLanguage")
+        preferredSubtitleLanguageCode = defaults.string(forKey: "preferredSubtitleLanguage")
 
-        if defaults.object(forKey: "\(keyPrefix).defaultSubtitleEnabled") != nil {
-            subtitleEnabledByDefault = defaults.bool(forKey: "\(keyPrefix).defaultSubtitleEnabled")
+        if defaults.object(forKey: "defaultSubtitleEnabled") != nil {
+            subtitleEnabledByDefault = defaults.bool(forKey: "defaultSubtitleEnabled")
         } else {
             subtitleEnabledByDefault = false
         }
     }
 
     private func persistPreference(_ key: String, value: Any) {
-        defaults.set(value, forKey: "\(profilePreferencePrefix()).\(key)")
-    }
-
-    private func profilePreferencePrefix() -> String {
-        let profile = providerFingerprintProvider() ?? "default"
-        return "player.preferences.\(profile)"
-    }
-
-    private func language(_ lhs: String?, matches rhs: String) -> Bool {
-        guard let lhs, !lhs.isEmpty else { return false }
-        let normalizedLHS = lhs.lowercased()
-        let normalizedRHS = rhs.lowercased()
-
-        if normalizedLHS == normalizedRHS {
-            return true
-        }
-
-        let lhsPrimary = normalizedLHS.split(separator: "-").first.map(String.init)
-        let rhsPrimary = normalizedRHS.split(separator: "-").first.map(String.init)
-        return lhsPrimary == rhsPrimary
+        defaults.set(value, forKey: key)
     }
 
     private func resolveAspectRatioMode(_ requested: PlayerAspectRatioMode) -> PlayerAspectRatioMode {
@@ -804,26 +759,20 @@ final class Player {
         return supportedAspectRatioModes.first ?? .fit
     }
 
-    private var isAdaptiveStream: Bool {
-        let itemExtension = currentItem?.containerExtension.lowercased()
-        let urlExtension = currentURL?.pathExtension.lowercased()
-        return itemExtension == "m3u8" || urlExtension == "m3u8"
-    }
-
     private var currentStreamDescriptor: String {
-        if currentPlaybackSource?.origin == .offline {
-            return "an offline file"
-        }
+//        if currentPlaybackSource?.origin == .offline {
+//            return "an offline file"
+//        }
+//
+//        if let ext = currentItem?.containerExtension.lowercased(), !ext.isEmpty {
+//            return "a fixed \(ext.uppercased()) stream"
+//        }
+//
+//        if let ext = currentURL?.pathExtension.lowercased(), !ext.isEmpty {
+//            return "a fixed \(ext.uppercased()) stream"
+//        }
 
-        if let ext = currentItem?.containerExtension.lowercased(), !ext.isEmpty {
-            return "a fixed \(ext.uppercased()) stream"
-        }
-
-        if let ext = currentURL?.pathExtension.lowercased(), !ext.isEmpty {
-            return "a fixed \(ext.uppercased()) stream"
-        }
-
-        return "a fixed direct stream"
+        return "TODO"
     }
 
     private func setUnsupportedFeatureMessage(_ feature: String) {
@@ -849,8 +798,7 @@ final class Player {
 
         guard backendID == .vlc,
               !didFallbackForCurrentItem,
-              let currentItem,
-              let currentPlaybackSource
+              let currentItem
         else {
             processTerminalFailure(error)
             return
@@ -860,10 +808,10 @@ final class Player {
         logger.info("Attempting automatic playback fallback to AV backend.")
 
         do {
-            try activateBackend(for: currentItem, url: currentPlaybackSource.url, excluding: [.vlc])
+            try activateBackend(for: currentItem, excluding: [.vlc])
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            try backend?.load(url: currentPlaybackSource.url, autoplay: shouldAutoPlay)
+            try backend?.load(url: currentItem.source.url, autoplay: shouldAutoPlay)
             playbackState = .loading
             errorMessage = nil
         } catch {
@@ -882,62 +830,53 @@ final class Player {
 
     private func persistProgressIfNeeded() {
         guard let currentItem else { return }
-        guard let watchActivityStore else { return }
-        guard let providerFingerprint = providerFingerprintProvider() else { return }
 
-        let key = makePersistenceKey(for: currentItem)
         let fraction = progressFraction
 
-        if let persisted = lastPersistedProgressByVideoKey[key],
-           abs(currentTime - persisted.time) < 10,
-           abs(fraction - persisted.fraction) < 0.05 {
-            return
-        }
-
-        lastPersistedProgressByVideoKey[key] = (currentTime, fraction)
-
-        let input = WatchActivityInput(
-            videoID: currentItem.id,
-            contentType: currentItem.contentType,
-            title: currentItem.name,
-            coverImageURL: currentItem.coverImageURL,
-            containerExtension: currentItem.containerExtension,
-            rating: currentItem.rating
-        )
-
-        let currentTime = self.currentTime
-        let duration = self.duration
-        Task(priority: .utility) {
-            await watchActivityStore.recordProgress(
-                input: input,
-                providerFingerprint: providerFingerprint,
-                currentTime: currentTime,
-                duration: duration
-            )
-        }
+//        if let persisted = lastPersistedProgressByVideoKey[key],
+//           abs(currentTime - persisted.time) < 10,
+//           abs(fraction - persisted.fraction) < 0.05 {
+//            return
+//        }
+//
+//        let input = WatchActivityInput(
+//            videoID: currentItem.id,
+//            contentType: currentItem.contentType,
+//            title: currentItem.name,
+//            coverImageURL: currentItem.coverImageURL,
+//            containerExtension: currentItem.containerExtension,
+//            rating: currentItem.rating
+//        )
+//
+//        let currentTime = self.currentTime
+//        let duration = self.duration
+//        Task(priority: .utility) {
+//            await watchActivityStore.recordProgress(
+//                input: input,
+//                providerFingerprint: providerFingerprint,
+//                currentTime: currentTime,
+//                duration: duration
+//            )
+//        }
     }
 
     private func markCurrentItemCompleted() {
-        guard let currentItem else { return }
-        guard let watchActivityStore else { return }
-        guard let providerFingerprint = providerFingerprintProvider() else { return }
-
-        let input = WatchActivityInput(
-            videoID: currentItem.id,
-            contentType: currentItem.contentType,
-            title: currentItem.name,
-            coverImageURL: currentItem.coverImageURL,
-            containerExtension: currentItem.containerExtension,
-            rating: currentItem.rating
-        )
-
-        Task(priority: .utility) {
-            await watchActivityStore.markCompleted(input: input, providerFingerprint: providerFingerprint)
-        }
-    }
-
-    private func makePersistenceKey(for video: Video) -> String {
-        "\(video.contentType):\(video.id)"
+//        guard let currentItem else { return }
+//        guard let watchActivityStore else { return }
+//        guard let providerFingerprint = providerFingerprintProvider() else { return }
+//
+//        let input = WatchActivityInput(
+//            videoID: currentItem.id,
+//            contentType: currentItem.contentType,
+//            title: currentItem.name,
+//            coverImageURL: currentItem.coverImageURL,
+//            containerExtension: currentItem.containerExtension,
+//            rating: currentItem.rating
+//        )
+//
+//        Task(priority: .utility) {
+//            await watchActivityStore.markCompleted(input: input, providerFingerprint: providerFingerprint)
+//        }
     }
 
     private static func formatTime(_ rawSeconds: Double) -> String {

@@ -9,24 +9,20 @@ import SwiftUI
 import OSLog
 
 struct ForYouScreen: View {
-    @Environment(AppContainer.self) private var appContainer
-    @Environment(DownloadCenter.self) private var downloadCenter
-    @Environment(ProviderStore.self) private var providerStore
+    @Environment(SessionManager.self) private var sessionManager
     @Environment(Player.self) private var player
 
-    @State private var viewModel: ForYouViewModel?
     @State private var isPresentingSettings = false
-    @State private var selectedDetailVideo: Video?
+    @State private var selectedMedia: Media?
     @State private var playError: String?
-    @State private var didBootstrapViewModel = false
-
+    @State private var isRefreshing = false
+    
+    
     var body: some View {
         NavigationStack {
             Group {
-                if !providerStore.hasConfiguration {
+                if !sessionManager.hasActiveSession {
                     missingProviderView
-                } else if let viewModel {
-                    content(viewModel)
                 } else {
                     ProgressView()
                 }
@@ -34,14 +30,14 @@ struct ForYouScreen: View {
             .navigationTitle("For You")
             .withBackgroundActivityToolbar()
             .toolbar {
-                if providerStore.hasConfiguration {
+                if sessionManager.hasActiveSession {
                     ToolbarItem(placement: .primaryAction) {
                         Button {
-                            Task { await viewModel?.refresh() }
+                            print("TODO")
                         } label: {
                             Image(systemName: "arrow.clockwise")
                         }
-                        .disabled(viewModel?.isRefreshing == true)
+                        .disabled(isRefreshing)
                     }
                 }
             }
@@ -57,109 +53,95 @@ struct ForYouScreen: View {
                             }
                         }
                 }
-                .environment(providerStore)
+                .environment(sessionManager)
             }
             #endif
-            .sheet(item: $selectedDetailVideo) { video in
+            .sheet(item: $selectedMedia) { media in
                 NavigationStack {
-                    destination(for: video)
+                    destination(for: media)
                 }
             }
-        }
-        .onAppear {
-            ensureViewModel()
-            guard !didBootstrapViewModel else { return }
-            didBootstrapViewModel = true
-            Task { await syncForCurrentProvider() }
-        }
-        .onChange(of: providerStore.revision) { _, _ in
-            Task { await syncForCurrentProvider() }
         }
     }
 
     @ViewBuilder
-    private func content(_ viewModel: ForYouViewModel) -> some View {
-        switch viewModel.phase {
-        case .idle, .loading:
-            ProgressView()
+    private func content() -> some View {
+//        case .failed(let error):
+//            VStack(spacing: 12) {
+//                Text(error.localizedDescription)
+//                    .multilineTextAlignment(.center)
+//                Button("Retry") {
+//                    Task { await viewModel.refresh() }
+//                }
+//                .buttonStyle(.borderedProminent)
+//            }
+//            .padding()
 
-        case .failed(let error):
-            VStack(spacing: 12) {
-                Text(error.localizedDescription)
-                    .multilineTextAlignment(.center)
-                Button("Retry") {
-                    Task { await viewModel.refresh() }
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding()
-
-        case .loaded:
-            if viewModel.hero == nil && viewModel.sections.isEmpty {
-                VStack(spacing: 12) {
-                    Text("Not enough activity yet. Start watching to personalize this page.")
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button("Refresh") {
-                        Task { await viewModel.refresh() }
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding()
-            } else {
+//        case .loaded:
+//            if viewModel.hero == nil && viewModel.sections.isEmpty {
+//                VStack(spacing: 12) {
+//                    Text("Not enough activity yet. Start watching to personalize this page.")
+//                        .foregroundStyle(.secondary)
+//                        .multilineTextAlignment(.center)
+//                    Button("Refresh") {
+////                        Task { await viewModel.refresh() }
+//                    }
+//                    .buttonStyle(.borderedProminent)
+//                }
+//                .padding()
+//            } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 22) {
-                        if let hero = viewModel.hero {
-                            ForYouHeroView(
-                                item: hero,
-                                onPlay: { startPlayback(video: hero.video) },
-                                onDetails: { selectedDetailVideo = hero.video }
-                            )
-                        }
+//                        if let hero = viewModel.hero {
+//                            ForYouHeroView(
+//                                item: hero,
+//                                onPlay: { startPlayback(video: hero.video) },
+//                                onDetails: { selectedDetailVideo = hero.video }
+//                            )
+//                        }
 
                         if let playError {
                             Text(playError)
                                 .foregroundStyle(.red)
                         }
 
-                        ForEach(viewModel.sections) { section in
-                            switch section.style {
-                            case .continueWatchingRail:
-                                continueWatchingRail(section: section)
-                            case .posterRail:
-                                ForYouRailView(section: section, destination: destination(for:))
-                            case .hero:
-                                EmptyView()
-                            }
-                        }
+//                        ForEach(viewModel.sections) { section in
+//                            switch section.style {
+//                            case .continueWatchingRail:
+//                                continueWatchingRail(section: section)
+//                            case .posterRail:
+//                                ForYouRailView(section: section, destination: destination(for:))
+//                            case .hero:
+//                                EmptyView()
+//                            }
+//                        }
                     }
                     .padding()
                 }
             }
-        }
-    }
+//        }
 
-    private func continueWatchingRail(section: ForYouSection) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(section.title)
-                .font(.headline)
-
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(section.items) { item in
-                        NavigationLink {
-                            destination(for: item)
-                        } label: {
-                            ContinueWatchingCardView(item: item)
-                                .frame(width: 170)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-            .scrollIndicators(.never)
-        }
-    }
+//    private func continueWatchingRail() -> some View {
+//        VStack(alignment: .leading, spacing: 10) {
+//            Text("TODO")
+//                .font(.headline)
+//
+//            ScrollView(.horizontal) {
+//                LazyHStack(alignment: .top, spacing: 14) {
+//                    ForEach(section.items) { item in
+//                        NavigationLink {
+//                            destination(for: item)
+//                        } label: {
+//                            ContinueWatchingCardView(item: item)
+//                                .frame(width: 170)
+//                        }
+//                        .buttonStyle(.plain)
+//                    }
+//                }
+//            }
+//            .scrollIndicators(.never)
+//        }
+//    }
 
     private var missingProviderView: some View {
         VStack(spacing: 12) {
@@ -187,61 +169,28 @@ struct ForYouScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func ensureViewModel() {
-        if viewModel == nil {
-            viewModel = appContainer.makeForYouViewModel()
-        }
-    }
-
-    private func syncForCurrentProvider() async {
-        ensureViewModel()
-        guard providerStore.hasConfiguration else {
-            await MainActor.run {
-                viewModel?.phase = .idle
-                viewModel?.hero = nil
-                viewModel?.sections = []
-            }
-            return
-        }
-
-        await viewModel?.load(policy: .readThrough)
-    }
-
     @ViewBuilder
-    private func destination(for item: ForYouItem) -> some View {
-        destination(for: item.video)
-    }
-
-    private func destination(for video: Video) -> AnyView {
-        switch video.xtreamContentType {
-        case .vod:
-            AnyView(MovieDetailScreen(video: video))
-        case .series:
-            AnyView(
-                EpisodeDetailTile(video: video)
-                    .navigationTitle(video.name)
-            )
-        case .live:
-            AnyView(
-                ScopedPlaceholderView(
-                    title: "Live Episodes Are Unavailable",
-                    message: "Episode detail only applies to series content."
-                )
-                .navigationTitle(video.name)
-            )
+    private func destination(for media: Media) -> some View {
+        switch media.self {
+        case is Movie:
+                MovieDetailScreen(movie: media as! Movie)
+        case is Series:
+                EpisodeDetailTile(series: media as! Series, episode: (media as! Series).episodes.first!)
+                    .navigationTitle(media.name)
+        default:
+            ContentUnavailableView {
+                Text("Live Episodes Are Unavailable")
+            } description: {
+                Text("Episode detail only applies to series content.")
+            }
+            .navigationTitle(media.name)
         }
     }
 
-    private func startPlayback(video: Video) {
+    private func startPlayback(media: PlayableMedia) {
         Task {
-            do {
-                let source = try await downloadCenter.playbackSource(for: video)
-                playError = nil
-                player.load(video, source, presentation: .fullWindow)
-            } catch {
-                playError = error.localizedDescription
-                logger.error("Failed to resolve playback URL for \(video.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
+            playError = nil
+            player.load(media, presentation: .fullWindow)
         }
     }
 }

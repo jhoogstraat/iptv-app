@@ -7,26 +7,30 @@
 
 import SwiftUI
 
+enum ForYouBadge {
+    case new, series
+}
+
 struct ForYouRailView<Destination: View>: View {
-    let section: ForYouSection
-    let destination: (ForYouItem) -> Destination
+//    let section: ForYouSection
+    let destination: (Media) -> Destination
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(section.title)
+            Text("TODO")
                 .font(.headline)
 
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
-                    ForEach(section.items) { item in
-                        NavigationLink {
-                            destination(item)
-                        } label: {
-                            ForYouPosterCard(item: item)
-                                .frame(width: 170, height: 255)
-                        }
-                        .buttonStyle(.plain)
-                    }
+//                    ForEach([]) { item in
+//                        NavigationLink {
+//                            destination(item)
+//                        } label: {
+//                            ForYouPosterCard(item: item)
+//                                .frame(width: 170, height: 255)
+//                        }
+//                        .buttonStyle(.plain)
+//                    }
                 }
             }
             .scrollIndicators(.never)
@@ -35,11 +39,11 @@ struct ForYouRailView<Destination: View>: View {
 }
 
 private struct ForYouPosterCard: View {
-    let item: ForYouItem
+    let item: Media
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            AsyncImage(url: item.artworkURL) { phase in
+            AsyncImage(url: item.coverImageURL) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -54,11 +58,6 @@ private struct ForYouPosterCard: View {
                     fallback
                 }
             }
-
-            if let badge = item.badge {
-                badgeView(badge)
-                    .padding(8)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.secondary.opacity(0.12))
@@ -69,7 +68,7 @@ private struct ForYouPosterCard: View {
         Rectangle()
             .fill(.gray.opacity(0.25))
             .overlay {
-                Text(item.video.name)
+                Text(item.name)
                     .font(.caption)
                     .multilineTextAlignment(.center)
                     .padding(8)
@@ -79,22 +78,22 @@ private struct ForYouPosterCard: View {
     @ViewBuilder
     private func badgeView(_ badge: ForYouBadge) -> some View {
         switch badge {
-        case .rating(let value):
-            Label(value, systemImage: "star.fill")
-                .labelStyle(.titleAndIcon)
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .background(.thinMaterial)
-                .clipShape(.capsule)
-        case .language(let value):
-            Text(value.uppercased())
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .background(.thinMaterial)
-                .clipShape(.capsule)
-        case .isNew:
+//        case .rating(let value):
+//            Label(value, systemImage: "star.fill")
+//                .labelStyle(.titleAndIcon)
+//                .font(.caption2.weight(.semibold))
+//                .padding(.horizontal, 6)
+//                .padding(.vertical, 4)
+//                .background(.thinMaterial)
+//                .clipShape(.capsule)
+//        case .language(let value):
+//            Text(value.uppercased())
+//                .font(.caption2.weight(.semibold))
+//                .padding(.horizontal, 6)
+//                .padding(.vertical, 4)
+//                .background(.thinMaterial)
+//                .clipShape(.capsule)
+        case .new:
             Text("NEW")
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 6)

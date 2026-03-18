@@ -6,25 +6,21 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct FavoritesScreen: View {
-    @Environment(AppContainer.self) private var appContainer
-    @Environment(ProviderStore.self) private var providerStore
-    @Environment(FavoritesStore.self) private var favoritesStore
-
-    @State private var favorites: [FavoriteRecord] = []
-    @State private var continueWatching: [WatchActivityRecord] = []
+    @Environment(SessionManager.self) private var sessionManager
+    
+    @Query private var favorites: [Media]
+    @Query private var continueWatching: [WatchActivity]
+    
     @State private var isLoading = false
     @State private var errorMessage: String?
-
-    private var reloadToken: String {
-        "\(providerStore.revision)|\(favoritesStore.revision)"
-    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if !providerStore.hasConfiguration {
+                if !sessionManager.hasActiveSession {
                     missingProviderView
                 } else if isLoading {
                     ProgressView()
@@ -34,9 +30,6 @@ struct FavoritesScreen: View {
             }
             .navigationTitle("Library")
             .withBackgroundActivityToolbar()
-        }
-        .task(id: reloadToken) {
-            await loadData()
         }
     }
 
@@ -78,14 +71,14 @@ struct FavoritesScreen: View {
                                 .font(.headline)
                             ScrollView(.horizontal) {
                                 LazyHStack(alignment: .top, spacing: 14) {
-                                    ForEach(continueWatching.prefix(20), id: \.key) { record in
-                                        let video = record.asVideo()
+                                    ForEach(continueWatching) { activity in
                                         NavigationLink {
-                                            destination(for: video)
+                                            destination(for: activity.media)
                                         } label: {
-                                            ContinueWatchingCardView(
-                                                item: ForYouItem.from(video: video, progress: record.progress)
-                                            )
+                                            Text("TODO")
+//                                            ContinueWatchingCardView(
+//                                                item: ForYouItem.from(video: video, progress: record.progress)
+//                                            )
                                             .frame(width: 170)
                                         }
                                         .buttonStyle(.plain)
@@ -101,19 +94,18 @@ struct FavoritesScreen: View {
                             Text("Favorites")
                                 .font(.headline)
                             ForEach(favorites, id: \.id) { favorite in
-                                let video = favorite.asVideo()
                                 NavigationLink {
-                                    destination(for: video)
+                                    destination(for: favorite)
                                 } label: {
                                     HStack(spacing: 12) {
-                                        VideoTile(video: video)
+                                        VideoTile(media: favorite)
                                             .frame(width: 70, height: 100)
                                             .clipShape(.rect(cornerRadius: 8))
                                         VStack(alignment: .leading, spacing: 4) {
-                                            Text(video.name)
+                                            Text(favorite.name)
                                                 .font(.headline)
                                                 .lineLimit(2)
-                                            Text(video.xtreamContentType == .series ? "Series" : "Movie")
+                                            Text("TODO: Series or Movie")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
@@ -138,51 +130,19 @@ struct FavoritesScreen: View {
     }
 
     @ViewBuilder
-    private func destination(for video: Video) -> some View {
-        switch video.xtreamContentType {
-        case .vod:
-            MovieDetailScreen(video: video)
-        case .series:
-            EpisodeDetailTile(video: video)
-                .navigationTitle(video.name)
-        case .live:
+    private func destination(for media: Media) -> some View {
+        switch media.self {
+            case is Movie:
+                MovieDetailScreen(movie: media as! Movie)
+        case is Series:
+                EpisodeDetailTile(series: media as! Series, episode: (media as! Series).episodes.first!)
+                .navigationTitle(media.name)
+        default:
             ScopedPlaceholderView(
                 title: "Live Episodes Are Unavailable",
                 message: "Episode detail only applies to series content."
             )
-                .navigationTitle(video.name)
-        }
-    }
-
-    private func loadData() async {
-        guard providerStore.hasConfiguration else {
-            favorites = []
-            continueWatching = []
-            errorMessage = nil
-            return
-        }
-
-        do {
-            isLoading = true
-            errorMessage = nil
-
-            let config = try providerStore.requiredConfiguration()
-            let providerFingerprint = ProviderCacheFingerprint.make(from: config)
-
-            async let favoriteData = favoritesStore.load(providerFingerprint: providerFingerprint)
-            async let watchData = appContainer.watchActivityStore.load(providerFingerprint: providerFingerprint)
-
-            let loadedFavorites = await favoriteData
-            let loadedWatchRecords = await watchData
-
-            favorites = loadedFavorites
-            continueWatching = loadedWatchRecords.filter { !$0.isCompleted && $0.progressFraction >= 0.05 }
-            isLoading = false
-        } catch {
-            favorites = []
-            continueWatching = []
-            isLoading = false
-            errorMessage = error.localizedDescription
+                .navigationTitle(media.name)
         }
     }
 }

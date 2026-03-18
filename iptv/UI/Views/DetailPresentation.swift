@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 enum DetailSpacing {
     static let xxxs: CGFloat = 2
@@ -164,14 +165,12 @@ struct DetailContentLayout<Content: View>: View {
 }
 
 struct DetailAlternativeSource: Identifiable {
-    let video: Video
+    let media: Media
     let categoryNames: [String]
     let languageCodes: [String]
-
-    var id: String {
-        "\(video.contentType):\(video.id)"
-    }
-
+    
+    var id: Media.ID { media.id }
+    
     var subtitle: String {
         let languages = languageCodes.isEmpty ? nil : languageCodes.joined(separator: " / ")
         let categories = categoryNames.isEmpty ? nil : categoryNames.joined(separator: " • ")
@@ -179,87 +178,6 @@ struct DetailAlternativeSource: Identifiable {
         return [languages, categories]
             .compactMap { $0 }
             .joined(separator: "  •  ")
-    }
-}
-
-struct DetailAlternativeSourcesSheet<Destination: View>: View {
-    let title: String
-    let isLoading: Bool
-    let errorMessage: String?
-    let sources: [DetailAlternativeSource]
-    let onRetry: () -> Void
-    let destination: (Video) -> Destination
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Group {
-                if isLoading {
-                    VStack(spacing: 14) {
-                        ProgressView()
-                        Text("Searching other categories for matching sources...")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(24)
-                } else if let errorMessage {
-                    VStack(spacing: 14) {
-                        Text(errorMessage)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-
-                        Button("Try Again", action: onRetry)
-                            .buttonStyle(.borderedProminent)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(24)
-                } else if sources.isEmpty {
-                    VStack(spacing: 12) {
-                        Text("No other sources found.")
-                            .font(.headline)
-                        Text("Try again after more categories have been synced.")
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(24)
-                } else {
-                    List(sources) { source in
-                        NavigationLink {
-                            destination(source.video)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(source.video.name)
-                                    .font(.headline)
-                                    .foregroundStyle(.primary)
-
-                                if !source.subtitle.isEmpty {
-                                    Text(source.subtitle)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(3)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    .listStyle(.plain)
-                }
-            }
-            .navigationTitle(title)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -367,126 +285,29 @@ struct DetailHeroBackdrop: View {
     }
 }
 
-@MainActor
-func loadDetailAlternativeSources(
-    for referenceVideo: Video,
-    preferredTitle: String,
-    catalog: Catalog
-) async throws -> [DetailAlternativeSource] {
-    let contentType = referenceVideo.xtreamContentType
-    guard contentType == .vod || contentType == .series else { return [] }
-
-    try await catalog.ensureBootstrapLoaded()
-
-    let referenceTitleKey = detailAlternativeSourceTitleKey(preferredTitle)
-    let referenceTMDBID = detailAlternativeSourceID(referenceVideo.tmdbId)
-    let referenceLanguage = referenceVideo.language?.uppercased()
-
-    struct Accumulator {
-        var video: Video
-        var categoryNames: Set<String>
-        var languageCodes: Set<String>
-    }
-
-    var groupedSources: [String: Accumulator] = [:]
-
-    for category in catalog.categories(for: contentType) {
-        guard let cachedVideos = catalog.cachedVideos(in: category, contentType: contentType) else { continue }
-
-        for candidate in cachedVideos {
-            guard candidate.id != referenceVideo.id else { continue }
-            guard detailAlternativeSourceMatches(
-                candidate,
-                referenceTitleKey: referenceTitleKey,
-                referenceTMDBID: referenceTMDBID
-            ) else { continue }
-
-            let key = "\(candidate.contentType):\(candidate.id)"
-            var accumulator = groupedSources[key] ?? Accumulator(
-                video: candidate,
-                categoryNames: [],
-                languageCodes: []
-            )
-
-            accumulator.categoryNames.insert(category.groupedDisplayName)
-            if let languageCode = (candidate.language ?? category.languageGroupCode)?.uppercased() {
-                accumulator.languageCodes.insert(languageCode)
-            }
-            groupedSources[key] = accumulator
-        }
-    }
-
-    return groupedSources.values
-        .map { source in
-            DetailAlternativeSource(
-                video: source.video,
-                categoryNames: source.categoryNames.sorted(),
-                languageCodes: source.languageCodes.sorted()
-            )
-        }
-        .sorted { lhs, rhs in
-            let lhsSharesLanguage = referenceLanguage != nil && lhs.languageCodes.contains(referenceLanguage!)
-            let rhsSharesLanguage = referenceLanguage != nil && rhs.languageCodes.contains(referenceLanguage!)
-            if lhsSharesLanguage != rhsSharesLanguage {
-                return !lhsSharesLanguage && rhsSharesLanguage
-            }
-            if lhs.categoryNames.count != rhs.categoryNames.count {
-                return lhs.categoryNames.count > rhs.categoryNames.count
-            }
-            return lhs.video.name.localizedCaseInsensitiveCompare(rhs.video.name) == .orderedAscending
-        }
-}
-
 private func detailAlternativeSourceMatches(
-    _ candidate: Video,
+    _ candidate: Media,
     referenceTitleKey: String,
     referenceTMDBID: String?
 ) -> Bool {
-    if let referenceTMDBID,
-       let candidateTMDBID = detailAlternativeSourceID(candidate.tmdbId),
-       referenceTMDBID == candidateTMDBID {
-        return true
-    }
-
-    let candidateTitleKey = detailAlternativeSourceTitleKey(candidate.name)
-    guard !referenceTitleKey.isEmpty, !candidateTitleKey.isEmpty else { return false }
-
-    if referenceTitleKey == candidateTitleKey {
-        return true
-    }
-
-    let minimumLength = min(referenceTitleKey.count, candidateTitleKey.count)
-    guard minimumLength >= 8 else { return false }
-
-    return referenceTitleKey.contains(candidateTitleKey) || candidateTitleKey.contains(referenceTitleKey)
-}
-
-private func detailAlternativeSourceTitleKey(_ value: String?) -> String {
-    let baseValue = value.map { LanguageTaggedText($0).groupedDisplayName } ?? ""
-    let folded = baseValue.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-
-    let strippedQuality = folded.replacingOccurrences(
-        of: #"\b(2160p|1080p|720p|480p|4k|uhd|fhd|hd|sd|hdr|hdr10|dv|dovi|bluray|blu-ray|brrip|bdrip|webrip|web-rip|webdl|web-dl|remux|x264|x265|h264|h265|hevc|aac|ddp|dd\+|atmos)\b"#,
-        with: " ",
-        options: [.regularExpression, .caseInsensitive]
-    )
-
-    let alphanumeric = strippedQuality.replacingOccurrences(
-        of: #"[^a-zA-Z0-9]+"#,
-        with: " ",
-        options: .regularExpression
-    )
-
-    return alphanumeric
-        .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-        .lowercased()
-}
-
-private func detailAlternativeSourceID(_ value: String?) -> String? {
-    guard let value else { return nil }
-    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-    return trimmed.isEmpty ? nil : trimmed
+//    if let referenceTMDBID,
+//       let candidateTMDBID = detailAlternativeSourceID(candidate.tmdbId),
+//       referenceTMDBID == candidateTMDBID {
+//        return true
+//    }
+//
+//    let candidateTitleKey = detailAlternativeSourceTitleKey(candidate.name)
+//    guard !referenceTitleKey.isEmpty, !candidateTitleKey.isEmpty else { return false }
+//
+//    if referenceTitleKey == candidateTitleKey {
+//        return true
+//    }
+//
+//    let minimumLength = min(referenceTitleKey.count, candidateTitleKey.count)
+//    guard minimumLength >= 8 else { return false }
+//
+//    return referenceTitleKey.contains(candidateTitleKey) || candidateTitleKey.contains(referenceTitleKey)
+    return false
 }
 
 struct DetailMetaPill: View {

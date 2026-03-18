@@ -10,15 +10,17 @@ import SwiftData
 
 @Model final class WatchActivity {
     
-    @Relationship
     var media: Media
+    
+    var timestamp: Double
     
     var progress: Double
     
     var isCompleted: Bool
     
-    init(media: Media, progress: Double, isCompleted: Bool) {
+    init(media: Media, timestamp: Double, progress: Double, isCompleted: Bool) {
         self.media = media
+        self.timestamp = timestamp
         self.progress = progress
         self.isCompleted = isCompleted
     }

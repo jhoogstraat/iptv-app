@@ -19,15 +19,9 @@ struct PreviewData: PreviewModifier {
     }
     
     func body(content: Content, context: ModelContainer) -> some View {
-        let appContainer = try! AppContainer(modelContainer: context)
+        let sessionManager = SessionManager(userDefaults: .standard, modelContainer: context)
         content.modelContainer(context)
-            .environment(appContainer)
-            .environment(appContainer.providerStore)
-            .environment(appContainer.catalog)
-            .environment(appContainer.player)
-            .environment(appContainer.favoritesStore)
-            .environment(appContainer.backgroundActivityCenter)
-            .environment(appContainer.downloadCenter)
+            .environment(sessionManager)
             #if os(visionOS)
             .environment(ImmersiveEnvironment())
             #endif

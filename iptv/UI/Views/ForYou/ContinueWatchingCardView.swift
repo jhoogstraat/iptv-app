@@ -8,12 +8,12 @@
 import SwiftUI
 
 struct ContinueWatchingCardView: View {
-    let item: ForYouItem
+    let item: Media
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomLeading) {
-                AsyncImage(url: item.artworkURL) { phase in
+                AsyncImage(url: item.coverImageURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -28,8 +28,8 @@ struct ContinueWatchingCardView: View {
                     }
                 }
 
-                if let progress = item.progress {
-                    ProgressView(value: progress.progressFraction)
+                if let progress = item.activity?.progress {
+                    ProgressView(value: progress)
                         .tint(.white)
                         .padding(8)
                 }
@@ -38,16 +38,16 @@ struct ContinueWatchingCardView: View {
             .background(Color.secondary.opacity(0.12))
             .clipShape(.rect(cornerRadius: 10))
 
-            Text(item.video.name)
+            Text(item.name)
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
 
-            if let progress = item.progress,
-               let remaining = progress.remainingSeconds {
-                Text("\(formattedDuration(remaining)) left")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+//            if let activity = item.activity?,
+//               let remaining = activity.remainingSeconds {
+//                Text("\(formattedDuration(remaining)) left")
+//                    .font(.caption)
+//                    .foregroundStyle(.secondary)
+//            }
         }
     }
 

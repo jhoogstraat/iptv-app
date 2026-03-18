@@ -7,6 +7,7 @@
 
 import OSLog
 import SwiftUI
+import SwiftData
 
 private enum LibraryLanguageSource: String, CaseIterable, Identifiable {
     case automatic
@@ -46,6 +47,30 @@ private enum PlaybackPreference: String, CaseIterable, Identifiable {
     }
 }
 
+@Observable
+class ProviderFields {
+    var name: String
+    var endpoint: String
+    var username: String
+    var password: String
+    
+    var isValid: Bool {
+        !name.isEmpty && !username.isEmpty && !password.isEmpty && URL(string: endpoint) != nil
+    }
+    
+    func build() -> XtreamProvider? {
+        guard isValid else { return nil }
+        return XtreamProvider(name: name, endpoint: URL(string: endpoint)!, username: username, password: password, movies: [], series: [])
+    }
+    
+    init(name: String, endpoint: String, username: String, password: String) {
+        self.name = name
+        self.endpoint = endpoint
+        self.username = username
+        self.password = password
+    }
+}
+
 struct SettingsScreen: View {
     private struct PrefixOption: Identifiable, Equatable {
         let prefix: String
@@ -59,12 +84,10 @@ struct SettingsScreen: View {
         }
     }
 
-    @Environment(Catalog.self) private var catalog
-    @Environment(ProviderStore.self) private var providerStore
-
-    @State private var baseURL = ""
-    @State private var username = ""
-    @State private var password = ""
+    private let sessionManager: SessionManager
+    
+    @State private var providerFields: ProviderFields
+    
     @State private var excludedPrefixesInput = ""
     @State private var availablePrefixOptions: [PrefixOption] = []
     @State private var selectedVisiblePrefixes: Set<String> = []
@@ -73,17 +96,39 @@ struct SettingsScreen: View {
     @State private var prefixDiscoveryError: String?
     @State private var statusMessage: String?
     @State private var statusIsError = false
-    @State private var catalogueSummary: ProviderCatalogueSummary?
-    @State private var movieSyncProgress: CatalogueSyncProgress?
-    @State private var seriesSyncProgress: CatalogueSyncProgress?
     @State private var isLoadingCatalogueSummary = false
 
+    
+    init(sessionManager: SessionManager) {
+        let fields: ProviderFields = switch sessionManager.session?.provider {
+            case let xtream as XtreamProvider:
+                .init(
+                    name: xtream.name,
+                    endpoint: xtream.endpoint.absoluteString,
+                    username: xtream.username,
+                    password: xtream.password
+                )
+//            case let m3u as M3UProvider:
+//                // Example of a second provider type
+//                .init(
+//                    name: m3u.title,
+//                    endpoint: m3u.url.absoluteString,
+//                    username: "",
+//                    password: ""
+//                )
+            default:
+                .init(name: "", endpoint: "", username: "", password: "")
+            }
+            
+        self._providerFields = State(initialValue: fields)
+        self.sessionManager = sessionManager
+    }
+    
     var body: some View {
         #if os(macOS)
-        withSettingsLifecycle(
             macSettingsBody
                 .frame(minWidth: 680, idealWidth: 720, minHeight: 480, idealHeight: 540)
-        )
+    
             .sheet(isPresented: $isShowingPrefixSelector) {
                 prefixSelectionSheet
             }
@@ -109,21 +154,7 @@ struct SettingsScreen: View {
         }
         #endif
     }
-
-    private func withSettingsLifecycle<Content: View>(_ content: Content) -> some View {
-        content
-            .onAppear(perform: loadCurrentValues)
-            .task(id: providerStore.revision) {
-                await loadCatalogueSummary()
-            }
-            .task(id: "movies-\(providerStore.revision)") {
-                await observeSyncProgress(for: .movies)
-            }
-            .task(id: "series-\(providerStore.revision)") {
-                await observeSyncProgress(for: .series)
-            }
-    }
-
+    
     #if os(macOS)
     private var macSettingsBody: some View {
         TabView {
@@ -186,28 +217,28 @@ struct SettingsScreen: View {
 
             LabeledContent("Type") {
                 Text(providerTypeSummary)
-                    .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
+                    .foregroundStyle(sessionManager.hasActiveSession ? .primary : .secondary)
                     .fixedSize()
             }
 
             LabeledContent("Endpoint") {
                 Text(providerEndpointSummary)
-                    .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
+                    .foregroundStyle(sessionManager.hasActiveSession ? .primary : .secondary)
                     .multilineTextAlignment(.trailing)
             }
 
             LabeledContent("Credentials") {
-                Text(providerStore.hasConfiguration ? "Stored Securely" : "Not Configured")
-                    .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
+                Text(sessionManager.hasActiveSession ? "Stored Securely" : "Not Configured")
+                    .foregroundStyle(sessionManager.hasActiveSession ? .primary : .secondary)
             }
 
-            if let validationError = providerStore.lastValidationError, !providerStore.hasConfiguration {
-                LabeledContent("Last Error") {
-                    Text(validationError)
-                        .foregroundStyle(.red)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
+//            if let validationError = sessionManager.lastValidationError, !sessionManager.hasActiveSession {
+//                LabeledContent("Last Error") {
+//                    Text(validationError)
+//                        .foregroundStyle(.red)
+//                        .multilineTextAlignment(.trailing)
+//                }
+//            }
 
             if let statusMessage {
                 LabeledContent(statusIsError ? "Save Error" : "Recent Change") {
@@ -282,17 +313,17 @@ struct SettingsScreen: View {
     }
 
     private var movieCountText: String {
-        if isLoadingCatalogueSummary && catalogueSummary == nil {
+        if isLoadingCatalogueSummary {
             return "..."
         }
-        return (catalogueSummary?.movieCount ?? 0).formatted()
+        return "TODO"
     }
 
     private var seriesCountText: String {
-        if isLoadingCatalogueSummary && catalogueSummary == nil {
+        if isLoadingCatalogueSummary {
             return "..."
         }
-        return (catalogueSummary?.seriesCount ?? 0).formatted()
+        return "TODO"
     }
 
     private var tvCountText: String {
@@ -300,21 +331,23 @@ struct SettingsScreen: View {
     }
 
     private var movieCountSubtitle: String {
-        syncSubtitle(
-            kind: "movie",
-            progress: movieSyncProgress,
-            fallbackSyncedCategories: catalogueSummary?.syncedMovieCategories,
-            fallbackTotalCategories: catalogueSummary?.totalMovieCategories
-        )
+        return "TODO"
+//        syncSubtitle(
+//            kind: "movie",
+//            progress: movieSyncProgress,
+//            fallbackSyncedCategories: catalogueSummary?.syncedMovieCategories,
+//            fallbackTotalCategories: catalogueSummary?.totalMovieCategories
+//        )
     }
 
     private var seriesCountSubtitle: String {
-        syncSubtitle(
-            kind: "series",
-            progress: seriesSyncProgress,
-            fallbackSyncedCategories: catalogueSummary?.syncedSeriesCategories,
-            fallbackTotalCategories: catalogueSummary?.totalSeriesCategories
-        )
+        return "TODO"
+//        syncSubtitle(
+//            kind: "series",
+//            progress: seriesSyncProgress,
+//            fallbackSyncedCategories: catalogueSummary?.syncedSeriesCategories,
+//            fallbackTotalCategories: catalogueSummary?.totalSeriesCategories
+//        )
     }
 
     private var tvCountSubtitle: String {
@@ -323,29 +356,18 @@ struct SettingsScreen: View {
 
     private var providerCredentialsSection: some View {
         Section {
-            TextField(text: $baseURL, prompt: Text("example.com or https://example.com")) {
-                Text("Base URL")
-            }
-            .providerInputStyle()
-            #if os(iOS)
-            .keyboardType(.URL)
-            .textContentType(.URL)
-            #endif
+            TextField("URL", text: $providerFields.endpoint, prompt: Text("example.com or https://example.com"))
+                .providerInputStyle()
+                .textContentType(.URL)
+                .autocorrectionDisabled()
 
-            TextField(text: $username, prompt: Text("Required")) {
-                Text("Username")
-            }
-            .providerInputStyle()
-            #if os(iOS)
-            .textContentType(.username)
-            #endif
+            TextField("Username", text: $providerFields.username, prompt: Text("Required"))
+                .providerInputStyle()
+                .textContentType(.username)
 
-            SecureField(text: $password, prompt: Text("Required")) {
-                Text("Password")
-            }
-            #if os(iOS)
-            .textContentType(.password)
-            #endif
+            SecureField("Password", text: $providerFields.password, prompt: Text("Required"))
+                .textContentType(.password)
+            
         } header: {
             Text("Provider Settings")
         } footer: {
@@ -355,31 +377,33 @@ struct SettingsScreen: View {
 
     private var providerActionsSection: some View {
         Section("Provider Actions") {
-            Button(providerStore.hasConfiguration ? "Update Provider" : "Save Provider") {
+            Button("Save") {
                 save()
             }
             .buttonStyle(.borderedProminent)
+            .disabled(!providerFields.isValid)
 
-            Button("Clear Provider", role: .destructive) {
+            Button("Reset", role: .destructive) {
                 clear()
             }
-            .disabled(!providerStore.hasConfiguration && baseURL.isEmpty && username.isEmpty && password.isEmpty)
+            .disabled(!sessionManager.hasActiveSession)
         }
     }
 
     private var librarySection: some View {
         Section {
             LabeledContent("Excluded Prefixes") {
-                Text(excludedPrefixesSummary)
-                    .foregroundStyle(providerStore.hasConfiguration ? .primary : .secondary)
-                    .multilineTextAlignment(.trailing)
+                Text("TODO")
+//                Text(excludedPrefixesSummary)
+//                    .foregroundStyle(sessionManager.hasActiveSession ? .primary : .secondary)
+//                    .multilineTextAlignment(.trailing)
             }
 
             Button("Choose Visible Prefixes") {
                 openPrefixSelector()
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!providerStore.hasConfiguration)
+            .disabled(!sessionManager.hasActiveSession)
 
             Toggle("Group categories by language", isOn: .constant(false))
                 .disabled(true)
@@ -456,7 +480,7 @@ struct SettingsScreen: View {
                 Button("Save") {
                     saveVisiblePrefixSelection()
                 }
-                .disabled(!providerStore.hasConfiguration || isLoadingPrefixOptions)
+                .disabled(!sessionManager.hasActiveSession || isLoadingPrefixOptions)
             }
 
             ToolbarItem(placement: .primaryAction) {
@@ -465,11 +489,11 @@ struct SettingsScreen: View {
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
-                .disabled(!providerStore.hasConfiguration || isLoadingPrefixOptions)
+                .disabled(!sessionManager.hasActiveSession || isLoadingPrefixOptions)
             }
         }
         .task(id: isShowingPrefixSelector) {
-            guard isShowingPrefixSelector, availablePrefixOptions.isEmpty, providerStore.hasConfiguration else { return }
+            guard isShowingPrefixSelector, availablePrefixOptions.isEmpty, sessionManager.hasActiveSession else { return }
             await loadAvailablePrefixes(force: false)
         }
     }
@@ -544,16 +568,16 @@ struct SettingsScreen: View {
 
     private var providerStatusBadge: some View {
         HStack(spacing: 6) {
-            Image(systemName: providerStore.hasConfiguration ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-            Text(providerStore.hasConfiguration ? "Configured" : "Needs Setup")
+            Image(systemName: sessionManager.hasActiveSession ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+            Text(sessionManager.hasActiveSession ? "Configured" : "Needs Setup")
         }
         .font(.subheadline.weight(.semibold))
-        .foregroundStyle(providerStore.hasConfiguration ? .green : .orange)
+        .foregroundStyle(sessionManager.hasActiveSession ? .green : .orange)
         .fixedSize()
     }
 
     private var providerEndpointSummary: String {
-        let trimmed = providerStore.baseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = "" //sessionManager.baseURLInput.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "Not configured" : trimmed
     }
 
@@ -561,10 +585,10 @@ struct SettingsScreen: View {
         "Xtream API"
     }
 
-    private var excludedPrefixesSummary: String {
-        let trimmed = providerStore.excludedCategoryPrefixesInput().trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "None" : trimmed
-    }
+//    private var excludedPrefixesSummary: String {
+//        let trimmed = sessionManager.excludedCategoryPrefixesInput().trimmingCharacters(in: .whitespacesAndNewlines)
+//        return trimmed.isEmpty ? "None" : trimmed
+//    }
 
     private var appVersionDescription: String {
         let bundle = Bundle.main
@@ -584,123 +608,86 @@ struct SettingsScreen: View {
     }
 
     @MainActor
-    private func loadCurrentValues() {
-        baseURL = providerStore.baseURLInput
-        username = providerStore.username()
-        password = providerStore.password()
-        excludedPrefixesInput = providerStore.excludedCategoryPrefixesInput()
-        selectedVisiblePrefixes = Set()
+    private func observeSyncProgress() async {
+//        setSyncProgress(nil, for: scope)
+//        guard sessionManager.hasActiveSession else { return }
+//
+//        let stream = catalog.observeSyncProgress(scope: scope)
+//        for await progress in stream {
+//            if Task.isCancelled {
+//                break
+//            }
+//            setSyncProgress(progress, for: scope)
+//        }
     }
 
     @MainActor
-    private func loadCatalogueSummary() async {
-        guard providerStore.hasConfiguration else {
-            catalogueSummary = nil
-            isLoadingCatalogueSummary = false
-            return
-        }
-
-        isLoadingCatalogueSummary = true
-
-        do {
-            let summary = try await catalog.providerCatalogueSummary()
-            catalogueSummary = summary
-            isLoadingCatalogueSummary = false
-        } catch {
-            isLoadingCatalogueSummary = false
-        }
-    }
-
-    @MainActor
-    private func observeSyncProgress(for scope: SearchMediaScope) async {
-        setSyncProgress(nil, for: scope)
-        guard providerStore.hasConfiguration else { return }
-
-        let stream = catalog.observeSyncProgress(scope: scope)
-        for await progress in stream {
-            if Task.isCancelled {
-                break
-            }
-            setSyncProgress(progress, for: scope)
-        }
-    }
-
-    @MainActor
-    private func setSyncProgress(_ progress: CatalogueSyncProgress?, for scope: SearchMediaScope) {
-        switch scope {
-        case .movies:
-            movieSyncProgress = progress
-        case .series:
-            seriesSyncProgress = progress
-        case .all:
-            break
-        }
+    private func setSyncProgress() {
+//        switch scope {
+//        case .movies:
+//            movieSyncProgress = progress
+//        case .series:
+//            seriesSyncProgress = progress
+//        case .all:
+//            break
+//        }
     }
 
     private func syncSubtitle(
         kind: String,
-        progress: CatalogueSyncProgress?,
         fallbackSyncedCategories: Int?,
         fallbackTotalCategories: Int?
     ) -> String {
-        guard providerStore.hasConfiguration else {
-            return "Configure a provider to show catalogue size."
-        }
-
-        let totalCategories = progress?.totalCategories ?? fallbackTotalCategories
-        let syncedCategories = progress?.syncedCategories ?? fallbackSyncedCategories ?? 0
-
-        guard let totalCategories, totalCategories > 0 else {
-            return "Discovering \(kind) categories."
-        }
-
-        if syncedCategories < totalCategories {
-            return "\(syncedCategories) of \(totalCategories) \(kind) categories synced so far"
-        }
-
-        return "All \(kind) categories synced. Search is ready."
+//        guard sessionManager.hasActiveSession else {
+//            return "Configure a provider to show catalogue size."
+//        }
+//
+//        let totalCategories = progress?.totalCategories ?? fallbackTotalCategories
+//        let syncedCategories = progress?.syncedCategories ?? fallbackSyncedCategories ?? 0
+//
+//        guard let totalCategories, totalCategories > 0 else {
+//            return "Discovering \(kind) categories."
+//        }
+//
+//        if syncedCategories < totalCategories {
+//            return "\(syncedCategories) of \(totalCategories) \(kind) categories synced so far"
+//        }
+//
+//        return "All \(kind) categories synced. Search is ready."
+        return "TODO"
     }
 
     private func save() {
-        do {
-            try providerStore.save(baseURL: baseURL, username: username, password: password)
-            loadCurrentValues()
-            statusMessage = "Provider configuration saved."
-            statusIsError = false
-            logger.info("Provider configuration saved.")
-        } catch {
-            statusMessage = error.localizedDescription
-            statusIsError = true
-            logger.error("Failed to save provider configuration: \(error.localizedDescription, privacy: .public)")
+        guard let provider = providerFields.build() else {
+            fatalError("Should validate provider fields before calling save()")
         }
+        
+        sessionManager.initialize(provider: provider)
+        statusMessage = "Provider configuration saved."
+        statusIsError = false
+        logger.info("Provider configuration saved.")
     }
 
     private func clear() {
-        do {
-            try providerStore.clear()
-            loadCurrentValues()
-            statusMessage = "Provider configuration cleared."
-            statusIsError = false
-            logger.info("Provider configuration cleared.")
-        } catch {
-            statusMessage = error.localizedDescription
-            statusIsError = true
-            logger.error("Failed to clear provider configuration: \(error.localizedDescription, privacy: .public)")
-        }
+        sessionManager.clear()
+        statusMessage = "Provider configuration cleared."
+        statusIsError = false
+        logger.info("Provider configuration cleared.")
     }
 
     private func saveExcludedPrefixes() {
-        do {
-            try providerStore.saveExcludedCategoryPrefixes(excludedPrefixesInput)
-            loadCurrentValues()
-            statusMessage = "Excluded prefixes saved for the current provider."
-            statusIsError = false
-            logger.info("Excluded category prefixes saved.")
-        } catch {
-            statusMessage = error.localizedDescription
-            statusIsError = true
-            logger.error("Failed to save excluded category prefixes: \(error.localizedDescription, privacy: .public)")
-        }
+        // TODO: Implementation
+//        do {
+//            try sessionManager.saveExcludedCategoryPrefixes(excludedPrefixesInput)
+//            loadCurrentValues()
+//            statusMessage = "Excluded prefixes saved for the current provider."
+//            statusIsError = false
+//            logger.info("Excluded category prefixes saved.")
+//        } catch {
+//            statusMessage = error.localizedDescription
+//            statusIsError = true
+//            logger.error("Failed to save excluded category prefixes: \(error.localizedDescription, privacy: .public)")
+//        }
     }
 
     private func openPrefixSelector() {
@@ -733,7 +720,7 @@ struct SettingsScreen: View {
     }
 
     private func loadAvailablePrefixes(force: Bool) async {
-        guard providerStore.hasConfiguration else { return }
+        guard sessionManager.hasActiveSession else { return }
         if isLoadingPrefixOptions && !force { return }
 
         await MainActor.run {
@@ -741,19 +728,9 @@ struct SettingsScreen: View {
             prefixDiscoveryError = nil
         }
 
+        let categories: [XtreamCategory] = []
+        
         do {
-            let config = try providerStore.requiredConfiguration()
-            let service = XtreamService(
-                .shared,
-                baseURL: config.apiURL,
-                username: config.username,
-                password: config.password
-            )
-
-            async let vodCategories = service.getCategories(of: .vod)
-            async let seriesCategories = service.getCategories(of: .series)
-            let categories = try await vodCategories + seriesCategories
-
             let prefixes = Self.detectedPrefixOptions(from: categories)
             await MainActor.run {
                 availablePrefixOptions = prefixes
@@ -769,39 +746,39 @@ struct SettingsScreen: View {
     }
 
     private static func detectedPrefixOptions(from categories: [XtreamCategory]) -> [PrefixOption] {
-        var counts: [String: Int] = [:]
-        var samples: [String: [String]] = [:]
-
-        for category in categories {
-            let tagged = LanguageTaggedText(category.name)
-            guard let prefix = tagged.prefixLanguageCode else { continue }
-
-            counts[prefix, default: 0] += 1
-            let sample = tagged.groupedDisplayName
-            if !sample.isEmpty, !(samples[prefix] ?? []).contains(sample) {
-                samples[prefix, default: []].append(sample)
-            }
-        }
-
-        return counts.keys.sorted().map { prefix in
-            PrefixOption(
-                prefix: prefix,
-                matches: counts[prefix, default: 0],
-                categoryNames: Array(samples[prefix, default: []].prefix(3))
-            )
-        }
+//        var counts: [String: Int] = [:]
+//        var samples: [String: [String]] = [:]
+//
+//        for category in categories {
+//            counts[prefix, default: 0] += 1
+//            let sample = tagged.groupedDisplayName
+//            if !sample.isEmpty, !(samples[prefix] ?? []).contains(sample) {
+//                samples[prefix, default: []].append(sample)
+//            }
+//        }
+//
+//        return counts.keys.sorted().map { prefix in
+//            PrefixOption(
+//                prefix: prefix,
+//                matches: counts[prefix, default: 0],
+//                categoryNames: Array(samples[prefix, default: []].prefix(3))
+//            )
+//        }
+        
+        return []
     }
 
     private func synchronizeVisiblePrefixes() {
-        let excludedPrefixes = Set(providerStore.excludedCategoryPrefixes())
-        let availablePrefixes = Set(availablePrefixOptions.map(\.prefix))
-
-        if availablePrefixes.isEmpty {
-            selectedVisiblePrefixes = []
-            return
-        }
-
-        selectedVisiblePrefixes = availablePrefixes.subtracting(excludedPrefixes)
+        // TODO: Implementation
+//        let excludedPrefixes = Set(sessionManager.excludedCategoryPrefixes())
+//        let availablePrefixes = Set(availablePrefixOptions.map(\.prefix))
+//
+//        if availablePrefixes.isEmpty {
+//            selectedVisiblePrefixes = []
+//            return
+//        }
+//
+//        selectedVisiblePrefixes = availablePrefixes.subtracting(excludedPrefixes)
     }
 }
 
@@ -818,10 +795,7 @@ private extension View {
     }
 }
 
-#Preview {
-    let appContainer = try! AppContainer()
-
-    SettingsScreen()
-        .environment(appContainer.providerStore)
-        .environment(appContainer.catalog)
+#Preview(traits: .previewData) {
+    @Previewable @Environment(\.modelContext) var context
+    SettingsScreen(sessionManager: .init(userDefaults: .standard, modelContainer: context.container))
 }

@@ -11,11 +11,12 @@ import SwiftData
 enum AppPersistence {
     static let schema = Schema([
         Category.self,
+        MovieCategory.self,
+        SeriesCategory.self,
         Movie.self,
         Series.self,
+        Episode.self,
         Media.self,
-        MovieMedia.self,
-        EpisodeMedia.self,
         Download.self,
         WatchActivity.self,
     ])

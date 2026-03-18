@@ -10,12 +10,10 @@ import SwiftUI
 struct LiveScreen: View {
     let contentType: XtreamContentType
     
-    @Environment(ProviderStore.self) private var providerStore
+    @Environment(SessionManager.self) private var sessionManager
     
     @State private var selectedCategoryID: String?
     @State private var queryText = ""
-    @State private var browseSort: BrowseSort = .title
-    @State private var requestStateByProviderFingerprint: [String: MoviesProviderRequestState] = [:]
     @State private var isPresentingSettings = false
     
     init(contentType: XtreamContentType = .vod) {
