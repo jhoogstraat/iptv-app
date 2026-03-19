@@ -8,8 +8,6 @@
 import SwiftUI
 
 struct DownloadsScreen: View {
-    @Environment(Player.self) private var player
-
     var body: some View {
         NavigationStack {
             ContentUnavailableView {

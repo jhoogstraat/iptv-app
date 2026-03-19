@@ -92,8 +92,6 @@ struct SettingsScreen: View {
     @State private var availablePrefixOptions: [PrefixOption] = []
     @State private var selectedVisiblePrefixes: Set<String> = []
     @State private var prefixDiscoveryError: String?
-    @State private var statusMessage: String?
-    @State private var statusIsError = false
     
     init(sessionManager: SessionManager) {
         let fields: ProviderFields = switch sessionManager.session?.provider {
@@ -186,7 +184,7 @@ struct SettingsScreen: View {
             LabeledContent("Status") {
                 HStack(spacing: 6) {
                     Image(systemName: session ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    Text(session ? "All good" : "Needs setup")
+                    Text(session ? "All good" : "Needs Setup")
                 }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(session ? .green : .orange)
@@ -221,14 +219,6 @@ struct SettingsScreen: View {
             
             SecureField("Password", text: $providerFields.password, prompt: Text("Required"))
                 .textContentType(.password)
-            
-            if let statusMessage {
-                LabeledContent(statusIsError ? "Save Error" : "Recent Change") {
-                    Text(statusMessage)
-                        .foregroundStyle(statusIsError ? .red : .green)
-                        .multilineTextAlignment(.trailing)
-                }
-            }
             
             HStack {
                 Spacer()
@@ -368,17 +358,11 @@ struct SettingsScreen: View {
         guard let provider = providerFields.build() else {
             fatalError("Should validate provider fields before calling save()")
         }
-        
         sessionManager.initialize(provider: provider)
-        statusMessage = "Provider configuration saved."
-        statusIsError = false
-        logger.info("Provider configuration saved.")
     }
     
     private func clear() {
         sessionManager.clear()
-        statusMessage = "Provider configuration cleared."
-        statusIsError = false
         logger.info("Provider configuration cleared.")
     }
     

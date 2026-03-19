@@ -18,7 +18,7 @@ struct PlayerView: View {
     static let identifier = "PlayerView"
 
     @Environment(Player.self) private var player
-    @Environment(SessionManager.self) private var sessionManager
+    @Environment(ActiveSession.self) private var session
 
     @State private var isShowingControls = true
     @State private var scrubTime: Double?
@@ -89,14 +89,14 @@ struct PlayerView: View {
             badges.append(OverlayBadge(label: backend))
         }
 
-        if let resolution = primaryDisplayQuality?.resolution ?? player.currentItem?.source.resolution {
+        if let resolution = primaryDisplayQuality?.resolution ?? player.currentItem?.source?.resolution {
             badges.append(OverlayBadge(label: resolution))
         }
 
-        let frameRate = primaryDisplayQuality?.frameRate ?? player.currentItem?.source.framerate
-        if let frameRate, frameRate > 0 {
-            badges.append(OverlayBadge(label: "\(frameRate.formatted(.number.precision(.fractionLength(0)))) FPS"))
-        }
+//        let frameRate = primaryDisplayQuality?.frameRate ?? player.currentItem?.source.framerate
+//        if let frameRate, frameRate > 0 {
+//            badges.append(OverlayBadge(label: "\(frameRate.formatted(.number.precision(.fractionLength(0)))) FPS"))
+//        }
 
         if let audio = preferredAudioBadgeText {
             badges.append(OverlayBadge(label: audio))
@@ -106,7 +106,7 @@ struct PlayerView: View {
     }
 
     private var preferredAudioBadgeText: String? {
-        if let description = player.currentItem?.source.audioDescription {
+        if let description = player.currentItem?.source?.audioDescription {
             return description
         }
 

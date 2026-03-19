@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import OSLog
 
 enum NetworkError: Error {
     case badRequest
@@ -13,7 +14,7 @@ enum NetworkError: Error {
     case decodingError(Error)
     case invalidResponse
     case invalidURL
-    case httpError(Int)
+    case httpError(Int, String?)
 }
 
 extension NetworkError: LocalizedError {
@@ -30,8 +31,8 @@ extension NetworkError: LocalizedError {
                 return NSLocalizedString("Invalid response", comment: "invalidResponse")
             case .invalidURL:
                 return NSLocalizedString("Invalid URL", comment: "invalidURL")
-            case .httpError(let code):
-                return NSLocalizedString("Bad request (code \(code))", comment: "badRequest")
+            case .httpError(let code, let body):
+                return NSLocalizedString("Bad request (code \(code)), body: \(body)", comment: "badRequest")
         }
     }
     
@@ -94,6 +95,7 @@ struct HTTPClient: Sendable {
             let data: Data
             let response: URLResponse
             do {
+//                logger.info("Making http request (\(request))")
                 (data, response) = try await session.data(for: request)
             } catch is CancellationError {
                 throw CancellationError()
@@ -109,7 +111,7 @@ struct HTTPClient: Sendable {
             }
 
             guard (200..<300).contains(httpResponse.statusCode) else {
-                throw NetworkError.httpError(httpResponse.statusCode)
+                throw NetworkError.httpError(httpResponse.statusCode, String(data: data, encoding: .utf8))
             }
 
             do {

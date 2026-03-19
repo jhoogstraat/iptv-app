@@ -7,11 +7,11 @@
 
 import Foundation
 
-extension Category {
-    convenience init(from xtream: XtreamCategory) {
-        self.init(name: xtream.name)
-    }
-}
+//extension Category {
+//    convenience init(from xtream: XtreamCategory) {
+//        self.init(name: xtream.name)
+//    }
+//}
 
 //extension Movie {
 //    convenience init(from xtream: XtreamStream) {

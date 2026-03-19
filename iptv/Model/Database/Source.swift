@@ -15,14 +15,13 @@ import SwiftData
     var resolution: String?
     var framerate: Double?
     
-    var media: PlayableMedia
+    var media: PlayableMedia!
 
-    init(url: URL, streamBitrate: Int? = nil, audioDescription: String? = nil, videoResolution: String? = nil, videoFrameRate: Double? = nil, media: PlayableMedia) {
+    init(url: URL, streamBitrate: Int? = nil, audioDescription: String? = nil, videoResolution: String? = nil, videoFrameRate: Double? = nil) {
         self.url = url
         self.streamBitrate = streamBitrate
         self.audioDescription = audioDescription
         self.resolution = videoResolution
         self.framerate = videoFrameRate
-        self.media = media
     }
 }

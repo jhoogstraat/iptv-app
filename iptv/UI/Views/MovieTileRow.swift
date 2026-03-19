@@ -11,7 +11,7 @@ import OSLog
 struct MovieTileRow: View {
     let category: MovieCategory
     
-    @Environment(SessionManager.self) private var sessionManager
+//    @Environment(ActiveSession.self) private var session
     
     var body: some View {
         Section {
@@ -69,12 +69,12 @@ struct MovieTileRow: View {
 #Preview(traits: .previewData, .fixedLayout(width: 1200, height: 700)) {
     ScrollView {
         LazyVStack(alignment: .leading) {
-            MovieTileRow(category: MovieCategory(name: "name1"))
-            MovieTileRow(category: MovieCategory(name: "name2"))
-            MovieTileRow(category: MovieCategory(name: "name3"))
-            MovieTileRow(category: MovieCategory(name: "name4"))
-            MovieTileRow(category: MovieCategory(name: "name5"))
-            MovieTileRow(category: MovieCategory(name: "name6"))
+            MovieTileRow(category: MovieCategory(remoteId: "1", name: "name1"))
+            MovieTileRow(category: MovieCategory(remoteId: "2", name: "name2"))
+            MovieTileRow(category: MovieCategory(remoteId: "3", name: "name3"))
+            MovieTileRow(category: MovieCategory(remoteId: "4", name: "name4"))
+            MovieTileRow(category: MovieCategory(remoteId: "5", name: "name5"))
+            MovieTileRow(category: MovieCategory(remoteId: "6", name: "name6"))
         }
     }
 }

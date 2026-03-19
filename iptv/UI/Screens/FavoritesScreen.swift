@@ -9,7 +9,7 @@ import SwiftUI
 import SwiftData
 
 struct FavoritesScreen: View {
-    @Environment(SessionManager.self) private var sessionManager
+    @Environment(ActiveSession.self) private var session
     
     @Query private var favorites: [Media]
     @Query private var continueWatching: [WatchActivity]
@@ -19,17 +19,9 @@ struct FavoritesScreen: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if !sessionManager.hasActiveSession {
-                    missingProviderView
-                } else if isLoading {
-                    ProgressView()
-                } else {
-                    content
-                }
-            }
-            .navigationTitle("Library")
-            .withBackgroundActivityToolbar()
+            content
+                .navigationTitle("Library")
+                .withBackgroundActivityToolbar()
         }
     }
 
