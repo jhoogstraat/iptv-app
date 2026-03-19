@@ -21,7 +21,6 @@ struct FavoritesScreen: View {
         NavigationStack {
             content
                 .navigationTitle("Library")
-                .withBackgroundActivityToolbar()
         }
     }
 

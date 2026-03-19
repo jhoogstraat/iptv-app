@@ -15,6 +15,7 @@ struct ContentView: View {
     @AppStorage("sidebarCustomizations") var tabViewCustomization: TabViewCustomization
 #endif
     
+    @Environment(SessionManager.self) private var sessionManager
     @Environment(ActiveSession.self) private var session
     
     @State private var selectedTab: Tabs = .home
@@ -73,7 +74,7 @@ struct ContentView: View {
                 TabSection("Settings") {
                     Tab(Tabs.settings.name, systemImage: Tabs.settings.symbol, value: Tabs.settings) {
                         NavigationStack {
-                            SettingsScreen()
+                            SettingsScreen(sessionManager: sessionManager)
                         }
                     }
                     .customizationID(Tabs.settings.customizationID)

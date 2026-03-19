@@ -627,12 +627,12 @@ struct PlayerView: View {
             audioControlChip
             subtitleControlChip
             moreControlChip
-            if player.episodeOptions.count > 1 {
-                controlChip("Episodes", icon: "list.number") {
-                    mobileSheet = .episodes
-                }
-                .accessibilityIdentifier("player.chip.episodes")
-            }
+//            if player.episodeOptions.count > 1 {
+//                controlChip("Episodes", icon: "list.number") {
+//                    mobileSheet = .episodes
+//                }
+//                .accessibilityIdentifier("player.chip.episodes")
+//            }
         }
     }
 
@@ -666,17 +666,17 @@ struct PlayerView: View {
                 }
             }
 
-            if player.episodeOptions.count > 1 {
-                compactMobileControlGroup {
-                    compactIconControlButton(
-                        systemImage: "list.number",
-                        accessibilityLabel: "Episodes",
-                        accessibilityIdentifier: "player.chip.episodes"
-                    ) {
-                        mobileSheet = .episodes
-                    }
-                }
-            }
+//            if player.episodeOptions.count > 1 {
+//                compactMobileControlGroup {
+//                    compactIconControlButton(
+//                        systemImage: "list.number",
+//                        accessibilityLabel: "Episodes",
+//                        accessibilityIdentifier: "player.chip.episodes"
+//                    ) {
+//                        mobileSheet = .episodes
+//                    }
+//                }
+//            }
 
             Spacer(minLength: 0)
         }
@@ -857,7 +857,7 @@ struct PlayerView: View {
         case .episodes:
             NavigationStack {
                 List {
-                    episodeListRows
+//                    episodeListRows
                 }
                 .navigationTitle("Episodes")
             }

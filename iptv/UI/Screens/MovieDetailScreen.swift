@@ -68,7 +68,6 @@ struct MovieDetailScreen: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .preferredColorScheme(.dark)
         #endif
-        .withBackgroundActivityToolbar()
         .sheet(isPresented: $isShowingOtherSources) {
             Text("Not yet implemented")
 //            DetailAlternativeSourcesSheet(

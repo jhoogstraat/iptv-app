@@ -22,7 +22,6 @@ struct ForYouScreen: View {
         NavigationStack {
             content
             .navigationTitle("For You")
-            .withBackgroundActivityToolbar()
             .sheet(item: $selectedMedia) { media in
                 NavigationStack {
                     destination(for: media)
