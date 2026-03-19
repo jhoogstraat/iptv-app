@@ -35,7 +35,9 @@ struct IPTVApp: App {
 #endif
                     .preferredColorScheme(.dark)
             } else {
-                Text("Login Screen")
+                NavigationView {
+                    SettingsScreen(sessionManager: sessionManager)
+                }
             }
         }
         #if !os(tvOS)

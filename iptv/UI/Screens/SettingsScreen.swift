@@ -93,6 +93,8 @@ struct SettingsScreen: View {
     @State private var selectedVisiblePrefixes: Set<String> = []
     @State private var prefixDiscoveryError: String?
     
+    @Environment(\.horizontalSizeClass) var sizeClass
+    
     init(sessionManager: SessionManager) {
         let fields: ProviderFields = switch sessionManager.session?.provider {
             case let xtream as XtreamProvider:
@@ -125,15 +127,13 @@ struct SettingsScreen: View {
 #else
         Form {
             providerOverviewSection
-            providerCredentialsSection
-            providerActionsSection
+            providerConfigurationSection
             librarySection
             playbackSection
             supportSection
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .withBackgroundActivityToolbar()
 #endif
     }
     
@@ -175,7 +175,11 @@ struct SettingsScreen: View {
         let session = sessionManager.hasActiveSession
         
         return Section {
-            HStack(spacing: 12) {
+            let layout = sizeClass == .compact
+                        ? AnyLayout(VStackLayout(spacing: 20))
+                        : AnyLayout(HStackLayout(spacing: 20))
+
+            layout {
                 StatsCard(title: "Movies", value: "...", subtitle: "TODO")
                 StatsCard(title: "Series", value: "...", subtitle: "TODO")
                 StatsCard(title: "TV", value: "Soon", subtitle: "Live TV stats will appear here once TV support lands.")

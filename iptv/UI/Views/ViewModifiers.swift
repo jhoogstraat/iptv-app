@@ -18,14 +18,6 @@ extension View {
         #endif
     }
     #endif
-
-    func withBackgroundActivityToolbar() -> some View {
-        #if os(macOS)
-        self
-        #else
-        modifier(BackgroundActivityToolbarModifier())
-        #endif
-    }
 }
 
 #if !os(macOS)
@@ -50,34 +42,6 @@ private struct FullScreenCoverModalModifier: ViewModifier {
             .onChange(of: player.presentation) { _, newPresentation in
                 isPresentingPlayer = newPresentation == .fullWindow
             }
-    }
-}
-#endif
-
-#if !os(macOS)
-private struct BackgroundActivityToolbarModifier: ViewModifier {
-    @Environment(BackgroundActivityCenter.self) private var backgroundActivityCenter
-
-    func body(content: Content) -> some View {
-        content.toolbar {
-            if shouldShowCatalogueIndicator {
-                ToolbarItem(placement: .topBarTrailing) {
-                    BackgroundActivityIndicatorView(activityCenter: backgroundActivityCenter)
-                }
-            }
-        }
-    }
-
-    private var shouldShowCatalogueIndicator: Bool {
-        backgroundActivityCenter.activeList.contains(where: isCatalogueIndexActivity)
-        || backgroundActivityCenter.recentList.contains {
-            isCatalogueIndexActivity($0) && $0.state == .failed
-        }
-    }
-
-    private func isCatalogueIndexActivity(_ activity: BackgroundActivity) -> Bool {
-        let id = activity.id.lowercased()
-        return id.hasPrefix("background-refresh:")
     }
 }
 #endif

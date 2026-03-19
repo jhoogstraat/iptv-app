@@ -48,7 +48,6 @@ struct EpisodeDetailTile: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
             .preferredColorScheme(.dark)
             #endif
-            .withBackgroundActivityToolbar()
             .sheet(isPresented: $isShowingOtherSources) {
                 Text("TODO")
     //            DetailAlternativeSourcesSheet(
