@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import OSLog
 
 @Observable
 class SessionManager {
@@ -29,15 +30,25 @@ class SessionManager {
     }
     
     func load(key: UserDefaultKey) {
-        guard let id = userDefaults.string(for: key), let uuid = UUID(uuidString: id), let provider = Provider.with(id: uuid, in: modelContainer.mainContext) else { return }
+        guard
+            let id = userDefaults.string(for: key),
+            let uuid = UUID(uuidString: id),
+            let provider = Provider.with(id: uuid, in: modelContainer.mainContext)
+        else { return }
         
         self.session = self.build(for: provider)
     }
     
-    func initialize(provider: Provider) {
+    func initialize(provider: XtreamProvider) {
         self.modelContainer.mainContext.insert(provider)
-        userDefaults.set(provider.id.uuidString, for: .activeSession)
-        self.session = self.build(for: provider)
+        
+        do {
+            try modelContainer.mainContext.save()
+            userDefaults.set(provider.id.uuidString, for: .activeSession)
+            self.session = self.build(for: provider)
+        } catch {
+            logger.error("Saving database failed: \(error)")
+        }
     }
     
     func change(to id: Provider.ID) {
@@ -58,7 +69,11 @@ class SessionManager {
     private func build(for provider: Provider) -> ActiveSession? {
         if let provider = provider as? XtreamProvider {
             let service = XtreamService(.shared, baseURL: provider.endpoint, username: provider.username, password: provider.password)
-            return ActiveSession(provider: provider, service: service)
+            let syncManager = SyncManager(container: modelContainer, provider: provider, service: service)
+            
+            syncManager.sync()
+            
+            return ActiveSession(provider: provider, service: service, syncManager: syncManager)
         }
         
         fatalError("Unknown provider type encountered. Fix before release.")
@@ -70,9 +85,11 @@ class SessionManager {
 class ActiveSession {
     let provider: Provider
     let service: XtreamService
+    let syncManager: SyncManager
     
-    init(provider: Provider, service: XtreamService) {
+    init(provider: Provider, service: XtreamService, syncManager: SyncManager) {
         self.provider = provider
         self.service = service
+        self.syncManager = syncManager
     }
 }

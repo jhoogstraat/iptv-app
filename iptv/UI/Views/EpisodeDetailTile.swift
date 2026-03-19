@@ -14,7 +14,7 @@ struct EpisodeDetailTile: View {
     let episode: Episode
 
     @Environment(Player.self) private var player
-    @Environment(SessionManager.self) private var sessionManager
+//    @Environment(ActiveSession.self) private var session
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var isLoading = true
@@ -419,7 +419,7 @@ struct EpisodeDetailTile: View {
     
     private func primaryActionTitle(for episode: Episode) -> String {
         return String(
-            localized: "Play E\(episode.episode)",
+            localized: "Play E\(episode.episodeNumber)",
             locale: Locale.current,
             comment: "Primary action to play the selected episode"
         )
@@ -427,7 +427,7 @@ struct EpisodeDetailTile: View {
 
     private func seasonTitle(in episode: Episode) -> String {
         return String(
-            localized: "Season \(episode.season.season)",
+            localized: "Season \(episode.season.seasonNumber)",
             locale: Locale.current,
             comment: "Season title in the episode browser"
         )

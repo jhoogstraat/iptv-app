@@ -8,17 +8,13 @@
 import SwiftUI
 
 struct LiveScreen: View {
-    let contentType: XtreamContentType
-    
-    @Environment(SessionManager.self) private var sessionManager
+    @Environment(ActiveSession.self) private var session
     
     @State private var selectedCategoryID: String?
     @State private var queryText = ""
     @State private var isPresentingSettings = false
     
-    init(contentType: XtreamContentType = .vod) {
-        self.contentType = contentType
-    }
+    init() { }
     
     var body: some View {
         NavigationStack {

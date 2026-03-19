@@ -17,7 +17,7 @@ struct XtreamService: Sendable {
     
     init(_ client: HTTPClient, baseURL: URL, username: String, password: String) {
         self.client = client
-        self.baseURL = baseURL
+        self.baseURL = baseURL.appendingPathComponent("player_api.php")
         self.username = username
         self.password = password
     }
@@ -46,8 +46,8 @@ struct XtreamService: Sendable {
         return data
     }
     
-    func getVodInfo(of id: String) async throws -> XtreamVod {
-        let query = [URLQueryItem(name: "action", value: "get_vod_info"), URLQueryItem(name: "vod_id", value: id)]
+    func getVodInfo(of id: Int) async throws -> XtreamVod {
+        let query = [URLQueryItem(name: "action", value: "get_vod_info"), URLQueryItem(name: "vod_id", value: "\(id)")]
         let resource = Resource<XtreamVod>(url: baseURL, method: .get(auth + query))
         let data = try await client.load(resource)
         return data
@@ -60,20 +60,8 @@ struct XtreamService: Sendable {
         return data
     }
     
-    func getPlayURL(for streamId: Int, type: String, containerExtension: String) -> URL {
-        let pathComponent = playbackPathComponent(for: type)
-        let url = URL(string: "\(pathComponent)/\(username)/\(password)/\(streamId).\(containerExtension)", relativeTo: baseURL)!
+    func getPlayURL(for streamId: Int, type: XtreamContentType, containerExtension: String?) -> URL {
+        let url = URL(string: "\(type.playbackPathComponent)/\(username)/\(password)/\(streamId)" + (containerExtension != nil ? ".\(containerExtension!)" : ""), relativeTo: baseURL)!
         return url
-    }
-
-    private func playbackPathComponent(for type: String) -> String {
-        let normalizedType = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if normalizedType == "movie" {
-            return "movie"
-        }
-        if let contentType = XtreamContentType(rawValue: normalizedType) {
-            return contentType.playbackPathComponent
-        }
-        return normalizedType
     }
 }

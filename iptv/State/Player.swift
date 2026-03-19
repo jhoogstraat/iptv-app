@@ -125,7 +125,6 @@ final class Player {
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
-        providerFingerprintProvider: @escaping @MainActor () -> String? = { nil },
         defaults: UserDefaults = .standard
     ) {
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()

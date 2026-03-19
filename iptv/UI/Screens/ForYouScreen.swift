@@ -9,7 +9,7 @@ import SwiftUI
 import OSLog
 
 struct ForYouScreen: View {
-    @Environment(SessionManager.self) private var sessionManager
+    @Environment(ActiveSession.self) private var session
     @Environment(Player.self) private var player
 
     @State private var isPresentingSettings = false
@@ -20,42 +20,9 @@ struct ForYouScreen: View {
     
     var body: some View {
         NavigationStack {
-            Group {
-                if !sessionManager.hasActiveSession {
-                    missingProviderView
-                } else {
-                    ProgressView()
-                }
-            }
+            content
             .navigationTitle("For You")
             .withBackgroundActivityToolbar()
-            .toolbar {
-                if sessionManager.hasActiveSession {
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            print("TODO")
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .disabled(isRefreshing)
-                    }
-                }
-            }
-            #if !os(macOS)
-            .sheet(isPresented: $isPresentingSettings) {
-                NavigationStack {
-                    SettingsScreen()
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Done") {
-                                    isPresentingSettings = false
-                                }
-                            }
-                        }
-                }
-                .environment(sessionManager)
-            }
-            #endif
             .sheet(item: $selectedMedia) { media in
                 NavigationStack {
                     destination(for: media)
@@ -64,8 +31,7 @@ struct ForYouScreen: View {
         }
     }
 
-    @ViewBuilder
-    private func content() -> some View {
+    private var content: some View {
 //        case .failed(let error):
 //            VStack(spacing: 12) {
 //                Text(error.localizedDescription)
@@ -188,10 +154,7 @@ struct ForYouScreen: View {
     }
 
     private func startPlayback(media: PlayableMedia) {
-        Task {
-            playError = nil
-            player.load(media, presentation: .fullWindow)
-        }
+        player.load(media, presentation: .fullWindow)
     }
 }
 

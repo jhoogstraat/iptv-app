@@ -44,7 +44,7 @@ struct BrowseScreen: View {
     @State var queryText: String
     @State var sort: BrowseSort
 
-    @Environment(SessionManager.self) private var sessionManager
+//    @Environment(ActiveSession.self) private var session
 
     @Query private var categories: [MovieCategory]
     
@@ -109,7 +109,7 @@ struct BrowseScreen: View {
         .searchable(text: $queryText, prompt: "Search \(screenTitle)")
 //        .withBackgroundActivityToolbar()
         .toolbar {
-            var groups = Dictionary(grouping: categories) { $0.group }.map { (key: $0.key, categories: $0.value) }
+            let groups = Dictionary(grouping: categories) { $0.group }.map { (key: $0.key, categories: $0.value) }
             
             ToolbarItem(placement: .principal) {
                 Menu {
