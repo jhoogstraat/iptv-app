@@ -842,7 +842,7 @@ final class Player {
 //            videoID: currentItem.id,
 //            contentType: currentItem.contentType,
 //            title: currentItem.name,
-//            coverImageURL: currentItem.coverImageURL,
+//            cover: currentItem.cover,
 //            containerExtension: currentItem.containerExtension,
 //            rating: currentItem.rating
 //        )
@@ -868,7 +868,7 @@ final class Player {
 //            videoID: currentItem.id,
 //            contentType: currentItem.contentType,
 //            title: currentItem.name,
-//            coverImageURL: currentItem.coverImageURL,
+//            cover: currentItem.cover,
 //            containerExtension: currentItem.containerExtension,
 //            rating: currentItem.rating
 //        )

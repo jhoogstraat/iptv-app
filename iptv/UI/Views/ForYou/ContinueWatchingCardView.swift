@@ -13,7 +13,7 @@ struct ContinueWatchingCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomLeading) {
-                AsyncImage(url: item.coverImageURL) { phase in
+                AsyncImage(url: item.cover) { phase in
                     switch phase {
                     case .success(let image):
                         image

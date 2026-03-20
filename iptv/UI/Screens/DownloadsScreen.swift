@@ -143,7 +143,7 @@ struct DownloadsScreen: View {
 //    }
 //
 //    private var artwork: some View {
-//        AsyncImage(url: URL(string: download.media.source.coverImageURL ?? "")) { phase in
+//        AsyncImage(url: URL(string: download.media.source.cover ?? "")) { phase in
 //            switch phase {
 //            case .success(let image):
 //                image.boundedCoverArtwork()

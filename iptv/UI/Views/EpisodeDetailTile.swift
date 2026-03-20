@@ -100,8 +100,14 @@ struct EpisodeDetailTile: View {
 
                             episodeBrowser(season: episode.season)
 
-                            section("Cast", text: episode.castText)
-                            section("Director", text: episode.directorText)
+                            if let cast = episode.info?.cast, !cast.isEmpty {
+                                section("Cast", text: cast.joined())
+                            }
+                            
+                            if let director = episode.info?.director, !director.isEmpty {
+                                section("Director", text: director.joined())
+                            }
+                            
                             section("About", text: aboutText(for: episode))
                         }
                         .background(Color.black)
@@ -171,7 +177,7 @@ struct EpisodeDetailTile: View {
 
         return VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             Group {
-                if let artworkURL = episode.heroImageURL {
+                if let artworkURL = episode.info?.heroImageURL {
                     Text("TODO")
 //                    AsyncImage(url: artworkURL) { phase in
 //                        switch phase {
@@ -444,27 +450,27 @@ struct EpisodeDetailTile: View {
     }
 
     private func heroArtworkURL(for episode: Episode) -> URL? {
-        episode.coverImageURL
+        episode.cover
     }
 
     private func collapsedArtworkURL(for episode: Episode) -> URL? {
-        episode.coverImageURL
+        episode.cover
     }
 
     private func heroTitleArtworkURL(for episode: Episode) -> URL? {
-       episode.coverImageURL
+       episode.cover
     }
 
     private func heroGenreText(for episode: Episode) -> String? {
-        episode.genreText?.replacingOccurrences(of: ", ", with: " / ")
+        episode.info?.genre.joined()
     }
 
     private func heroYearText(for episode: Episode) -> String? {
-        episode.releaseDate?.formatted()
+        episode.info?.releaseDate?.formatted()
     }
 
     private func heroRuntimeText(for episode: Episode) -> String? {
-        episode.runtime?.formatted()
+        episode.info?.runtime?.formatted()
     }
 
     private func heroScoreText(for episode: Episode) -> String? {
@@ -472,7 +478,7 @@ struct EpisodeDetailTile: View {
     }
 
     private func overviewText(episode: Episode) -> some View {
-        Text(episode.plot ?? episode.detailsDescription ?? String(localized: "Not available.", comment: "Fallback when metadata is missing"))
+        Text(episode.info?.plot ?? String(localized: "Not available.", comment: "Fallback when metadata is missing"))
             .font(.title3.weight(.regular))
             .lineSpacing(6)
             .foregroundStyle(.white)
@@ -592,16 +598,8 @@ struct EpisodeDetailTile: View {
             : String(localized: "\(count) episodes", locale: Locale.current, comment: "Plural episode count")
     }
 
-    private func episodeShortLabel(for episode: XtreamEpisode) -> String {
-        String(localized: "E\(episode.episodeNum)", locale: Locale.current, comment: "Short episode label")
-    }
-
-    private func episodeBadgeText(for episode: XtreamEpisode) -> String {
-        String(localized: "Episode \(episode.episodeNum)", locale: Locale.current, comment: "Episode card title label")
-    }
-
     private func episodeRuntimeText() -> String? {
-        episode.runtime?.formatted()
+        episode.info?.runtime?.formatted()
     }
 
     private func progressStatusText() -> String {
@@ -650,7 +648,7 @@ struct EpisodeDetailTile: View {
 
 #Preview {
     NavigationStack {
-//        EpisodeDetailTile(episode: .init(id: 10, name: "Example Series", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, coverImageURL: nil, tmdbId: nil, rating: nil))
+//        EpisodeDetailTile(episode: .init(id: 10, name: "Example Series", containerExtension: "mp4", contentType: XtreamContentType.series.rawValue, cover: nil, tmdbId: nil, rating: nil))
     }
     .frame(width: 390, height: 844)
 }

@@ -52,7 +52,7 @@ extension Movie {
 //            youtubeTrailer: info.youtubeTrailer.flatMap(URL.init),
 //            sourceId: data.streamId,
 //            tmdbId: stream.tmdbId ?? info.tmdbId,
-//            coverImageURL: URL(string: info.coverBig),
+//            cover: URL(string: info.coverBig),
 //            heroImageURL: URL(string: info.movieImage),
 //            activity: nil,
 //            category: category,

@@ -17,7 +17,7 @@ import SwiftData
     var language: String?
     var backdropURLs: [URL]
     var duration: Duration?
-    var coverImageURL: URL?
+    var cover: URL?
     var heroImageURL: URL?
     var releaseDate: Date?
     var ageRating: String?
@@ -29,7 +29,7 @@ import SwiftData
 
     var episodeRuntime: Int?
     
-    init(media: Media, plot: String? = nil, runtime: Duration? = nil, genre: [String], language: String? = nil, backdropURLs: [URL], duration: Duration? = nil, coverImageURL: URL? = nil, heroImageURL: URL? = nil, releaseDate: Date? = nil, ageRating: String? = nil, country: String? = nil, director: [String], cast: [String], actors: [String], mpaaRating: String? = nil, episodeRuntime: Int? = nil) {
+    init(media: Media, plot: String? = nil, runtime: Duration? = nil, genre: [String], language: String? = nil, backdropURLs: [URL], duration: Duration? = nil, cover: URL? = nil, heroImageURL: URL? = nil, releaseDate: Date? = nil, ageRating: String? = nil, country: String? = nil, director: [String], cast: [String], actors: [String], mpaaRating: String? = nil, episodeRuntime: Int? = nil) {
         self.media = media
         self.plot = plot
         self.runtime = runtime
@@ -37,7 +37,7 @@ import SwiftData
         self.language = language
         self.backdropURLs = backdropURLs
         self.duration = duration
-        self.coverImageURL = coverImageURL
+        self.cover = cover
         self.heroImageURL = heroImageURL
         self.releaseDate = releaseDate
         self.ageRating = ageRating
@@ -56,8 +56,12 @@ import SwiftData
     var sourceId: Int
     var tmdbId: String?
     var rating: Double?
-    var youtubeTrailer: String?
-    var coverImageURL: URL?
+    var trailer: String?
+    var cover: URL?
+    var added: Date
+    
+    var isFavorite: Bool = false
+    var category: Category
     
     @Relationship(deleteRule: .cascade, inverse: \MediaInfo.media)
     var info: MediaInfo?
@@ -65,22 +69,18 @@ import SwiftData
     @Relationship(deleteRule: .cascade, inverse: \WatchActivity.media)
     var activity: WatchActivity?
     
-    var category: Category
-    var isFavorite: Bool = false
-    var added: Date
-    
-    init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, youtubeTrailer: String? = nil, coverImageURL: URL? = nil, info: MediaInfo? = nil, activity: WatchActivity? = nil, category: Category, isFavorite: Bool, added: Date) {
+    init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, trailer: String? = nil, cover: URL? = nil, added: Date, isFavorite: Bool = false, category: Category, info: MediaInfo? = nil, activity: WatchActivity? = nil) {
         self.name = name
         self.sourceId = sourceId
         self.tmdbId = tmdbId
         self.rating = rating
-        self.youtubeTrailer = youtubeTrailer
-        self.coverImageURL = coverImageURL
+        self.trailer = trailer
+        self.cover = cover
+        self.added = added
+        self.isFavorite = isFavorite
+        self.category = category
         self.info = info
         self.activity = activity
-        self.category = category
-        self.isFavorite = isFavorite
-        self.added = added
     }
 }
 
@@ -92,16 +92,17 @@ import SwiftData
     @Relationship(inverse: \Download.media)
     var download: Download?
     
-    init(source: MediaSource!, download: Download? = nil) {
+    init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, trailer: String? = nil, cover: URL? = nil, added: Date, isFavorite: Bool = false, category: Category, info: MediaInfo? = nil, activity: WatchActivity? = nil, source: MediaSource!, download: Download? = nil) {
         self.source = source
         self.download = download
+        super.init(name: name, sourceId: sourceId, added: added, isFavorite: isFavorite, category: category)
     }
 }
 
 @available(iOS 26, macOS 26, watchOS 26, tvOS 26, *)
 @Model final class Movie: PlayableMedia {
-    init(source: MediaSource, download: Download? = nil) {
-        super.init(source: source, download: download)
+    override init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, trailer: String? = nil, cover: URL? = nil, added: Date, isFavorite: Bool = false, category: Category, info: MediaInfo? = nil, activity: WatchActivity? = nil, source: MediaSource!, download: Download? = nil) {
+        super.init(name: name, sourceId: sourceId, added: added, isFavorite: isFavorite, category: category, source: source, download: download)
     }
 }
 
@@ -112,10 +113,11 @@ import SwiftData
     
     @Relationship(deleteRule: .cascade, inverse: \Episode.series)
     var episodes: [Episode] = []
-     
-    init(seasons: [Season], episodes: [Episode]) {
+    
+    init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, trailer: String? = nil, cover: URL? = nil, added: Date, isFavorite: Bool = false, category: Category, info: MediaInfo? = nil, activity: WatchActivity? = nil, source: MediaSource!, download: Download? = nil, seasons: [Season], episodes: [Episode]) {
         self.seasons = seasons
         self.episodes = episodes
+        super.init(name: name, sourceId: sourceId, added: added, isFavorite: isFavorite, category: category)
     }
 }
 
@@ -128,10 +130,11 @@ import SwiftData
     @Relationship(inverse: \Episode.season)
     var episodes: [Episode] = []
     
-    init(seasonNumber: Int, series: Series, episodes: [Episode]) {
+    init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, trailer: String? = nil, cover: URL? = nil, added: Date, isFavorite: Bool = false, category: Category, info: MediaInfo? = nil, activity: WatchActivity? = nil, source: MediaSource!, download: Download? = nil, seasonNumber: Int, series: Series, episodes: [Episode]) {
         self.seasonNumber = seasonNumber
         self.series = series
         self.episodes = episodes
+        super.init(name: name, sourceId: sourceId, added: added, isFavorite: isFavorite, category: category)
     }
 }
 
@@ -143,9 +146,10 @@ import SwiftData
     
     var season: Season
     
-    init(episodeNumber: Int, series: Series, season: Season) {
+    init(name: String, sourceId: Int, tmdbId: String? = nil, rating: Double? = nil, trailer: String? = nil, cover: URL? = nil, added: Date, isFavorite: Bool = false, category: Category, info: MediaInfo? = nil, activity: WatchActivity? = nil, source: MediaSource!, download: Download? = nil, episodeNumber: Int, series: Series, season: Season) {
         self.episodeNumber = episodeNumber
         self.series = series
         self.season = season
+        super.init(name: name, sourceId: sourceId, added: added, isFavorite: isFavorite, category: category, source: source, download: download)
     }
 }
