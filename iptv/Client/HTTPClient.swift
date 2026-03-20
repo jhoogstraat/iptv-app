@@ -64,13 +64,20 @@ struct HTTPClient: Sendable {
     static let shared = HTTPClient()
     private let session: URLSession
     private let connectionMonitor: InternetConnectionMonitor
+    private let decoder: JSONDecoder
     
     private init(connectionMonitor: InternetConnectionMonitor = .shared) {
         let configuration = URLSessionConfiguration.default
         configuration.httpAdditionalHeaders = ["Content-Type": "application/json"]
         configuration.waitsForConnectivity = true
+        
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        
         self.session = URLSession(configuration: configuration)
         self.connectionMonitor = connectionMonitor
+        self.decoder = decoder
     }
     
     func load<T: Decodable>(_ resource: Resource<T>) async throws -> T {
@@ -95,7 +102,7 @@ struct HTTPClient: Sendable {
             let data: Data
             let response: URLResponse
             do {
-//                logger.info("Making http request (\(request))")
+                logger.info("Making http request (\(request))")
                 (data, response) = try await session.data(for: request)
             } catch is CancellationError {
                 throw CancellationError()
@@ -115,7 +122,7 @@ struct HTTPClient: Sendable {
             }
 
             do {
-                let result = try JSONDecoder().decode(T.self, from: data)
+                let result = try decoder.decode(T.self, from: data)
                 return result
             } catch {
                 throw NetworkError.decodingError(error)

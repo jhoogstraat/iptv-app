@@ -11,9 +11,9 @@ import OSLog
 
 @Observable
 final class SyncManager {
-    let container: ModelContainer
-    let provider: Provider
-    let service: XtreamService
+    private let container: ModelContainer
+    private let provider: Provider
+    private let service: XtreamService
     
     init(container: ModelContainer, provider: Provider, service: XtreamService) {
         self.container = container
@@ -33,31 +33,56 @@ final class SyncManager {
         }
     }
     
-    private func syncMovies() async throws {
+    private func fullIndex() async throws {
         let categories = try await service.getCategories(of: .vod)
+        let streams = try await service.getStreams(of: .vod)
         
-        for category in categories {
+        let movieCategories = categories.map(MovieCategory.init)
+        
+        for stream in streams {
+            
+        }
+    }
+    
+    private func syncMovies() async throws {
+        for category in try await service.getCategories(of: .vod) {
+            let streams = try await service.getStreams(of: .vod, in: category.id)
+
             let count = try Category.countMedia(of: category.id, on: container.mainContext)
-            if count > 0 {
+            if count == streams.count {
                 logger.info("Category \(category.name) up to date with \(count) media.")
                 continue
             } else {
                 logger.info("Synchronizing category \(category.name)")
             }
             
-            let entity = MovieCategory(remoteId: category.id, name: category.name, group: nil, movies: [])
-            container.mainContext.insert(entity)
-            
-            let streams = try await service.getStreams(of: .vod, in: category.id)
+            let context = ModelContext(container)
+
+            let movieCategory = MovieCategory(from: category)
+            context.insert(movieCategory)
             
             logger.info("Found \(streams.count) streams in category \(category.name)")
+            
             for stream in streams {
-                let info = try await service.getVodInfo(of: stream.id)
+                let vod = try await service.getVodInfo(of: stream.id)
                 
-                let source = MediaSource(url: service.getPlayURL(for: stream.id, type: .vod, containerExtension: stream.containerExtension))
-                let movie = Movie(name: info.info.name, plot: info.info.plot, runtime: nil, releaseDate: nil, ageRating: info.info.age, country: info.info.country, director: info.info.director, cast: info.info.cast, rating: info.info.rating, genre: info.info.genre, language: nil, sourceId: stream.id, tmdbId: stream.tmdbId, coverImageURL: URL(string: info.info.coverBig), heroImageURL: URL(string: info.info.movieImage), activity: nil, category: entity, isFavorite: false, added: .now, source: source)
-                container.mainContext.insert(movie)
+                let source = MediaSource(
+                    url: service.getPlayURL(
+                        for: stream.id,
+                        type: .vod,
+                        containerExtension: stream.containerExtension ?? vod.data.containerExtension
+                    ),
+                    streamBitrate: vod.info.bitrate > 0 ? vod.info.bitrate : nil,
+//                    audioDescription: streamAudioDescription(from: info.info.audio),
+//                    videoResolution: streamVideoResolution(from: info.info.video),
+//                    videoFrameRate: streamFrameRate(from: info.info.video)
+                )
+                
+//                let movie = Movie(from: stream, movie: vod, category: movieCategory, source: source)
+//                container.mainContext.insert(movie)
             }
+            
+            try context.save()
         }
     }
 }

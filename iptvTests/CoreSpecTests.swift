@@ -245,12 +245,207 @@ struct CoreSpecTests {
         #expect(stream.categoryIds == [7, 8])
         #expect(stream.containerExtension == "mkv")
         #expect(stream.rating == 7.1)
-        #expect(stream.rating5Based == 4.2)
         #expect(stream.type == "movie")
         #expect(stream.tmdbId == 123)
         #expect(stream.streamIcon == "https://example.com/poster.jpg")
         #expect(stream.added == "2026-01-01")
         #expect(stream.trailer == "")
+    }
+
+    @Test
+    func mapperBuildsMovieCategoryFromXtreamCategory() throws {
+        let data = #"""
+        {
+          "category_id": "12",
+          "category_name": "  Action  "
+        }
+        """#.data(using: .utf8)!
+
+        let xtreamCategory = try JSONDecoder().decode(XtreamCategory.self, from: data)
+        let category = MovieCategory(from: xtreamCategory)
+
+        #expect(category.remoteId == "12")
+        #expect(category.name == "Action")
+        #expect(category.group == nil)
+    }
+
+    @Test
+    func mapperBuildsMovieFromTypedXtreamResponses() throws {
+        let category = MovieCategory(remoteId: "12", name: "Action")
+
+        let streamData = #"""
+        {
+          "stream_id": 42,
+          "name": "Stream Name",
+          "category_id": "12",
+          "category_ids": [12, 99],
+          "container_extension": "mkv",
+          "rating": "7.1",
+          "rating_5based": "4.3",
+          "stream_type": "movie",
+          "tmdb": "321",
+          "stream_icon": "https://example.com/stream-icon.jpg",
+          "added": "2026-01-03 10:11:12",
+          "trailer": "https://example.com/stream-trailer.mp4",
+          "num": 7,
+          "is_adult": 1
+        }
+        """#.data(using: .utf8)!
+
+        let vodData = #"""
+        {
+          "info": {
+            "actors": "Actor One, Actor Two",
+            "age": "16",
+            "backdrop_path": [
+              "https://example.com/backdrop-1.jpg",
+              "https://example.com/backdrop-2.jpg"
+            ],
+            "bitrate": 4800,
+            "cast": "Actor One, Actor Two",
+            "country": "US",
+            "cover_big": "https://example.com/cover-big.jpg",
+            "description": "A longer description",
+            "director": "Director Name",
+            "duration": "2h 2m",
+            "episode_run_time": 122,
+            "genre": "Action",
+            "movie_image": "https://example.com/movie-image.jpg",
+            "mpaa_rating": "PG-13",
+            "name": "Movie Title",
+            "o_name": "Original Movie Title",
+            "plot": "Short plot",
+            "releasedate": "2026-01-02",
+            "status": "Released",
+            "youtube_trailer": "https://youtube.example/trailer",
+            "audio": null,
+            "duration_secs": 7320,
+            "rating": 7.8,
+            "runtime": 122,
+            "tmdb_id": 654,
+            "video": null
+          },
+          "movie_data": {
+            "added": "2026-01-03 10:11:12",
+            "category_id": "12",
+            "category_ids": [12, 99],
+            "container_extension": "mkv",
+            "custom_sid": "SID-42",
+            "direct_source": "https://cdn.example/movie.mkv",
+            "name": "Stream Name",
+            "stream_id": 42
+          }
+        }
+        """#.data(using: .utf8)!
+
+        let stream = try JSONDecoder().decode(XtreamStream.self, from: streamData)
+        let vod = try JSONDecoder().decode(XtreamVod.self, from: vodData)
+        let source = MediaSource(url: URL(string: "https://example.com/movie/42.mkv")!)
+        let movie = Movie(from: stream, vod: vod, category: category, source: source)
+
+        #expect(movie.name == "Movie Title")
+        #expect(movie.plot == "Short plot")
+        #expect(movie.detailsDescription == "A longer description")
+        #expect(movie.ageRating == "16")
+        #expect(movie.originalName == "Original Movie Title")
+        #expect(movie.director == ["Director Name"])
+        #expect(movie.cast == ["Actor One", "Actor Two"])
+        #expect(movie.actors == ["Actor One", "Actor Two"])
+        #expect(movie.rating == 7.8)
+        #expect(movie.voteAverage == 7.8)
+        #expect(movie.genre == ["Action"])
+        #expect(movie.backdropURLs == [
+            URL(string: "https://example.com/backdrop-1.jpg")!,
+            URL(string: "https://example.com/backdrop-2.jpg")!
+        ])
+        #expect(movie.durationSeconds == 7320)
+        #expect(movie.durationFormatted == "2h 2m")
+        #expect(movie.episodeRuntime == 122)
+        #expect(movie.mpaaRating == "PG-13")
+        #expect(movie.status == "Released")
+        #expect(movie.youtubeTrailer == URL(string: "https://youtube.example/trailer"))
+        #expect(movie.tmdbId == 321)
+        #expect(movie.coverImageURL?.absoluteString == "https://example.com/cover-big.jpg")
+        #expect(movie.heroImageURL?.absoluteString == "https://example.com/movie-image.jpg")
+        #expect(movie.streamIconURL?.absoluteString == "https://example.com/stream-icon.jpg")
+        #expect(movie.streamIsAdult)
+        #expect(movie.streamOrder == 7)
+        #expect(movie.source.url.absoluteString == "https://example.com/movie/42.mkv")
+        #expect(movie.source.streamBitrate == 4800)
+        #expect(movie.source.audioDescription == "")
+        #expect(movie.source.resolution == "")
+        #expect(movie.source.framerate == nil)
+    }
+
+    @Test
+    func mapperDropsInvalidMovieURLs() throws {
+        let category = MovieCategory(remoteId: "12", name: "Action")
+
+        let streamData = #"""
+        {
+          "stream_id": 42,
+          "name": "Stream Name",
+          "category_id": "12",
+          "container_extension": "mkv",
+          "rating_5based": "4.3",
+          "stream_type": "movie",
+          "stream_icon": "not a url",
+          "added": "2026-01-03",
+          "num": 7,
+          "is_adult": 0
+        }
+        """#.data(using: .utf8)!
+
+        let vodData = #"""
+        {
+          "info": {
+            "actors": "",
+            "age": "",
+            "backdrop_path": ["invalid-url"],
+            "bitrate": 0,
+            "cast": "",
+            "country": "",
+            "cover_big": "not a url",
+            "description": "",
+            "director": "",
+            "duration": "",
+            "episode_run_time": null,
+            "genre": "",
+            "movie_image": "not a url",
+            "mpaa_rating": null,
+            "name": "Movie Title",
+            "o_name": "",
+            "plot": "",
+            "releasedate": "",
+            "status": null,
+            "youtube_trailer": "not a url",
+            "audio": null,
+            "duration_secs": null,
+            "rating": null,
+            "runtime": null,
+            "tmdb_id": null,
+            "video": null
+          },
+          "movie_data": {
+            "added": "2026-01-03",
+            "category_id": "12",
+            "container_extension": "mkv",
+            "name": "Stream Name",
+            "stream_id": 42
+          }
+        }
+        """#.data(using: .utf8)!
+
+        let stream = try JSONDecoder().decode(XtreamStream.self, from: streamData)
+        let vod = try JSONDecoder().decode(XtreamVod.self, from: vodData)
+        let movie = Movie(from: stream, vod: vod, category: category, source: MediaSource(url: URL(string: "https://example.com/movie/42.mkv")!))
+
+        #expect(movie.backdropURLs.isEmpty)
+        #expect(movie.youtubeTrailer == nil)
+        #expect(movie.coverImageURL == nil)
+        #expect(movie.heroImageURL == nil)
+        #expect(movie.posterImageURL == nil)
+        #expect(movie.streamIconURL == nil)
     }
 
     @Test

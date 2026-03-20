@@ -24,43 +24,43 @@ struct XtreamService: Sendable {
 
     var auth: [URLQueryItem] { [.init(name: "username", value: username), .init(name: "password", value: password)] }
 
-    func getCategories(of type: XtreamContentType) async throws -> [XtreamCategory] {
+    func getCategories(of type: Xtream.ContentType) async throws -> [Xtream.Category] {
         let query = [URLQueryItem(name: "action", value: "get_\(type)_categories")]
-        let resource = Resource<[XtreamCategory]>(url: baseURL, method: .get(auth + query))
+        let resource = Resource<[Xtream.Category]>(url: baseURL, method: .get(auth + query))
         let data = try await client.load(resource)
         return data
     }
     
-    func getStreams(of type: XtreamContentType, in category: String? = nil) async throws -> [XtreamStream] {
+    func getStreams(of type: Xtream.ContentType, in category: String? = nil) async throws -> [Xtream.MovieStream] {
         let action = type == .series ? "get_\(type)" : "get_\(type)_streams"
         let query = [URLQueryItem(name: "action", value: action), URLQueryItem(name: "category_id", value: category)]
-        let resource = Resource<[XtreamStream]>(url: baseURL, method: .get(auth + query))
+        let resource = Resource<[Xtream.MovieStream]>(url: baseURL, method: .get(auth + query))
         let data = try await client.load(resource)
         return data
     }
 
-    func getSeries(in category: String? = nil) async throws -> [XtreamSeriesStream] {
-        let query = [URLQueryItem(name: "action", value: "get_series"), URLQueryItem(name: "category_id", value: category)]
-        let resource = Resource<[XtreamSeriesStream]>(url: baseURL, method: .get(auth + query))
-        let data = try await client.load(resource)
-        return data
-    }
-    
-    func getVodInfo(of id: Int) async throws -> XtreamVod {
+    func getVodInfo(of id: Int) async throws -> Xtream.Movie {
         let query = [URLQueryItem(name: "action", value: "get_vod_info"), URLQueryItem(name: "vod_id", value: "\(id)")]
-        let resource = Resource<XtreamVod>(url: baseURL, method: .get(auth + query))
-        let data = try await client.load(resource)
-        return data
-    }
-
-    func getSeriesInfo(of id: String) async throws -> XtreamSeries {
-        let query = [URLQueryItem(name: "action", value: "get_series_info"), URLQueryItem(name: "series_id", value: id)]
-        let resource = Resource<XtreamSeries>(url: baseURL, method: .get(auth + query))
+        let resource = Resource<Xtream.Movie>(url: baseURL, method: .get(auth + query))
         let data = try await client.load(resource)
         return data
     }
     
-    func getPlayURL(for streamId: Int, type: XtreamContentType, containerExtension: String?) -> URL {
+    func getSeries(in category: String? = nil) async throws -> [Xtream.SeriesStream] {
+        let query = [URLQueryItem(name: "action", value: "get_series"), URLQueryItem(name: "category_id", value: category)]
+        let resource = Resource<[Xtream.SeriesStream]>(url: baseURL, method: .get(auth + query))
+        let data = try await client.load(resource)
+        return data
+    }
+
+    func getSeriesInfo(of id: String) async throws -> Xtream.Series {
+        let query = [URLQueryItem(name: "action", value: "get_series_info"), URLQueryItem(name: "series_id", value: id)]
+        let resource = Resource<Xtream.Series>(url: baseURL, method: .get(auth + query))
+        let data = try await client.load(resource)
+        return data
+    }
+    
+    func getPlayURL(for streamId: Int, type: Xtream.ContentType, containerExtension: String?) -> URL {
         let url = URL(string: "\(type.playbackPathComponent)/\(username)/\(password)/\(streamId)" + (containerExtension != nil ? ".\(containerExtension!)" : ""), relativeTo: baseURL)!
         return url
     }

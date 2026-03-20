@@ -59,7 +59,7 @@ struct PlayerView: View {
     }
     
     private var eyebrowText: String? {
-        if let genre = player.currentItem?.genre {
+        if let genre = player.currentItem?.genre.joined() {
             return genre
         }
         

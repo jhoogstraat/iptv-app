@@ -100,8 +100,8 @@ struct EpisodeDetailTile: View {
 
                             episodeBrowser(season: episode.season)
 
-                            section("Cast", text: episode.cast)
-                            section("Director", text: episode.director)
+                            section("Cast", text: episode.castText)
+                            section("Director", text: episode.directorText)
                             section("About", text: aboutText(for: episode))
                         }
                         .background(Color.black)
@@ -456,13 +456,7 @@ struct EpisodeDetailTile: View {
     }
 
     private func heroGenreText(for episode: Episode) -> String? {
-        let genres = episode.genre?
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard let genres, !genres.isEmpty else { return nil }
-        return genres.joined(separator: " / ")
+        episode.genreText?.replacingOccurrences(of: ", ", with: " / ")
     }
 
     private func heroYearText(for episode: Episode) -> String? {
@@ -478,7 +472,7 @@ struct EpisodeDetailTile: View {
     }
 
     private func overviewText(episode: Episode) -> some View {
-        Text(episode.plot ?? String(localized: "Not available.", comment: "Fallback when metadata is missing"))
+        Text(episode.plot ?? episode.detailsDescription ?? String(localized: "Not available.", comment: "Fallback when metadata is missing"))
             .font(.title3.weight(.regular))
             .lineSpacing(6)
             .foregroundStyle(.white)

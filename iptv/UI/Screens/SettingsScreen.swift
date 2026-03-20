@@ -195,15 +195,13 @@ struct SettingsScreen: View {
             }
             
             
-        } footer: {
-            Text("Provider credentials unlock catalog loading, search, recommendations, and playback.")
         }
     }
     
     private var providerConfigurationSection: some View {
         let session = sessionManager.hasActiveSession
         
-        return Section("Provider") {
+        return Section {
             LabeledContent("Type") {
                 // TODO: Make selectable when supporting multiple provider types
                 Text(sessionManager.session?.provider.type ?? "Xtream API")
@@ -234,6 +232,10 @@ struct SettingsScreen: View {
                 Button("Reset", role: .destructive, action: clear)
                     .disabled(!sessionManager.hasActiveSession)
             }
+        } header: {
+            Text("Provider")
+        } footer: {
+            Text("Provider credentials unlock catalog loading, search, recommendations, and playback.")
         }
     }
     

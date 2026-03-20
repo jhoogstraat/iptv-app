@@ -117,8 +117,8 @@ struct MovieDetailScreen: View {
                                 ratingSection
                             }
 
-//                            section("Cast", text: movie.cast ?? "No cast information available.")
-                            section("Director", text: movie.director ?? "No director information available.")
+//                            section("Cast", text: movie.castText ?? "No cast information available.")
+                            section("Director", text: movie.director.joined() ?? "No director information available.")
                             section("About", text: aboutText)
                         }
                         .background(Color.black)
@@ -134,8 +134,8 @@ struct MovieDetailScreen: View {
 
                 DetailCollapsedHeaderBar(
                     title: displayTitle,
-                    artworkURL: collapsedArtworkURL,
-                    titleArtworkURL: heroTitleArtworkURL,
+                    artworkURL: movie.heroImageURL,
+                    titleArtworkURL: movie.coverImageURL,
                     progress: heroCollapseProgress
                 )
                 .padding(.top, topInset + 8)
@@ -200,50 +200,8 @@ struct MovieDetailScreen: View {
         .compactMap { $0 }
     }
 
-    private var heroHeight: CGFloat {
-        usesCompactDetailLayout ? 430 : 520
-    }
-
-    private var heroArtworkURL: URL? {
-        offlineArtworkURL ?? movie.coverImageURL
-    }
-
-    private var collapsedArtworkURL: URL? {
-        movie.coverImageURL ?? heroArtworkURL
-    }
-
-    private var heroTitleArtworkURL: URL? {
-        guard let coverURL = movie.coverImageURL,
-              coverURL != heroArtworkURL else {
-            return nil
-        }
-        return coverURL
-    }
-
-    private var heroGenreText: String? {
-        let genres = movie.genre?
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        guard let genres, !genres.isEmpty else { return nil }
-        return genres.joined(separator: " / ")
-    }
-
-    private var heroYearText: String? {
-        movie.releaseDate?.formatted(date: .abbreviated, time: .omitted)
-    }
-
-    private var heroRuntimeText: String? {
-        movie.runtime?.formatted()
-    }
-
-    private var heroScoreText: String? {
-        scoreBadges.first?.value
-    }
-
     private var overviewText: some View {
-        Text(movie.plot ?? "No synopsis available.")
+        Text(movie.plot ?? movie.detailsDescription ?? "No synopsis available.")
             .font(.title3.weight(.regular))
             .lineSpacing(6)
             .foregroundStyle(.white)
@@ -267,6 +225,10 @@ struct MovieDetailScreen: View {
         if let runtime = movie.runtime {
             lines.append("Runtime: \(runtime.formatted()) min")
         }
+
+        if let duration = movie.durationFormatted {
+            lines.append("Duration: \(duration)")
+        }
         
         return lines.joined(separator: "\n")
     }
@@ -289,8 +251,8 @@ struct MovieDetailScreen: View {
     @ViewBuilder
     private func heroBackground(topInset: CGFloat) -> some View {
         DetailHeroBackdrop(
-            artworkURL: heroArtworkURL,
-            height: heroHeight,
+            artworkURL: movie.heroImageURL,
+            height: 480,
             topInset: topInset,
             collapseProgress: heroCollapseProgress,
             scrollOffset: heroScrollOffset,
@@ -303,8 +265,8 @@ struct MovieDetailScreen: View {
             Spacer()
 
             VStack(spacing: DetailSpacing.md) {
-                if let heroTitleArtworkURL {
-                    AsyncImage(url: heroTitleArtworkURL) { phase in
+                if let heroImage = movie.heroImageURL {
+                    AsyncImage(url: heroImage) { phase in
                         switch phase {
                         case .success(let image):
                             image
@@ -330,8 +292,8 @@ struct MovieDetailScreen: View {
 
                 heroMetaRow
 
-                if let heroGenreText {
-                    Text(heroGenreText)
+                if !movie.genre.isEmpty {
+                    Text(movie.genre.joined())
                         .font(.title3.weight(.medium))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -341,7 +303,7 @@ struct MovieDetailScreen: View {
             .frame(maxWidth: usesCompactDetailLayout ? 320 : 760)
             .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: .infinity, minHeight: heroHeight + topInset, alignment: .bottom)
+        .frame(maxWidth: .infinity, minHeight: 480 + topInset, alignment: .bottom)
         .padding(.horizontal, usesCompactDetailLayout ? 24 : 32)
         .padding(.top, topInset + 24)
         .padding(.bottom, DetailSpacing.lg)
@@ -371,23 +333,23 @@ struct MovieDetailScreen: View {
                 .font(.title2.weight(.medium))
                 .foregroundStyle(.white.opacity(0.88))
         }
-        if let heroScoreText {
-            DetailMetaPill(heroScoreText, systemImage: "star.fill")
+        if let rating = movie.rating?.formatted() {
+            DetailMetaPill(rating, systemImage: "star.fill")
         }
-        if let heroYearText {
-            Text(heroYearText)
+        if let year = movie.releaseDate?.formatted() {
+            Text(year)
                 .font(.title2.weight(.medium))
                 .foregroundStyle(.white)
         }
-        if let heroRuntimeText {
-            Text(heroRuntimeText)
+        if let runtime = movie.runtime?.formatted() {
+            Text(runtime)
                 .font(.title2.weight(.medium))
                 .foregroundStyle(.white.opacity(0.88))
         }
     }
 
     private func heroProgress(for minY: CGFloat) -> CGFloat {
-        let distance = max(heroHeight - 140, 1)
+        let distance = max(480.0 - 140, 1)
         return min(max(-minY / distance, 0), 1)
     }
 

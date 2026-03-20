@@ -12,9 +12,7 @@ import Nuke
 
 @main
 struct IPTVApp: App {
-    /// An object that manages the model storage configuration.
     private let modelContainer: ModelContainer
-    
     private let sessionManager: SessionManager
     private let player: Player
     
@@ -22,6 +20,7 @@ struct IPTVApp: App {
         WindowGroup {
             if let session = sessionManager.session {
                 ContentView()
+                    .environment(sessionManager)
                     .environment(session)
                     .environment(player)
                     .modelContainer(modelContainer)
@@ -59,22 +58,18 @@ struct IPTVApp: App {
     
     /// Load video metadata and initialize the model container and video player model.
     init() {
+        let userDefaults = UserDefaults.standard
         let modelContainer = try! AppPersistence.makeModelContainer(isStoredInMemoryOnly: false)
-        let sessionManager = SessionManager(userDefaults: .standard, modelContainer: modelContainer)
+        
+        let sessionManager = SessionManager(userDefaults: userDefaults, modelContainer: modelContainer)
+        let player = Player(defaults: userDefaults)
         
         sessionManager.load(key: .activeSession)
         ImagePipeline.Configuration.isSignpostLoggingEnabled = true
-        
-        let fetch = FetchDescriptor<Provider>()
-        
-        let result = try! modelContainer.mainContext.fetch(fetch)
-        logger.info("\(result)")
-        
-        logger.info("\(modelContainer.configurations.first?.url.absoluteString ?? "No URL")")
-        
+
         self.modelContainer = modelContainer
         self.sessionManager = sessionManager
-        self.player = Player(defaults: .standard)
+        self.player = player
     }
 }
 
