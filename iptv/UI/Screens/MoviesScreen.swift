@@ -336,7 +336,7 @@ private struct CoverGrid: View {
         
         @ViewBuilder
         private var artwork: some View {
-            AsyncImage(url: media.coverImageURL) { phase in
+            AsyncImage(url: media.cover) { phase in
                 if let image = phase.image {
                     image.boundedCoverArtwork()
                 } else if phase.error != nil {
@@ -373,14 +373,14 @@ private struct CoverGrid: View {
                 
                 Spacer()
                 
-                if let languageText = media.language {
-                    Text(languageText)
-                        .font(.footnote.weight(.semibold))
-                        .padding(.horizontal, 2)
-                        .padding(4)
-                        .background(.thinMaterial)
-                        .clipShape(.rect(cornerRadius: 8))
-                }
+//                if let languageText = media.language {
+//                    Text(languageText)
+//                        .font(.footnote.weight(.semibold))
+//                        .padding(.horizontal, 2)
+//                        .padding(4)
+//                        .background(.thinMaterial)
+//                        .clipShape(.rect(cornerRadius: 8))
+//                }
             }
             .padding(6)
         }

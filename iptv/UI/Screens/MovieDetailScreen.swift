@@ -118,7 +118,7 @@ struct MovieDetailScreen: View {
                             }
 
 //                            section("Cast", text: movie.castText ?? "No cast information available.")
-                            section("Director", text: movie.director.joined() ?? "No director information available.")
+                            section("Director", text: movie.info?.director.joined() ?? "No director information available.")
                             section("About", text: aboutText)
                         }
                         .background(Color.black)
@@ -134,8 +134,8 @@ struct MovieDetailScreen: View {
 
                 DetailCollapsedHeaderBar(
                     title: displayTitle,
-                    artworkURL: movie.heroImageURL,
-                    titleArtworkURL: movie.coverImageURL,
+                    artworkURL: movie.info?.heroImageURL,
+                    titleArtworkURL: movie.cover,
                     progress: heroCollapseProgress
                 )
                 .padding(.top, topInset + 8)
@@ -201,7 +201,7 @@ struct MovieDetailScreen: View {
     }
 
     private var overviewText: some View {
-        Text(movie.plot ?? movie.detailsDescription ?? "No synopsis available.")
+        Text(movie.info?.plot ?? "No synopsis available.")
             .font(.title3.weight(.regular))
             .lineSpacing(6)
             .foregroundStyle(.white)
@@ -218,15 +218,15 @@ struct MovieDetailScreen: View {
     private var aboutText: String {
         var lines: [String] = []
         
-        if let country = movie.country, !country.isEmpty {
+        if let country = movie.info?.country, !country.isEmpty {
             lines.append("Country: \(country)")
         }
         
-        if let runtime = movie.runtime {
+        if let runtime = movie.info?.runtime {
             lines.append("Runtime: \(runtime.formatted()) min")
         }
 
-        if let duration = movie.durationFormatted {
+        if let duration = movie.info?.duration?.formatted() {
             lines.append("Duration: \(duration)")
         }
         
@@ -251,7 +251,7 @@ struct MovieDetailScreen: View {
     @ViewBuilder
     private func heroBackground(topInset: CGFloat) -> some View {
         DetailHeroBackdrop(
-            artworkURL: movie.heroImageURL,
+            artworkURL: movie.info?.heroImageURL,
             height: 480,
             topInset: topInset,
             collapseProgress: heroCollapseProgress,
@@ -265,7 +265,7 @@ struct MovieDetailScreen: View {
             Spacer()
 
             VStack(spacing: DetailSpacing.md) {
-                if let heroImage = movie.heroImageURL {
+                if let heroImage = movie.info?.heroImageURL {
                     AsyncImage(url: heroImage) { phase in
                         switch phase {
                         case .success(let image):
@@ -292,8 +292,8 @@ struct MovieDetailScreen: View {
 
                 heroMetaRow
 
-                if !movie.genre.isEmpty {
-                    Text(movie.genre.joined())
+                if let genre = movie.info?.genre, !genre.isEmpty {
+                    Text(genre.joined())
                         .font(.title3.weight(.medium))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
@@ -336,12 +336,12 @@ struct MovieDetailScreen: View {
         if let rating = movie.rating?.formatted() {
             DetailMetaPill(rating, systemImage: "star.fill")
         }
-        if let year = movie.releaseDate?.formatted() {
+        if let year = movie.info?.releaseDate?.formatted() {
             Text(year)
                 .font(.title2.weight(.medium))
                 .foregroundStyle(.white)
         }
-        if let runtime = movie.runtime?.formatted() {
+        if let runtime = movie.info?.runtime?.formatted() {
             Text(runtime)
                 .font(.title2.weight(.medium))
                 .foregroundStyle(.white.opacity(0.88))
@@ -391,7 +391,7 @@ struct MovieDetailScreen: View {
 
 #Preview(traits: .previewData) {
     NavigationStack {
-//        MovieDetailScreen(video: .init(id: 0, name: "EN - Title of the movie", containerExtension: "mkv", contentType: "movie", coverImageURL: "error_url", tmdbId: nil, rating: 7.7))
+//        MovieDetailScreen(video: .init(id: 0, name: "EN - Title of the movie", containerExtension: "mkv", contentType: "movie", cover: "error_url", tmdbId: nil, rating: 7.7))
     }
     .frame(width: 390, height: 844)
 }

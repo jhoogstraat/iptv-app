@@ -43,7 +43,7 @@ private struct ForYouPosterCard: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            AsyncImage(url: item.coverImageURL) { phase in
+            AsyncImage(url: item.cover) { phase in
                 switch phase {
                 case .success(let image):
                     image

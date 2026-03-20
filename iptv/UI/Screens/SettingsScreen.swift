@@ -412,13 +412,13 @@ struct SettingsScreen: View {
             prefixDiscoveryError = nil
         }
         
-        let categories: [XtreamCategory] = []
+        let categories: [Xtream.Category] = []
         
         let prefixes = Self.detectedPrefixOptions(from: categories)
         availablePrefixOptions = prefixes
     }
     
-    private static func detectedPrefixOptions(from categories: [XtreamCategory]) -> [PrefixOption] {
+    private static func detectedPrefixOptions(from categories: [Xtream.Category]) -> [PrefixOption] {
         //        var counts: [String: Int] = [:]
         //        var samples: [String: [String]] = [:]
         //

@@ -59,7 +59,7 @@ struct PlayerView: View {
     }
     
     private var eyebrowText: String? {
-        if let genre = player.currentItem?.genre.joined() {
+        if let genre = player.currentItem?.info?.genre.joined() {
             return genre
         }
         
@@ -71,7 +71,7 @@ struct PlayerView: View {
     }
 
     private var synopsisText: String? {
-        player.currentItem?.plot
+        player.currentItem?.info?.plot
     }
 
     private var primaryDisplayQuality: QualityVariant? {
