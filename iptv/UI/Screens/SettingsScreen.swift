@@ -278,7 +278,7 @@ struct SettingsScreen: View {
     
     private func prefixSelectorRow(for option: PrefixOption) -> some View {
         Button {
-            toggleVisiblePrefix(option.prefix)
+            print("TODO")
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: selectedVisiblePrefixes.contains(option.prefix) ? "checkmark.circle.fill" : "circle")
@@ -370,88 +370,6 @@ struct SettingsScreen: View {
     private func clear() {
         sessionManager.clear()
         logger.info("Provider configuration cleared.")
-    }
-    
-    private func saveExcludedPrefixes() {
-        // TODO: Implementation
-        //        do {
-        //            try sessionManager.saveExcludedCategoryPrefixes(excludedPrefixesInput)
-        //            loadCurrentValues()
-        //            statusMessage = "Excluded prefixes saved for the current provider."
-        //            statusIsError = false
-        //            logger.info("Excluded category prefixes saved.")
-        //        } catch {
-        //            statusMessage = error.localizedDescription
-        //            statusIsError = true
-        //            logger.error("Failed to save excluded category prefixes: \(error.localizedDescription, privacy: .public)")
-        //        }
-    }
-    
-    private func toggleVisiblePrefix(_ prefix: String) {
-        if selectedVisiblePrefixes.contains(prefix) {
-            selectedVisiblePrefixes.remove(prefix)
-        } else {
-            selectedVisiblePrefixes.insert(prefix)
-        }
-    }
-    
-    private func saveVisiblePrefixSelection() {
-        let excludedPrefixes = availablePrefixOptions
-            .map(\.prefix)
-            .filter { !selectedVisiblePrefixes.contains($0) }
-        
-        excludedPrefixesInput = excludedPrefixes
-            .joined(separator: ", ")
-        saveExcludedPrefixes()
-    }
-    
-    private func loadAvailablePrefixes(force: Bool) async {
-        guard sessionManager.hasActiveSession else { return }
-        
-        await MainActor.run {
-            prefixDiscoveryError = nil
-        }
-        
-        let categories: [Xtream.Category] = []
-        
-        let prefixes = Self.detectedPrefixOptions(from: categories)
-        availablePrefixOptions = prefixes
-    }
-    
-    private static func detectedPrefixOptions(from categories: [Xtream.Category]) -> [PrefixOption] {
-        //        var counts: [String: Int] = [:]
-        //        var samples: [String: [String]] = [:]
-        //
-        //        for category in categories {
-        //            counts[prefix, default: 0] += 1
-        //            let sample = tagged.groupedDisplayName
-        //            if !sample.isEmpty, !(samples[prefix] ?? []).contains(sample) {
-        //                samples[prefix, default: []].append(sample)
-        //            }
-        //        }
-        //
-        //        return counts.keys.sorted().map { prefix in
-        //            PrefixOption(
-        //                prefix: prefix,
-        //                matches: counts[prefix, default: 0],
-        //                categoryNames: Array(samples[prefix, default: []].prefix(3))
-        //            )
-        //        }
-        
-        return []
-    }
-    
-    private func synchronizeVisiblePrefixes() {
-        // TODO: Implementation
-        //        let excludedPrefixes = Set(sessionManager.excludedCategoryPrefixes())
-        //        let availablePrefixes = Set(availablePrefixOptions.map(\.prefix))
-        //
-        //        if availablePrefixes.isEmpty {
-        //            selectedVisiblePrefixes = []
-        //            return
-        //        }
-        //
-        //        selectedVisiblePrefixes = availablePrefixes.subtracting(excludedPrefixes)
     }
 }
 
