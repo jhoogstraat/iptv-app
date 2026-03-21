@@ -16,6 +16,8 @@
 		1AAD540C2F6958EF00406EA5 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 1AAD540B2F6958EF00406EA5 /* Nuke */; };
 		1AAD540E2F6958EF00406EA5 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1AAD540D2F6958EF00406EA5 /* NukeUI */; };
 		1AB0A8842F6DC4EC00FE80F0 /* xtream-swift in Frameworks */ = {isa = PBXBuildFile; productRef = 1AB0A8832F6DC4EC00FE80F0 /* xtream-swift */; };
+		1AB0A8892F6EC35B00FE80F0 /* SQLiteData in Frameworks */ = {isa = PBXBuildFile; productRef = 1AB0A8882F6EC35B00FE80F0 /* SQLiteData */; };
+		1AB0A88B2F6EC35B00FE80F0 /* SQLiteDataTestSupport in Frameworks */ = {isa = PBXBuildFile; productRef = 1AB0A88A2F6EC35B00FE80F0 /* SQLiteDataTestSupport */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -101,6 +103,7 @@
 				1A89EEE22F4A9BAE00332D6A /* VLCKit-tvOS.xcframework in Frameworks */,
 				1AAD540E2F6958EF00406EA5 /* NukeUI in Frameworks */,
 				1A1352562E6B8D40002345D7 /* Collections in Frameworks */,
+				1AB0A8892F6EC35B00FE80F0 /* SQLiteData in Frameworks */,
 				1AAD540C2F6958EF00406EA5 /* Nuke in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -109,6 +112,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1AB0A88B2F6EC35B00FE80F0 /* SQLiteDataTestSupport in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -178,6 +182,7 @@
 				1AAD540B2F6958EF00406EA5 /* Nuke */,
 				1AAD540D2F6958EF00406EA5 /* NukeUI */,
 				1AB0A8832F6DC4EC00FE80F0 /* xtream-swift */,
+				1AB0A8882F6EC35B00FE80F0 /* SQLiteData */,
 			);
 			productName = iptv;
 			productReference = 1A0D265E2E6728660091AF6A /* iptv.app */;
@@ -201,6 +206,7 @@
 			);
 			name = iptvTests;
 			packageProductDependencies = (
+				1AB0A88A2F6EC35B00FE80F0 /* SQLiteDataTestSupport */,
 			);
 			productName = iptvTests;
 			productReference = 1A0D266F2E6728670091AF6A /* iptvTests.xctest */;
@@ -265,6 +271,7 @@
 				1A1352542E6B8D40002345D7 /* XCRemoteSwiftPackageReference "swift-collections" */,
 				1AAD540A2F6958EF00406EA5 /* XCRemoteSwiftPackageReference "Nuke" */,
 				1AB0A8822F6DC4EC00FE80F0 /* XCRemoteSwiftPackageReference "xtream-swift" */,
+				1AB0A8872F6EC35B00FE80F0 /* XCRemoteSwiftPackageReference "sqlite-data" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A0D265F2E6728660091AF6A /* Products */;
@@ -735,7 +742,15 @@
 			repositoryURL = "https://github.com/jhoogstraat/xtream-swift.git";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.0.0;
+				minimumVersion = 3.0.0;
+			};
+		};
+		1AB0A8872F6EC35B00FE80F0 /* XCRemoteSwiftPackageReference "sqlite-data" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/sqlite-data.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.6.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -760,6 +775,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1AB0A8822F6DC4EC00FE80F0 /* XCRemoteSwiftPackageReference "xtream-swift" */;
 			productName = "xtream-swift";
+		};
+		1AB0A8882F6EC35B00FE80F0 /* SQLiteData */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1AB0A8872F6EC35B00FE80F0 /* XCRemoteSwiftPackageReference "sqlite-data" */;
+			productName = SQLiteData;
+		};
+		1AB0A88A2F6EC35B00FE80F0 /* SQLiteDataTestSupport */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1AB0A8872F6EC35B00FE80F0 /* XCRemoteSwiftPackageReference "sqlite-data" */;
+			productName = SQLiteDataTestSupport;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
