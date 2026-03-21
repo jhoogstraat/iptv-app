@@ -1,5 +1,5 @@
 {
-  "originHash" : "beeaa1602cfc70c0f4b0c5353de6c1b393403f3f8db9bd8198ed0d56bd6066b1",
+  "originHash" : "194105d7e7f43d813d2407333c77118d804670e8bb54cf45e925300a219f1262",
   "pins" : [
     {
       "identity" : "nuke",
@@ -15,8 +15,17 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-collections.git",
       "state" : {
-        "revision" : "8c0c0a8b49e080e54e5e328cc552821ff07cd341",
-        "version" : "1.2.1"
+        "revision" : "6675bc0ff86e61436e615df6fc5174e043e57924",
+        "version" : "1.4.1"
+      }
+    },
+    {
+      "identity" : "xtream-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jhoogstraat/xtream-swift.git",
+      "state" : {
+        "revision" : "025b8de2d3dd5732a35d36f0b0812599c48ea87d",
+        "version" : "2.0.0"
       }
     }
   ],

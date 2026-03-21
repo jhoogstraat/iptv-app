@@ -17,6 +17,9 @@ import SwiftData
     var name: String
     
     var isValid: Bool { !name.isEmpty }
+    
+    var isIndexed: Bool = false
+    
     var type: String { "Generic Provider" }
     
     init(name: String) {

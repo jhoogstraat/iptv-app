@@ -15,6 +15,7 @@
 		1A89EEE62F4A9BB800332D6A /* VLCKit-macOS.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 1A89EEE42F4A9BB800332D6A /* VLCKit-macOS.xcframework */; platformFilters = (macos, ); settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1AAD540C2F6958EF00406EA5 /* Nuke in Frameworks */ = {isa = PBXBuildFile; productRef = 1AAD540B2F6958EF00406EA5 /* Nuke */; };
 		1AAD540E2F6958EF00406EA5 /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 1AAD540D2F6958EF00406EA5 /* NukeUI */; };
+		1AB0A8842F6DC4EC00FE80F0 /* xtream-swift in Frameworks */ = {isa = PBXBuildFile; productRef = 1AB0A8832F6DC4EC00FE80F0 /* xtream-swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -94,6 +95,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1AB0A8842F6DC4EC00FE80F0 /* xtream-swift in Frameworks */,
 				1A89EEE52F4A9BB800332D6A /* VLCKit-macOS.xcframework in Frameworks */,
 				1A89EEDE2F4A9B9500332D6A /* VLCKit-iOS.xcframework in Frameworks */,
 				1A89EEE22F4A9BAE00332D6A /* VLCKit-tvOS.xcframework in Frameworks */,
@@ -175,6 +177,7 @@
 				1A1352552E6B8D40002345D7 /* Collections */,
 				1AAD540B2F6958EF00406EA5 /* Nuke */,
 				1AAD540D2F6958EF00406EA5 /* NukeUI */,
+				1AB0A8832F6DC4EC00FE80F0 /* xtream-swift */,
 			);
 			productName = iptv;
 			productReference = 1A0D265E2E6728660091AF6A /* iptv.app */;
@@ -261,6 +264,7 @@
 			packageReferences = (
 				1A1352542E6B8D40002345D7 /* XCRemoteSwiftPackageReference "swift-collections" */,
 				1AAD540A2F6958EF00406EA5 /* XCRemoteSwiftPackageReference "Nuke" */,
+				1AB0A8822F6DC4EC00FE80F0 /* XCRemoteSwiftPackageReference "xtream-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1A0D265F2E6728660091AF6A /* Products */;
@@ -726,6 +730,14 @@
 				minimumVersion = 12.9.0;
 			};
 		};
+		1AB0A8822F6DC4EC00FE80F0 /* XCRemoteSwiftPackageReference "xtream-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jhoogstraat/xtream-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -743,6 +755,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1AAD540A2F6958EF00406EA5 /* XCRemoteSwiftPackageReference "Nuke" */;
 			productName = NukeUI;
+		};
+		1AB0A8832F6DC4EC00FE80F0 /* xtream-swift */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1AB0A8822F6DC4EC00FE80F0 /* XCRemoteSwiftPackageReference "xtream-swift" */;
+			productName = "xtream-swift";
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

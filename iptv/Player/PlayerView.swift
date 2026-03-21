@@ -63,7 +63,7 @@ struct PlayerView: View {
             return genre
         }
         
-        if let category = player.currentItem?.category.name {
+        if let category = player.currentItem?.category?.name {
             return category
         }
         
@@ -89,7 +89,7 @@ struct PlayerView: View {
             badges.append(OverlayBadge(label: backend))
         }
 
-        if let resolution = primaryDisplayQuality?.resolution ?? player.currentItem?.source?.resolution {
+        if let resolution = primaryDisplayQuality?.resolution ?? player.currentItem?.source.resolution {
             badges.append(OverlayBadge(label: resolution))
         }
 
@@ -106,7 +106,7 @@ struct PlayerView: View {
     }
 
     private var preferredAudioBadgeText: String? {
-        if let description = player.currentItem?.source?.audioDescription {
+        if let description = player.currentItem?.source.audioDescription {
             return description
         }
 

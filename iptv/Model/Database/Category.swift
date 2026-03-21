@@ -28,8 +28,9 @@ import SwiftData
     }
     
     static func countMedia(of remoteId: String, on context: ModelContext) throws -> Int {
-        let descriptor = FetchDescriptor<Media>.init(predicate: #Predicate { $0.category.remoteId == remoteId })
-        return try context.fetchCount(descriptor)
+        var descriptor = FetchDescriptor<Category>(predicate: #Predicate { $0.remoteId == remoteId })
+        descriptor.fetchLimit = 1
+        return try context.fetch(descriptor).first?.media.count ?? 0
     }
 }
 

@@ -21,7 +21,7 @@ struct EpisodeDetailTile: View {
     @State private var loadError: Error?
     @State private var playError: String?
     @State private var isFavorite = false
-    @State private var selectedSeasonId: Season.ID?
+    @State private var selectedSeason = 1
     @State private var selectedEpisodeId: Episode.ID?
     @State private var offlineHeaderArtworkURL: URL?
     @State private var heroCollapseProgress: CGFloat = 0
@@ -98,7 +98,7 @@ struct EpisodeDetailTile: View {
                                 ratingSection(episode: episode)
                             }
 
-                            episodeBrowser(season: episode.season)
+                            episodeBrowser(episode: episode)
 
                             if let cast = episode.info?.cast, !cast.isEmpty {
                                 section("Cast", text: cast.joined())
@@ -134,15 +134,15 @@ struct EpisodeDetailTile: View {
     }
 
     @ViewBuilder
-    private func episodeBrowser(season: Season) -> some View {
+    private func episodeBrowser(episode: Episode) -> some View {
         VStack(alignment: .leading, spacing: DetailSpacing.md) {
             DetailSectionHeader(title: "Episodes")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: DetailSpacing.xs) {
-                    ForEach(episode.series.seasons, id: \.self) { season in
-                        seasonButton(for: season, in: episode)
-                    }
+//                    ForEach(episode.series.seasons, id: \.self) { season in
+//                        seasonButton(for: season, in: episode)
+//                    }
                 }
                 .padding(.vertical, 2)
             }
@@ -150,17 +150,17 @@ struct EpisodeDetailTile: View {
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: DetailSpacing.sm) {
-                    ForEach(season.episodes) { episode in
-                        if usesCompactDetailLayout {
-                            episodeCard(episode: episode)
-                                .id(episode.id)
-                                .containerRelativeFrame(.horizontal, count: 7, span: 5, spacing: DetailSpacing.sm, alignment: .leading)
-                        } else {
-                            episodeCard(episode: episode)
-                                .id(episode.id)
-                                .frame(width: 288)
-                        }
-                    }
+//                    ForEach(season.episodes) { episode in
+//                        if usesCompactDetailLayout {
+//                            episodeCard(episode: episode)
+//                                .id(episode.id)
+//                                .containerRelativeFrame(.horizontal, count: 7, span: 5, spacing: DetailSpacing.sm, alignment: .leading)
+//                        } else {
+//                            episodeCard(episode: episode)
+//                                .id(episode.id)
+//                                .frame(width: 288)
+//                        }
+//                    }
                 }
                 .scrollTargetLayout()
                 .padding(.vertical, DetailSpacing.xxs)
@@ -346,19 +346,15 @@ struct EpisodeDetailTile: View {
 //        )
     }
 
-    @ViewBuilder
-    private func seasonButton(for season: Season, in episode: Episode) -> some View {
-        let isSelected = season.id == selectedSeasonId
-        let episodesCount = season.episodes.count
-
-        Button {
-            selectedSeasonId = season.id
+    private func seasonButton(for season: Int, in episode: Episode) -> some View {
+        let isSelected = season == selectedSeason
+        let episodesCount = episode.series.season(season).count
+        
+        return Button {
+            selectedSeason = season
             selectedEpisodeId = episode.id
         } label: {
             VStack(alignment: .leading, spacing: DetailSpacing.xxxs) {
-                Text(season.name)
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
                 Text(episodeCountText(episodesCount))
                     .font(.caption)
                     .foregroundStyle(.white.opacity(isSelected ? 0.74 : 0.56))
@@ -404,7 +400,7 @@ struct EpisodeDetailTile: View {
             lines.append("TMDB: \(tmdb)")
         }
         
-        lines.append("Seasons: \(episode.series.seasons.count)")
+//        lines.append("Seasons: \(episode.series.sea)")
         lines.append("Episodes: \(episode.series.episodes.count)")
 
         return lines.joined(separator: "\n")
@@ -424,7 +420,7 @@ struct EpisodeDetailTile: View {
     
     private func primaryActionTitle(for episode: Episode) -> String {
         return String(
-            localized: "Play E\(episode.episodeNumber)",
+            localized: "Play E\(episode.episode)",
             locale: Locale.current,
             comment: "Primary action to play the selected episode"
         )
@@ -432,7 +428,7 @@ struct EpisodeDetailTile: View {
 
     private func seasonTitle(in episode: Episode) -> String {
         return String(
-            localized: "Season \(episode.season.seasonNumber)",
+            localized: "Season \(episode.season)",
             locale: Locale.current,
             comment: "Season title in the episode browser"
         )

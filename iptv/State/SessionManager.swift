@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import OSLog
+import xtream_swift
 
 @Observable
 class SessionManager {
@@ -68,7 +69,7 @@ class SessionManager {
     
     private func build(for provider: Provider) -> ActiveSession? {
         if let provider = provider as? XtreamProvider {
-            let service = XtreamService(.shared, baseURL: provider.endpoint, username: provider.username, password: provider.password)
+            let service = XtreamService(baseURL: provider.endpoint, username: provider.username, password: provider.password)
             let syncManager = SyncManager(container: modelContainer, provider: provider, service: service)
             
             syncManager.sync()

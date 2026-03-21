@@ -19,6 +19,7 @@ enum AppPersistence {
         Series.self,
         Episode.self,
         Media.self,
+        MediaInfo.self,
         MediaSource.self,
         Download.self,
         WatchActivity.self,
