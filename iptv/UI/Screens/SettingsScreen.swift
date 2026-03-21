@@ -122,25 +122,7 @@ struct SettingsScreen: View {
     
     var body: some View {
 #if os(macOS)
-        macSettingsBody
-            .frame(minHeight: 600)
-#else
-        Form {
-            providerOverviewSection
-            providerConfigurationSection
-            librarySection
-            playbackSection
-            supportSection
-        }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
-#endif
-    }
-    
-#if os(macOS)
-    private var macSettingsBody: some View {
         TabView {
-            
             Tab("Provider", systemImage: "key.horizontal") {
                 Form {
                     providerOverviewSection
@@ -163,25 +145,35 @@ struct SettingsScreen: View {
                 Form {
                     supportSection
                 }
-                
             }
         }
         .formStyle(.grouped)
         .padding(20)
-    }
+        .frame(minWidth: 800, minHeight: 600)
+#else
+        Form {
+            providerOverviewSection
+            providerConfigurationSection
+            librarySection
+            playbackSection
+            supportSection
+        }
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.inline)
 #endif
+    }
     
+    @ViewBuilder
     private var providerOverviewSection: some View {
         let session = sessionManager.hasActiveSession
-        
-        return Section {
+        Section {
             let layout = sizeClass == .compact
                         ? AnyLayout(VStackLayout(spacing: 20))
                         : AnyLayout(HStackLayout(spacing: 20))
 
             layout {
-                StatsCard(title: "Movies", value: "...", subtitle: "TODO")
-                StatsCard(title: "Series", value: "...", subtitle: "TODO")
+                StatsCard(title: "Movies", value: "...", subtitle: syncDescription(sessionManager.session?.syncManager.movieSync))
+                StatsCard(title: "Series", value: "...", subtitle: syncDescription(sessionManager.session?.syncManager.seriesSync))
                 StatsCard(title: "TV", value: "Soon", subtitle: "Live TV stats will appear here once TV support lands.")
             }
             
@@ -193,8 +185,27 @@ struct SettingsScreen: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(session ? .green : .orange)
             }
-            
-            
+        }
+    }
+    
+    var providerStatus: String {
+        if !sessionManager.hasActiveSession { return "Needs Setup" }
+        if sessionManager.session?.syncManager.movieSync == .active || sessionManager.session?.syncManager.seriesSync == .active { return "Syncing" }
+        if sessionManager.session?.syncManager.movieSync == .success && sessionManager.session?.syncManager.seriesSync == .success { return "All Good" }
+        if sessionManager.session?.syncManager.movieSync == .failure || sessionManager.session?.syncManager.seriesSync == .failure { return "Error" }
+        return "All Good!"
+    }
+    
+    func syncDescription(_ state: SyncManager.SyncState?) -> String {
+        if let state {
+            switch state {
+                case .idle: return "Not syncing"
+                case .active: return "Syncing"
+                case .failure: return "Failed"
+                case .success: return "Synced"
+            }
+        } else {
+            return "..."
         }
     }
     
@@ -229,7 +240,7 @@ struct SettingsScreen: View {
 //                    .buttonStyle(.borderedProminent)
                     .disabled(!providerFields.isValid)
                 
-                Button("Reset", role: .destructive, action: clear)
+                Button("Refresh", role: .destructive, action: clear)
                     .disabled(!sessionManager.hasActiveSession)
             }
         } header: {

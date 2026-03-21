@@ -13,28 +13,28 @@ import xtream_swift
 private enum SyncValueMapper {
     static let liveCategoryPrefix = "live:"
 
-    static let dateFormatters: [DateFormatter] = [
-        makeFormatter("yyyy-MM-dd HH:mm:ss"),
-        makeFormatter("yyyy-MM-dd")
-    ]
-
-    static func date(from value: String?) -> Date? {
-        guard let rawValue = value?.trimmed, !rawValue.isEmpty else {
-            return nil
-        }
-
-        if let unixTimestamp = TimeInterval(rawValue) {
-            return Date(timeIntervalSince1970: unixTimestamp)
-        }
-
-        for formatter in dateFormatters {
-            if let parsedDate = formatter.date(from: rawValue) {
-                return parsedDate
-            }
-        }
-
-        return nil
-    }
+//    static let dateFormatters: [DateFormatter] = [
+//        makeFormatter("yyyy-MM-dd HH:mm:ss"),
+//        makeFormatter("yyyy-MM-dd")
+//    ]
+//
+//    static func date(from value: String?) -> Date? {
+//        guard let rawValue = value?.trimmed, !rawValue.isEmpty else {
+//            return nil
+//        }
+//
+//        if let unixTimestamp = TimeInterval(rawValue) {
+//            return Date(timeIntervalSince1970: unixTimestamp)
+//        }
+//
+//        for formatter in dateFormatters {
+//            if let parsedDate = formatter.date(from: rawValue) {
+//                return parsedDate
+//            }
+//        }
+//
+//        return nil
+//    }
 
     static func liveCategoryID(for remoteID: String) -> String {
         "\(liveCategoryPrefix)\(remoteID)"
@@ -58,7 +58,7 @@ final class SyncManager {
 
     // State
     var movieSync = SyncState.idle
-    var showSync = SyncState.idle
+    var seriesSync = SyncState.idle
     var liveSync = SyncState.idle
     
     init(container: ModelContainer, provider: Provider, service: XtreamService) {
@@ -78,16 +78,16 @@ final class SyncManager {
                 try await syncMovies()
                 self.movieSync = .success
             } catch {
-                self.movieSync = .failure(error)
+                self.movieSync = .failure
                 logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
             }
             
             do {
-                self.showSync = .active
-                try await syncShows()
-                self.showSync = .success
+                self.seriesSync = .active
+                try await syncSeries()
+                self.seriesSync = .success
             } catch {
-                self.showSync = .failure(error)
+                self.seriesSync = .failure
                 logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
             }
             
@@ -113,8 +113,7 @@ final class SyncManager {
         let context = ModelContext(container)
 
         try context.transaction {
-            try deleteAll(Movie.self, in: context)
-            try deleteAll(MovieCategory.self, in: context)
+            try MovieCategory.deleteAll(modelContext: context)
 
             for category in movieCategoriesByRemoteID.values {
                 context.insert(category)
@@ -122,13 +121,7 @@ final class SyncManager {
 
             for stream in streams {
                 let category = stream.categoryId.flatMap { movieCategoriesByRemoteID[$0] }
-                let source = MediaSource(
-                    url: service.getPlayURL(
-                        for: stream.id,
-                        type: .vod,
-                        containerExtension: stream.containerExtension
-                    )
-                )
+                let source = MediaSource(url: service.getPlayURL(for: stream.id, type: .vod, containerExtension: stream.containerExtension))
                 let movie = Movie(from: stream, category: category, source: source)
                 context.insert(movie)
             }
@@ -137,7 +130,7 @@ final class SyncManager {
         try context.save()
     }
 
-    private func syncShows() async throws {
+    private func syncSeries() async throws {
         let categories = try await service.getCategories(of: .series)
         let streams = try await service.getSeriesStreams()
         
@@ -148,10 +141,7 @@ final class SyncManager {
         let context = ModelContext(container)
         
         try context.transaction {
-            try deleteAll(SeriesCategory.self, in: context)
-            try deleteAll(Episode.self, in: context)
-            try deleteAll(Series.self, in: context)
-            
+            try SeriesCategory.deleteAll(modelContext: context)
             
             for category in seriesCategoriesByRemoteID.values {
                 context.insert(category)
@@ -186,15 +176,10 @@ final class SyncManager {
         
         try context.save()
     }
-
-    private func deleteAll<Model: PersistentModel>(_ model: Model.Type, in context: ModelContext) throws {
-        let items = try context.fetch(FetchDescriptor<Model>())
-        for item in items {
-            context.delete(item)
-        }
-    }
 }
 
 extension SyncManager {
-    enum SyncState { case idle, active, success, failure(Error) }
+    enum SyncState: Equatable {
+        case idle, active, success, failure
+    }
 }
