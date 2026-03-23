@@ -23,7 +23,10 @@ struct ContentView: View {
     var body: some View {
             TabView(selection: $selectedTab) {
                 Tab(Tabs.home.name, systemImage: Tabs.home.symbol, value: .home) {
-                    ForYouScreen()
+                    ScopedPlaceholderView(
+                        title: "For You In Progress",
+                        message: "The personalized landing screen is being migrated to SQLiteData."
+                    )
                 }
                 .customizationID(Tabs.home.customizationID)
 #if !os(macOS) && !os(tvOS)
@@ -40,12 +43,18 @@ struct ContentView: View {
                 
                 TabSection("Watch") {
                     Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
-                        BrowseScreen()
+                        ScopedPlaceholderView(
+                            title: "Movies In Progress",
+                            message: "The movies browser is being migrated to SQLiteData."
+                        )
                     }
                     .customizationID(Tabs.movies.customizationID)
                     
                     Tab(Tabs.series.name, systemImage: Tabs.series.symbol, value: Tabs.series) {
-                        BrowseScreen()
+                        ScopedPlaceholderView(
+                            title: "Series In Progress",
+                            message: "The series browser is being migrated to SQLiteData."
+                        )
                     }
                     .customizationID(Tabs.series.customizationID)
                     
@@ -60,7 +69,10 @@ struct ContentView: View {
                 
                 TabSection("Library") {
                     Tab(Tabs.favorites.name, systemImage: Tabs.favorites.symbol, value: Tabs.favorites) {
-                        FavoritesScreen()
+                        ScopedPlaceholderView(
+                            title: "Favorites In Progress",
+                            message: "Favorites are being migrated to SQLiteData."
+                        )
                     }
                     .customizationID(Tabs.favorites.customizationID)
                     
@@ -85,7 +97,6 @@ struct ContentView: View {
 #if !os(macOS) && !os(tvOS)
             .tabViewCustomization($tabViewCustomization)
 #endif
-            .withVideoPlayer()
 #if os(macOS)
             .overlay(alignment: .bottomTrailing) {
                 // TODO: Activity view indicator
@@ -95,6 +106,6 @@ struct ContentView: View {
     }
 }
 
-#Preview(traits: .previewData) {
+#Preview {
     ContentView()
 }

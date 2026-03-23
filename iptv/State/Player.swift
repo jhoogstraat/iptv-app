@@ -36,7 +36,7 @@ final class Player {
     private(set) var isBuffering = false
     private(set) var isPlaybackComplete = false
     private(set) var presentation: Presentation = .inline
-    private(set) var currentItem: PlayableMedia?
+    private(set) var currentItem: Media?
     private(set) var currentTime: Double = 0
     private(set) var duration: Double?
     private(set) var errorMessage: String?

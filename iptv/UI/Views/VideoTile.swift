@@ -22,13 +22,13 @@ struct VideoTile: View {
 
     @ViewBuilder
     private var artwork: some View {
-        AsyncImage(url: media.cover) { phase in
+        AsyncImage(url: media.coverURL) { phase in
             if let image = phase.image {
                 image.boundedCoverArtwork()
             } else if phase.error != nil {
                 VStack {
                     Spacer()
-                    Text(media.name)
+                    Text(media.title)
                         .multilineTextAlignment(.center)
                     Spacer()
                 }

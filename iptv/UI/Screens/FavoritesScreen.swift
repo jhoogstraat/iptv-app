@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 
 struct FavoritesScreen: View {
     @Environment(ActiveSession.self) private var session

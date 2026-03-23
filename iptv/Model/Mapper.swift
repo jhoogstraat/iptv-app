@@ -69,156 +69,77 @@ private enum XtreamMapper {
     }
 }
 
-extension MovieCategory {
-    convenience init(from xtream: Xtream.Category) {
-        self.init(remoteId: xtream.id, name: xtream.name, group: nil, movies: [])
+extension Media.Draft {
+    nonisolated init(from stream: Xtream.VodStream, categoryID: Category.ID?) {
+        self.id = nil
+        self.sourceID = stream.id
+        self.type = .movie
+        self.title = stream.name
+        self.categoryID = categoryID
+        self.tmdbID = stream.tmdbId
+        self.coverURL = URL(string: stream.streamIcon)
+        self.rating = stream.rating
+    }
+    
+    nonisolated init(from stream: Xtream.SeriesStream, categoryID: Category.ID?) {
+        self.id = nil
+        self.sourceID = stream.id
+        self.type = .series
+        self.title = stream.name
+        self.categoryID = categoryID
+        self.tmdbID = stream.tmdb
+        self.coverURL = stream.cover.flatMap(URL.init)
+        self.rating = stream.rating
     }
 }
 
-extension SeriesCategory {
-    convenience init(from xtream: Xtream.Category) {
-        self.init(remoteId: xtream.id, name: xtream.name, group: nil, series: [])
+extension Category.Draft {
+    nonisolated init(from category: Xtream.Category, type: MediaType) {
+        self.id = nil
+        self.sourceID = category.id
+        self.type = type
+        self.title = category.name
     }
 }
 
-extension MediaInfo {
-    convenience init(media: Media, from movie: Xtream.Movie) {
-        let info = movie.info
-        let runtime = XtreamMapper.duration(minutes: info.runtime)
-        let duration = XtreamMapper.duration(seconds: info.durationSecs) ?? runtime
-        let heroImageURL = URL(string: info.movieImage) ?? URL(string: info.coverBig)
-
-        self.init(
-            media: media,
-            plot: XtreamMapper.text(info.plot) ?? XtreamMapper.text(info.description),
-            genre: XtreamMapper.parseList(info.genre),
-            releaseDate: info.releaseDate,
-            runtime: runtime,
-            duration: duration,
-            heroImageURL: heroImageURL,
-            backdropURLs: info.backdropPath.compactMap(URL.init),
-            country: XtreamMapper.text(info.country),
-            director: XtreamMapper.parseList(info.director),
-            cast: XtreamMapper.parseList(info.cast),
-            episodeRuntime: info.episodeRuntime
-        )
-    }
-
-    convenience init(media: Media, from stream: Xtream.SeriesStream) {
-        let episodeRuntime = stream.episodeRuntime.flatMap(Int.init)
-        let runtime = XtreamMapper.duration(minutes: episodeRuntime)
-
-        self.init(
-            media: media,
-            plot: XtreamMapper.text(stream.plot),
-            genre: [],
-            releaseDate: stream.releaseDate,
-            runtime: runtime,
-            duration: runtime,
-            heroImageURL: stream.cover.flatMap(URL.init),
-            backdropURLs: stream.backdropPath?.compactMap { $0 }.compactMap(URL.init) ?? [],
-            country: nil,
-            director: XtreamMapper.parseList(stream.director),
-            cast: XtreamMapper.parseList(stream.cast),
-            episodeRuntime: episodeRuntime
-        )
-    }
-
-    convenience init(media: Media, from episode: Xtream.EpisodeInfo) {
-        let runtime = XtreamMapper.duration(seconds: episode.durationSecs)
-
-        self.init(
-            media: media,
-            plot: XtreamMapper.text(episode.overview),
-            genre: [],
-            releaseDate: XtreamMapper.date(from: episode.releaseDate),
-            runtime: runtime,
-            duration: runtime,
-            heroImageURL: episode.movieImage.flatMap(URL.init),
-            backdropURLs: episode.backdropPath?.compactMap(URL.init) ?? [],
-            country: nil,
-            director: XtreamMapper.parseList(episode.crew),
-            cast: [],
-            episodeRuntime: nil
-        )
-    }
-}
-
-extension Movie {
-    convenience init(from stream: Xtream.VodStream, category: MovieCategory?, source: MediaSource) {
-        self.init(
-            name: stream.name,
-            sourceId: stream.id,
-            tmdbId: stream.tmdbId,
-            rating: stream.rating,
-            trailer: stream.trailer,
-            cover: URL(string: stream.streamIcon),
-            added: XtreamMapper.date(from: stream.added) ?? .now,
-            isFavorite: false,
-            category: category,
-            source: source
-        )
-    }
-}
-
-extension Series {
-    convenience init(from stream: Xtream.SeriesStream, category: SeriesCategory?, source: MediaSource, episodes: [Episode] = []) {
-        self.init(
-            name: stream.name,
-            sourceId: stream.id,
-            tmdbId: stream.tmdb,
-            rating: stream.rating,
-            trailer: stream.youtubeTrailer,
-            cover: stream.cover.flatMap(URL.init),
-            added: XtreamMapper.date(from: stream.lastModified) ?? stream.releaseDate ?? .now,
-            isFavorite: false,
-            category: category,
-            source: source,
-            episodes: episodes
-        )
-
-        self.info = MediaInfo(media: self, from: stream)
-    }
-}
-
-extension Episode {
-    convenience init(from stream: Xtream.SeriesStream, category: SeriesCategory?, source: MediaSource, series: Series, season: Int = 1) {
-        self.init(
-            name: stream.name,
-            sourceId: stream.id,
-            tmdbId: stream.tmdb,
-            rating: stream.rating,
-            trailer: stream.youtubeTrailer,
-            cover: stream.cover.flatMap(URL.init),
-            added: XtreamMapper.date(from: stream.lastModified) ?? stream.releaseDate ?? .now,
-            isFavorite: false,
-            category: category,
-            source: source,
-            episode: stream.number ?? 1,
-            series: series,
-            season: season
-        )
-
-        self.info = MediaInfo(media: self, from: stream)
-    }
-
-    convenience init(from episode: Xtream.Episode, category: SeriesCategory?, source: MediaSource, series: Series) {
-        self.init(
-            name: episode.title,
-            sourceId: Int(episode.id) ?? 0,
-            tmdbId: episode.info.tmdbId,
-            rating: episode.info.rating,
-            trailer: nil,
-            cover: episode.info.movieImage.flatMap(URL.init),
-            added: XtreamMapper.date(from: episode.added) ?? .now,
-            isFavorite: false,
-            category: category,
-            source: source,
-            episode: episode.episodeNum,
-            series: series,
-            season: episode.season
-        )
-
-        self.info = MediaInfo(media: self, from: episode.info)
-    }
-}
+//extension Episode {
+//    convenience init(from stream: Xtream.SeriesStream, category: SeriesCategory?, source: MediaSource, series: Series, season: Int = 1) {
+//        self.init(
+//            name: stream.name,
+//            sourceId: stream.id,
+//            tmdbId: stream.tmdb,
+//            rating: stream.rating,
+//            trailer: stream.youtubeTrailer,
+//            cover: stream.cover.flatMap(URL.init),
+//            added: XtreamMapper.date(from: stream.lastModified) ?? stream.releaseDate ?? .now,
+//            isFavorite: false,
+//            category: category,
+//            source: source,
+//            episode: stream.number ?? 1,
+//            series: series,
+//            season: season
+//        )
+//
+//        self.info = MediaInfo(media: self, from: stream)
+//    }
+//
+//    convenience init(from episode: Xtream.Episode, category: SeriesCategory?, source: MediaSource, series: Series) {
+//        self.init(
+//            name: episode.title,
+//            sourceId: Int(episode.id) ?? 0,
+//            tmdbId: episode.info.tmdbId,
+//            rating: episode.info.rating,
+//            trailer: nil,
+//            cover: episode.info.movieImage.flatMap(URL.init),
+//            added: XtreamMapper.date(from: episode.added) ?? .now,
+//            isFavorite: false,
+//            category: category,
+//            source: source,
+//            episode: episode.episodeNum,
+//            series: series,
+//            season: episode.season
+//        )
+//
+//        self.info = MediaInfo(media: self, from: episode.info)
+//    }
+//}
