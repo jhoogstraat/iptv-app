@@ -13,7 +13,7 @@ func appDatabase() throws -> any DatabaseWriter {
     @Dependency(\.context) var context
     
     var configuration = Configuration()
-    
+    configuration.journalMode = .wal
 #if DEBUG
     configuration.prepareDatabase { db in
 //        db.trace(options: .profile) {
@@ -28,10 +28,13 @@ func appDatabase() throws -> any DatabaseWriter {
     
     let database = try defaultDatabase(configuration: configuration)
     logger.info("open '\(database.path)'")
+    
     var migrator = DatabaseMigrator()
+    
 #if DEBUG
     migrator.eraseDatabaseOnSchemaChange = true
 #endif
+    
     migrator.registerMigration("Create tables") { db in
         try #sql("""
         CREATE TABLE "providers" (
@@ -40,40 +43,41 @@ func appDatabase() throws -> any DatabaseWriter {
             "username" TEXT NOT NULL,
             "password" TEXT NOT NULL,
             "endpoint" TEXT NOT NULL,
+            "isInitialized" INTEGER NOT NULL DEFAULT 0,
             "isActive" INTEGER NOT NULL DEFAULT 0,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) STRICT
-        """)
-        .execute(db)
-        
-        try #sql("""
-        CREATE TABLE "media" (
-            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "sourceID" INTEGER NOT NULL,
-            "type" INTEGER NOT NULL,
-            "title" TEXT NOT NULL,
-            "categoryID" INTEGER REFERENCES "categories"("id"),
-            "tmdbID" TEXT,
-            "coverURL" TEXT,
-            "rating" REAL,
-            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-        ) STRICT
-        """)
-        .execute(db)
+        """).execute(db)
         
         try #sql("""
         CREATE TABLE "categories"(
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "sourceID" TEXT NOT NULL,
+            "sourceID" TEXT UNIQUE NOT NULL,
             "type" INTEGER NOT NULL,
             "title" TEXT NOT NULL,
-            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE ("sourceID", "type")
+            "updatedAt" TEXT
         ) STRICT
-        """)
-        .execute(db)
+        """).execute(db)
+
+        try #sql("""
+        CREATE TABLE "media" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "sourceID" INTEGER UNIQUE NOT NULL,
+            "type" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "categoryID" INTEGER,
+            "tmdbID" TEXT,
+            "coverURL" TEXT,
+            "rating" REAL,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
+        ) STRICT
+        """).execute(db)
+        
     }
+    
     try migrator.migrate(database)
+    
     return database
 }
 
@@ -84,7 +88,8 @@ nonisolated struct Provider: Hashable, Identifiable, Sendable {
     var username: String
     var password: String
     var endpoint: URL
-    var isActive: Bool
+    var isInitialized: Bool = false
+    var isActive: Bool = false
 }
 
 @Table("media")
@@ -99,9 +104,6 @@ struct Media: Hashable, Identifiable, Sendable {
     let rating: Double?
     var updatedAt: Date = .now
 }
-enum MediaType: Int, QueryBindable {
-   case movie = 0, series = 1, episode = 2
-}
 
 @Table
 nonisolated struct Category: Hashable, Identifiable, Sendable {
@@ -109,7 +111,11 @@ nonisolated struct Category: Hashable, Identifiable, Sendable {
     let sourceID: String
     let type: MediaType
     let title: String
-    var updatedAt: Date = .now
+    var updatedAt: Date?
+}
+
+enum MediaType: Int, QueryBindable {
+   case movie = 0, series = 1, episode = 2
 }
 
 private nonisolated let logger = Logger(subsystem: "IPTV", category: "Database")

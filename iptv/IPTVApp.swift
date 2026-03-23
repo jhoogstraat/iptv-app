@@ -65,7 +65,7 @@ struct IPTVApp: App {
         
         let sessionManager = SessionManager()
         
-        sessionManager.load(key: .activeSession)
+        sessionManager.load()
         ImagePipeline.Configuration.isSignpostLoggingEnabled = true
 
         self.sessionManager = sessionManager
