@@ -16,6 +16,6 @@ struct SearchScreen: View {
     }
 }
 
-#Preview(traits: .previewData) {
+#Preview {
     SearchScreen()
 }

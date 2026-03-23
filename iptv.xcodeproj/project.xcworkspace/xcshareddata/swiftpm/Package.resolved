@@ -1,5 +1,5 @@
 {
-  "originHash" : "e4e2970b45c9c37e6f425eaff86c3734d98e0f751c368d0325d9e0d5c59d60c0",
+  "originHash" : "11c0ac272c3ad2292e34a38dd7dc2c5a875bde6554abe37b2de5a6ab6a4817a0",
   "pins" : [
     {
       "identity" : "combine-schedulers",
@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/jhoogstraat/xtream-swift.git",
       "state" : {
-        "revision" : "3ee67f022c1b4ec874e47af2266312c0a2f96305",
-        "version" : "3.0.0"
+        "revision" : "d879e168dcdedd3579b6f5a6322e7083e1817b44",
+        "version" : "3.2.0"
       }
     }
   ],

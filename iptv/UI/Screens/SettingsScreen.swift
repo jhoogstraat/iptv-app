@@ -7,7 +7,6 @@
 
 import OSLog
 import SwiftUI
-import SwiftData
 
 private enum LibraryLanguageSource: String, CaseIterable, Identifiable {
     case automatic
@@ -58,9 +57,9 @@ class ProviderFields {
         !name.isEmpty && !username.isEmpty && !password.isEmpty && URL(string: endpoint) != nil
     }
     
-    func build() -> XtreamProvider? {
+    func build() -> Provider.Draft? {
         guard isValid else { return nil }
-        return XtreamProvider(name: name, endpoint: URL(string: endpoint)!, username: username, password: password, movies: [], series: [])
+        return .init(id: nil, name: name, username: username, password: password, endpoint: URL(string: endpoint)!, isActive: true)
     }
     
     init(name: String, endpoint: String, username: String, password: String) {
@@ -96,24 +95,15 @@ struct SettingsScreen: View {
     @Environment(\.horizontalSizeClass) var sizeClass
     
     init(sessionManager: SessionManager) {
-        let fields: ProviderFields = switch sessionManager.session?.provider {
-            case let xtream as XtreamProvider:
-                    .init(
-                        name: xtream.name,
-                        endpoint: xtream.endpoint.absoluteString,
-                        username: xtream.username,
-                        password: xtream.password
-                    )
-                //            case let m3u as M3UProvider:
-                //                // Example of a second provider type
-                //                .init(
-                //                    name: m3u.title,
-                //                    endpoint: m3u.url.absoluteString,
-                //                    username: "",
-                //                    password: ""
-                //                )
-            default:
-                    .init(name: "", endpoint: "", username: "", password: "")
+        let fields = if let provider = sessionManager.session?.provider {
+            ProviderFields(
+                name: provider.name,
+                endpoint: provider.endpoint.absoluteString,
+                username: provider.username,
+                password: provider.password
+            )
+        } else {
+            ProviderFields(name: "", endpoint: "", username: "", password: "")
         }
         
         self._providerFields = State(initialValue: fields)
@@ -214,8 +204,7 @@ struct SettingsScreen: View {
         
         return Section {
             LabeledContent("Type") {
-                // TODO: Make selectable when supporting multiple provider types
-                Text(sessionManager.session?.provider.type ?? "Xtream API")
+                Text("Xtream API")
                     .foregroundStyle(session ? .primary : .secondary)
                     .fixedSize()
             }
@@ -375,16 +364,14 @@ struct SettingsScreen: View {
         guard let provider = providerFields.build() else {
             fatalError("Should validate provider fields before calling save()")
         }
-        sessionManager.initialize(provider: provider)
+        sessionManager.initialize(provider)
     }
     
     private func clear() {
-        sessionManager.clear()
-        logger.info("Provider configuration cleared.")
+        try? sessionManager.clear()
     }
 }
 
-#Preview(traits: .previewData) {
-    @Previewable @Environment(\.modelContext) var context
-    SettingsScreen(sessionManager: .init(userDefaults: .standard, modelContainer: context.container))
+#Preview {
+    SettingsScreen(sessionManager: .init())
 }

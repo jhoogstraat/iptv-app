@@ -6,78 +6,75 @@
 //
 
 import SwiftUI
-import SwiftData
 import OSLog
 import xtream_swift
+import Dependencies
+import SQLiteData
 
 @Observable
 class SessionManager {
     // Deps
-    private let userDefaults: UserDefaults
-    private let modelContainer: ModelContainer
-    
-    // Constants
-    private let activeProviderKey = "active_provider_id"
+    @ObservationIgnored
+    @Dependency(\.defaultDatabase) var database
+  
+//    @ObservationIgnored
+//    @FetchOne(Provider.where(\.isActive)) var provider
     
     // State
     var session: ActiveSession?
-
-    // Dependent state
+    
+    // Helper
     var hasActiveSession: Bool { session != nil }
-    
-    init(userDefaults: UserDefaults, modelContainer: ModelContainer) {
-        self.userDefaults = userDefaults
-        self.modelContainer = modelContainer
-    }
-    
-    func load(key: UserDefaultKey) {
-        guard
-            let id = userDefaults.string(for: key),
-            let uuid = UUID(uuidString: id),
-            let provider = Provider.with(id: uuid, in: modelContainer.mainContext)
-        else { return }
-        
-        self.session = self.build(for: provider)
-    }
-    
-    func initialize(provider: XtreamProvider) {
-        self.modelContainer.mainContext.insert(provider)
-        
-        do {
-            try modelContainer.mainContext.save()
-            userDefaults.set(provider.id.uuidString, for: .activeSession)
-            self.session = self.build(for: provider)
-        } catch {
-            logger.error("Saving database failed: \(error)")
+
+    func load(key _: UserDefaultKey) {
+        let provider = try? database.read {
+            try Provider.where { $0.isActive.eq(true) }.fetchOne($0)
         }
-    }
-    
-    func change(to id: Provider.ID) {
-        guard let provider = Provider.with(id: id, in: modelContainer.mainContext) else { return }
-        
-        userDefaults.set(provider, forKey: activeProviderKey)
+        guard let provider else { return }
         self.session = self.build(for: provider)
     }
     
-    func clear() {
-        guard let session else { return }
+    func initialize(_ draft: Provider.Draft) {
+        var provider: Provider!
         
-        modelContainer.mainContext.delete(session.provider)
-        userDefaults.removeObject(for: .activeSession)
+        try! database.write { db in
+            provider = try Provider.insert { draft }.returning(\.self).fetchOne(db)!
+            if let id = self.session?.provider.id {
+                try Provider.find(id).update { $0.isActive = false}.execute(db)
+            }
+        }
+        
+        self.session = self.build(for: provider)
+    }
+    
+    func change(to id: Provider.ID) throws {
+        try database.write { db in
+            if let id = self.session?.provider.id {
+                try Provider.find(id).update { $0.isActive = false}.execute(db)
+            }
+            try Provider.find(id).update { $0.isActive = true }.execute(db)
+        }
+      
+        let provider = try database.read(Provider.find(id).fetchOne)!
+        
+        self.session = self.build(for: provider)
+    }
+    
+    func clear() throws {
+        guard let session else { return }
+        try database.write { try Provider.delete(session.provider).execute($0) }
         self.session = nil
     }
     
     private func build(for provider: Provider) -> ActiveSession? {
-        if let provider = provider as? XtreamProvider {
-            let service = XtreamService(baseURL: provider.endpoint, username: provider.username, password: provider.password)
-            let syncManager = SyncManager(container: modelContainer, provider: provider, service: service)
-            
-            syncManager.sync()
-            
-            return ActiveSession(provider: provider, service: service, syncManager: syncManager)
+        let service = XtreamService(baseURL: provider.endpoint, username: provider.username, password: provider.password)
+        let syncManager = SyncManager(service: service)
+       
+        Task {
+            await syncManager.sync()
         }
         
-        fatalError("Unknown provider type encountered. Fix before release.")
+        return ActiveSession(provider: provider, service: service, syncManager: syncManager)
     }
     
 }

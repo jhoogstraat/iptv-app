@@ -6,15 +6,15 @@
 //
 
 import SwiftUI
-import SwiftData
 import OSLog
+import SQLiteData
+import Dependencies
 import Nuke
+import Sharing
 
 @main
 struct IPTVApp: App {
-    private let modelContainer: ModelContainer
     private let sessionManager: SessionManager
-    private let player: Player
     
     var body: some Scene {
         WindowGroup {
@@ -22,8 +22,6 @@ struct IPTVApp: App {
                 ContentView()
                     .environment(sessionManager)
                     .environment(session)
-                    .environment(player)
-                    .modelContainer(modelContainer)
 #if os(macOS)
                     .toolbar(removing: .title)
                     .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
@@ -59,19 +57,20 @@ struct IPTVApp: App {
     /// Load video metadata and initialize the model container and video player model.
     init() {
         let userDefaults = UserDefaults.standard
-        let modelContainer = try! AppPersistence.makeModelContainer(isStoredInMemoryOnly: false)
         
-        let sessionManager = SessionManager(userDefaults: userDefaults, modelContainer: modelContainer)
-        let player = Player(defaults: userDefaults)
+        prepareDependencies {
+            $0.defaultDatabase = try! appDatabase()
+            $0.defaultAppStorage = userDefaults
+        }
+        
+        let sessionManager = SessionManager()
         
         sessionManager.load(key: .activeSession)
         ImagePipeline.Configuration.isSignpostLoggingEnabled = true
 
-        self.modelContainer = modelContainer
         self.sessionManager = sessionManager
-        self.player = player
     }
 }
 
 /// A global log of events for the app.
-let logger = Logger()
+private let logger = Logger()

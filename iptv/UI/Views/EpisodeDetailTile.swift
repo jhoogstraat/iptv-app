@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 import OSLog
 
 struct EpisodeDetailTile: View {

@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 
 enum BrowseSort: String, CaseIterable, Identifiable {
     case title, newest, rating

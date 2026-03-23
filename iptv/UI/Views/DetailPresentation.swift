@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 
 enum DetailSpacing {
     static let xxxs: CGFloat = 2
