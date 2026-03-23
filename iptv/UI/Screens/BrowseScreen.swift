@@ -51,6 +51,16 @@ struct BrowseScreen: View {
     
     var category: Category? { categories.first { $0.id == selectedCategory } }
     
+    var groups: Array<(key: String, value: [Category])> {
+        Dictionary(grouping: categories) { element in
+            if let match = element.title.firstMatch(of: #/\|(.*)\|(.*)/#) {
+                return String(match.output.1)
+            } else {
+                return "  "
+            }
+        }.sorted(by: { $0.key < $1.key })
+    }
+    
     private var fallbackScreentitle: String {
         return switch type {
             case .movie:
@@ -115,13 +125,20 @@ struct BrowseScreen: View {
         }
         .toolbar {
             Spacer()
-            
-            Menu(category?.title ?? "") {
-                ForEach(categories) { category in
-                    Button(category.title) {
-                        selectedCategory = category.id
+
+            Menu {
+                ForEach(groups, id: \.key) { group in
+                    Section(group.key) {
+                        ForEach(group.value, id: \.id) { category in
+                            Button(category.title) {
+                                selectedCategory = category.id
+                            }
+                        }
                     }
                 }
+            } label: {
+                Text(category?.title ?? "")
+                    .padding(.horizontal, 30)
             }
             .buttonStyle(.plain)
             
@@ -234,7 +251,6 @@ private struct CoverGrid: View {
             ScrollView {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
                     ForEach(media) { media in
-                        print(media.categoryID)
                         return NavigationLink {
                             ContentUnavailableView("Not yet implemented", systemImage: "fail")
 //                            MovieDetailScreen(movie: movie)
