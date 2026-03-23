@@ -43,10 +43,11 @@ struct ContentView: View {
                 
                 TabSection("Watch") {
                     Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
-                        ScopedPlaceholderView(
-                            title: "Movies In Progress",
-                            message: "The movies browser is being migrated to SQLiteData."
-                        )
+                        BrowseScreen()
+//                        ScopedPlaceholderView(
+//                            title: "Movies In Progress",
+//                            message: "The movies browser is being migrated to SQLiteData."
+//                        )
                     }
                     .customizationID(Tabs.movies.customizationID)
                     

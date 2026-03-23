@@ -79,7 +79,6 @@
 				UI/Screens/FavoritesScreen.swift,
 				UI/Screens/ForYouScreen.swift,
 				UI/Screens/MovieDetailScreen.swift,
-				UI/Screens/MoviesScreen.swift,
 				UI/Views/EpisodeDetailTile.swift,
 				UI/Views/ForYou/ContinueWatchingCardView.swift,
 				UI/Views/ForYou/ForYouHeroView.swift,

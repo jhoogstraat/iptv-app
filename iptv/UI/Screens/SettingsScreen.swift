@@ -7,6 +7,8 @@
 
 import OSLog
 import SwiftUI
+import SQLiteData
+import Dependencies
 
 private enum LibraryLanguageSource: String, CaseIterable, Identifiable {
     case automatic
@@ -46,6 +48,23 @@ private enum PlaybackPreference: String, CaseIterable, Identifiable {
     }
 }
 
+struct MediaCount: FetchKeyRequest {
+  struct Value {
+      var movies = 0
+      var series = 0
+      var live = 0
+  }
+  
+    let provider: Provider.ID?
+    
+  func fetch(_ db: Database) throws -> Value {
+    try Value(
+        movies: Media.where { $0.type.eq(MediaType.movie) }.fetchCount(db),
+        series: Media.where { $0.type.eq(MediaType.series) }.fetchCount(db),
+    )
+  }
+}
+
 @Observable
 class ProviderFields {
     var name: String
@@ -57,9 +76,9 @@ class ProviderFields {
         !name.isEmpty && !username.isEmpty && !password.isEmpty && URL(string: endpoint) != nil
     }
     
-    func build() -> Provider.Draft? {
+    func build(id id: Provider.ID?) -> Provider.Draft? {
         guard isValid else { return nil }
-        return .init(id: nil, name: name, username: username, password: password, endpoint: URL(string: endpoint)!, isActive: true)
+        return .init(id: id, name: name, username: username, password: password, endpoint: URL(string: endpoint)!, isActive: true)
     }
     
     init(name: String, endpoint: String, username: String, password: String) {
@@ -85,28 +104,21 @@ struct SettingsScreen: View {
     
     private let sessionManager: SessionManager
     
-    @State private var providerFields: ProviderFields
+    @State private var providerFields: ProviderFields = .init(name: "", endpoint: "", username: "", password: "")
     
     @State private var excludedPrefixesInput = ""
     @State private var availablePrefixOptions: [PrefixOption] = []
     @State private var selectedVisiblePrefixes: Set<String> = []
     @State private var prefixDiscoveryError: String?
+  
+    @Dependency(\.defaultDatabase) var database
+    
+    @FetchOne(Provider.where(\.isActive)) var provider: Provider?
+    @Fetch(MediaCount(provider: nil)) var mediaCount = MediaCount.Value()
     
     @Environment(\.horizontalSizeClass) var sizeClass
     
     init(sessionManager: SessionManager) {
-        let fields = if let provider = sessionManager.session?.provider {
-            ProviderFields(
-                name: provider.name,
-                endpoint: provider.endpoint.absoluteString,
-                username: provider.username,
-                password: provider.password
-            )
-        } else {
-            ProviderFields(name: "", endpoint: "", username: "", password: "")
-        }
-        
-        self._providerFields = State(initialValue: fields)
         self.sessionManager = sessionManager
     }
     
@@ -136,6 +148,13 @@ struct SettingsScreen: View {
                     supportSection
                 }
             }
+        }.task(id: sessionManager.session?.provider) {
+            if let provider {
+                providerFields.name = provider.name
+                providerFields.endpoint = provider.endpoint.absoluteString
+                providerFields.username = provider.username
+                providerFields.password = provider.password
+            }
         }
         .formStyle(.grouped)
         .padding(20)
@@ -162,8 +181,8 @@ struct SettingsScreen: View {
                         : AnyLayout(HStackLayout(spacing: 20))
 
             layout {
-                StatsCard(title: "Movies", value: "...", subtitle: syncDescription(sessionManager.session?.syncManager.movieSync))
-                StatsCard(title: "Series", value: "...", subtitle: syncDescription(sessionManager.session?.syncManager.seriesSync))
+                StatsCard(title: "Movies", value: "\(mediaCount.movies)", subtitle: syncDescription(sessionManager.session?.syncManager.movieSync))
+                StatsCard(title: "Series", value: "\(mediaCount.series)", subtitle: syncDescription(sessionManager.session?.syncManager.seriesSync))
                 StatsCard(title: "TV", value: "Soon", subtitle: "Live TV stats will appear here once TV support lands.")
             }
             
@@ -361,10 +380,19 @@ struct SettingsScreen: View {
     }
     
     private func save() {
-        guard let provider = providerFields.build() else {
+        guard let provider = providerFields.build(id: provider?.id) else {
             fatalError("Should validate provider fields before calling save()")
         }
-        sessionManager.initialize(provider)
+       
+        do {
+            if provider.id != nil {
+                try sessionManager.upsert(provider: provider)
+            } else {
+                try sessionManager.initialize(provider)
+            }
+        } catch {
+            fatalError("\(error)")
+        }
     }
     
     private func clear() {

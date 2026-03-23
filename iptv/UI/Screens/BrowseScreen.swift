@@ -6,86 +6,73 @@
 //
 
 import SwiftUI
+import SQLiteData
 
 enum BrowseSort: String, CaseIterable, Identifiable {
     case title, newest, rating
     var id: Self { self }
 }
 
-private func streamSortDescriptors(for browseSort: BrowseSort) -> [SortDescriptor<Movie>] {
-    switch browseSort {
-    case .title:
-        [
-            SortDescriptor(\Movie.name, order: .forward),
-            SortDescriptor(\Movie.rating, order: .reverse),
-            SortDescriptor(\Movie.added, order: .reverse),
-            SortDescriptor(\Movie.sourceId, order: .forward)
-        ]
-    case .newest:
-        [
-            SortDescriptor(\Movie.added, order: .reverse),
-            SortDescriptor(\Movie.rating, order: .reverse),
-            SortDescriptor(\Movie.name, order: .forward),
-            SortDescriptor(\Movie.sourceId, order: .forward)
-        ]
-    case .rating:
-        [
-            SortDescriptor(\Movie.rating, order: .reverse),
-            SortDescriptor(\Movie.added, order: .reverse),
-            SortDescriptor(\Movie.name, order: .forward),
-            SortDescriptor(\Movie.sourceId, order: .forward)
-        ]
-    }
-}
+//private func streamSortDescriptors(for browseSort: BrowseSort) -> [SortDescriptor<Movie>] {
+//    switch browseSort {
+//    case .title:
+//        [
+//            SortDescriptor(\Movie.name, order: .forward),
+//            SortDescriptor(\Movie.rating, order: .reverse),
+//            SortDescriptor(\Movie.added, order: .reverse),
+//            SortDescriptor(\Movie.sourceId, order: .forward)
+//        ]
+//    case .newest:
+//        [
+//            SortDescriptor(\Movie.added, order: .reverse),
+//            SortDescriptor(\Movie.rating, order: .reverse),
+//            SortDescriptor(\Movie.name, order: .forward),
+//            SortDescriptor(\Movie.sourceId, order: .forward)
+//        ]
+//    case .rating:
+//        [
+//            SortDescriptor(\Movie.rating, order: .reverse),
+//            SortDescriptor(\Movie.added, order: .reverse),
+//            SortDescriptor(\Movie.name, order: .forward),
+//            SortDescriptor(\Movie.sourceId, order: .forward)
+//        ]
+//    }
+//}
 
 struct BrowseScreen: View {
-    @State var selectedCategory: MovieCategory?
-    @State var queryText: String
-    @State var sort: BrowseSort
-
-//    @Environment(ActiveSession.self) private var session
-
-    @Query private var categories: [MovieCategory]
+    @State var type: MediaType = .movie
+    @State var selectedCategory: Category.ID? = nil
+    @State var queryText: String = ""
+    @State var sort: BrowseSort = .title
+   
+    @Environment(ActiveSession.self) var session
     
-    init() {
-        self.queryText = ""
-        self.sort = .title
-        
-//        _categoryRecords = Query(
-//            filter: #Predicate<PersistedCategoryRecord> { record in
-//                record.providerFingerprint == provider &&
-//                record.contentType == contentType.rawValue
-//            },
-//            sort: [
-//                SortDescriptor(\PersistedCategoryRecord.sortIndex, order: .forward),
-//                SortDescriptor(\PersistedCategoryRecord.name, order: .forward)
-//            ]
-//        )
+    @FetchAll(Category.where { $0.type.eq(MediaType.movie) }) private var categories: [Category]
+    
+    var category: Category? { categories.first { $0.id == selectedCategory } }
+    
+    private var fallbackScreentitle: String {
+        return switch type {
+            case .movie:
+                "Movies"
+            case .series:
+                "Series"
+            default:
+               "Content"
+            }
     }
-
-    private var screenTitle: String {
-        return "TODO"
-//        switch contentType {
-//        case .vod:
-//            "Movies"
-//        case .series:
-//            "Series"
-//        case .live:
-//            "Live"
-//        }
-    }
-
-//    private var emptyCatalogMessage: String {
-//        switch contentType {
-//        case .vod:
-//            "No movies were returned by the provider."
-//        case .series:
-//            "No series were returned by the provider."
-//        case .live:
-//            "No channels were returned by the provider."
-//        }
-//    }
-
+    
+    //    private var emptyCatalogMessage: String {
+    //        switch contentType {
+    //        case .vod:
+    //            "No movies were returned by the provider."
+    //        case .series:
+    //            "No series were returned by the provider."
+    //        case .live:
+    //            "No channels were returned by the provider."
+    //        }
+    //    }
+    
     var body: some View {
         NavigationStack {
             if categories.isEmpty {
@@ -96,62 +83,82 @@ struct BrowseScreen: View {
                 }
             } else if let selectedCategory {
                 CoverGrid(
-                    category: selectedCategory,
-                    queryText: queryText,
-                    sort: sort
+                    category: $selectedCategory,
+                    searchText: $queryText,
+                    sort: $sort
                 )
             } else {
                 ProgressView()
             }
         }
-        .navigationTitle(screenTitle)
-        .searchable(text: $queryText, prompt: "Search \(screenTitle)")
-//        .withBackgroundActivityToolbar()
-        .toolbar {
-            let groups = Dictionary(grouping: categories) { $0.group }.map { (key: $0.key, categories: $0.value) }
+        .navigationTitle(fallbackScreentitle)
+        .searchable(text: $queryText, prompt: "Search \(fallbackScreentitle)")
+        .task {
+            // TODO: Find last selected category and reopen
+            if selectedCategory == nil, let id = categories.first?.id {
+                selectedCategory = id
+            }
+        }
+        .task(id: selectedCategory) {
+            // Fetch media for category if not yet initialized
+            guard let category, category.updatedAt == nil else {
+                return
+            }
             
-            ToolbarItem(placement: .principal) {
-                Menu {
-                    ForEach(groups, id: \.key) { categoryGroup in
-                        if let title = categoryGroup.key {
-                            Section(title) {
-                                CategorySelector(selectedCategory: $selectedCategory, categories: categoryGroup.categories)
-                            }
-                        } else {
-                            CategorySelector(selectedCategory: $selectedCategory, categories: categoryGroup.categories)
-                        }
-                    }
-                } label: {
-                    categorySelectorLabel(title: selectedCategory?.name ?? screenTitle)
-                }
-                .buttonStyle(.plain)
-                .help("Category: \(selectedCategory?.name ?? "No Category Selected")")
-            }
-
-            ToolbarItem(placement: .primaryAction) {
-                sortMenu
+            do {
+                try await session.syncManager.updateMovies(in: category.id)
+            } catch is CancellationError {
+                print("Cancelled update movies task")
+            } catch {
+                fatalError("\(error.localizedDescription), \(#file) \(#line) - \(#function) - \(#column) - \(#fileID)")
             }
         }
-    }
-
-    struct CategorySelector: View {
-        @Binding var selectedCategory: MovieCategory?
-        
-        let categories: [MovieCategory]
-        
-        var body: some View {
-            ForEach(categories) { category in
-                Button {
-                    selectedCategory = category
-                } label: {
-                    if category == selectedCategory {
-                        Label(category.name, systemImage: "checkmark")
-                    } else {
-                        Text(category.name)
+        .toolbar {
+            Spacer()
+            
+            Menu(category?.title ?? "") {
+                ForEach(categories) { category in
+                    Button(category.title) {
+                        selectedCategory = category.id
                     }
                 }
             }
+            .buttonStyle(.plain)
+            
+//            ToolbarItem(placement: .primaryAction) {
+//                sortMenu
+//            }
         }
+//                .withBackgroundActivityToolbar()
+//        .toolbar {
+////                    let groups = Dictionary(grouping: categories) { $0.group }.map { (key: $0.key, categories: $0.value) }
+//            ToolbarItem(placement: .principal) {
+//                Menu {
+//                    ForEach(categories) { category in
+//                        Button(category.title) {
+//                            selectedCategory = category
+//                        }
+//                    }
+////                                if let title = categoryGroup.key {
+////                                    Section(title) {
+////                                        CategorySelector(selectedCategory: $selectedCategory, categories: categoryGroup.categories)
+////                                    }
+////                                } else {
+////                            CategorySelector(selectedCategory: $selectedCategory, categories: categories)
+////                                }
+////                            }
+//                }
+////                        label: {
+////                            categorySelectorLabel(title: selectedCategory?.name ?? fallbackScreentitle)
+////                        }
+//                .buttonStyle(.plain)
+//                .help("Category: \(selectedCategory?.name ?? "No Category Selected")")
+//            }
+
+//            ToolbarItem(placement: .primaryAction) {
+//                sortMenu
+//            }
+//        }
     }
 
     @ViewBuilder
@@ -193,18 +200,18 @@ struct BrowseScreen: View {
         .help("Sort: \(sort.rawValue)")
     }
 
-    private func reconcileSelection() {
-        guard !categories.isEmpty else {
-            selectedCategory = nil
-            return
-        }
-
-        if let selectedCategory, categories.contains(where: { $0 == selectedCategory }) {
-            return
-        }
-
-        selectedCategory = categories.first
-    }
+//    private func reconcileSelection() {
+//        guard !categories.isEmpty else {
+//            selectedCategory = nil
+//            return
+//        }
+//
+//        if let selectedCategory, categories.contains(where: { $0.id == selectedCategory }) {
+//            return
+//        }
+//
+//        selectedCategory = categories.first
+//    }
 
 }
 
@@ -215,57 +222,24 @@ private struct CoverGrid: View {
         static let posterAspectRatio: CGFloat = 2 / 3
     }
     
-    let category: MovieCategory
-    let queryText: String
-    let sort: BrowseSort
+    @Binding var category: Category.ID?
+    @Binding var searchText: String
+    @Binding var sort: BrowseSort
     
-    @State private var isLoading = true
     @State private var error: String?
-    
-    init(
-        category: MovieCategory,
-        queryText: String,
-        sort: BrowseSort
-    ) {
-        self.category = category
-        self.queryText = queryText
-        self.sort = sort
-    }
+   
+    @State @FetchAll var media: [Media] = []
     
     var body: some View {
-        if let errorMessage = error {
-            VStack(spacing: 12) {
-                Text(errorMessage)
-                    .multilineTextAlignment(.center)
-                Button("Retry Category") {
-                    print("TODO")
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding()
-        } else if isLoading {
-            ScrollView {
-                BrowseSkeletonGrid(columns: gridColumns)
-                    .padding(.horizontal)
-                    .padding(.bottom, 20)
-            }
-            .scrollIndicators(.hidden)
-        } else if category.movies.isEmpty {
-            ContentUnavailableView(
-                "No Results",
-                systemImage: "film",
-                description: Text("No titles are available in this category")
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
             ScrollView {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
-                    ForEach(category.movies) { movie in
-                        NavigationLink {
-                            MovieDetailScreen(movie: movie)
+                    ForEach(media) { media in
+                        print(media.categoryID)
+                        return NavigationLink {
+                            ContentUnavailableView("Not yet implemented", systemImage: "fail")
+//                            MovieDetailScreen(movie: movie)
                         } label: {
-                            BrowsePosterTile(media: movie)
+                            BrowsePosterTile(media: media)
                         }
                         .buttonStyle(.plain)
                     }
@@ -273,8 +247,28 @@ private struct CoverGrid: View {
                 .padding(.horizontal)
                 .padding(.bottom, 20)
             }
+            .task(id: [category, searchText, sort] as [AnyHashable]) {
+                await updateQuery()
+            }
         }
-    }
+    
+    private func updateQuery() async {
+       do {
+           try await $media.wrappedValue.load(
+           Media
+            .where { $0.categoryID.eq(category) }
+//             .order {
+//               if order == .forward {
+//                 $0.timestamp
+//               } else {
+//                 $0.timestamp.desc()
+//               }
+//             }
+         )
+       } catch {
+         // Handle error...
+       }
+     }
     
     private var gridColumns: [GridItem] {
         [
@@ -325,7 +319,7 @@ private struct CoverGrid: View {
                 .aspectRatio(BrowseLayout.posterAspectRatio, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: 8))
                 
-                Text(media.name)
+                Text(media.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
                     .lineLimit(2)
@@ -335,13 +329,13 @@ private struct CoverGrid: View {
         
         @ViewBuilder
         private var artwork: some View {
-            AsyncImage(url: media.cover) { phase in
+            AsyncImage(url: media.coverURL) { phase in
                 if let image = phase.image {
                     image.boundedCoverArtwork()
                 } else if phase.error != nil {
                     VStack {
                         Spacer()
-                        Text(media.name)
+                        Text(media.title)
                             .multilineTextAlignment(.center)
                         Spacer()
                     }
@@ -453,6 +447,31 @@ private struct CoverGrid: View {
         }
     }
 }
-#Preview(traits: .previewData, .fixedLayout(width: 1000, height: 500)) {
+
+struct CategorySelector: View {
+    @Binding var selectedCategory: Category?
+    
+    @FetchAll(Category.where { $0.type.eq(MediaType.movie) }) var categories: [Category]
+    
+    var body: some View {
+        ForEach(categories) { category in
+            Text(category.title)
+//            Button {
+//                selectedCategory = category
+//            } label: {
+//                if category == selectedCategory {
+//                    Label(category.name, systemImage: "checkmark")
+//                } else {
+//                    Text(category.name)
+//                }
+//            }
+        }
+    }
+}
+
+#Preview {
+    let _ = prepareDependencies {
+        $0.defaultDatabase = try! appDatabase()
+    }
     BrowseScreen()
 }

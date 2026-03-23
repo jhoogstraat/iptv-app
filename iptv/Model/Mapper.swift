@@ -8,69 +8,69 @@
 import Foundation
 import xtream_swift
 
-private enum XtreamMapper {
-    static let timestampFormatters: [DateFormatter] = [
-        makeFormatter("yyyy-MM-dd HH:mm:ss"),
-        makeFormatter("yyyy-MM-dd")
-    ]
-
-    static func date(from value: String?) -> Date? {
-        guard let rawValue = value?.trimmed, !rawValue.isEmpty else {
-            return nil
-        }
-
-        if let unixTimestamp = TimeInterval(rawValue) {
-            return Date(timeIntervalSince1970: unixTimestamp)
-        }
-
-        for formatter in timestampFormatters {
-            if let parsedDate = formatter.date(from: rawValue) {
-                return parsedDate
-            }
-        }
-
-        return nil
-    }
-
-    static func duration(minutes: Int?) -> Duration? {
-        guard let minutes else { return nil }
-        return Duration(secondsComponent: Int64(minutes * 60), attosecondsComponent: 0)
-    }
-
-    static func duration(seconds: Int?) -> Duration? {
-        guard let seconds else { return nil }
-        return Duration(secondsComponent: Int64(seconds), attosecondsComponent: 0)
-    }
-
-    static func parseList(_ value: String?) -> [String] {
-        guard let value else { return [] }
-
-        return value
-            .split(separator: ",")
-            .map(\.trimmed)
-            .filter { !$0.isEmpty }
-    }
-
-    static func text(_ value: String?) -> String? {
-        guard let value = value?.trimmed, !value.isEmpty else {
-            return nil
-        }
-
-        return value
-    }
-
-    private static func makeFormatter(_ format: String) -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.dateFormat = format
-        return formatter
-    }
-}
+//private enum XtreamMapper {
+//    static let timestampFormatters: [DateFormatter] = [
+//        makeFormatter("yyyy-MM-dd HH:mm:ss"),
+//        makeFormatter("yyyy-MM-dd")
+//    ]
+//
+//    static func date(from value: String?) -> Date? {
+//        guard let rawValue = value?.trimmed, !rawValue.isEmpty else {
+//            return nil
+//        }
+//
+//        if let unixTimestamp = TimeInterval(rawValue) {
+//            return Date(timeIntervalSince1970: unixTimestamp)
+//        }
+//
+//        for formatter in timestampFormatters {
+//            if let parsedDate = formatter.date(from: rawValue) {
+//                return parsedDate
+//            }
+//        }
+//
+//        return nil
+//    }
+//
+//    static func duration(minutes: Int?) -> Duration? {
+//        guard let minutes else { return nil }
+//        return Duration(secondsComponent: Int64(minutes * 60), attosecondsComponent: 0)
+//    }
+//
+//    static func duration(seconds: Int?) -> Duration? {
+//        guard let seconds else { return nil }
+//        return Duration(secondsComponent: Int64(seconds), attosecondsComponent: 0)
+//    }
+//
+//    static func parseList(_ value: String?) -> [String] {
+//        guard let value else { return [] }
+//
+//        return value
+//            .split(separator: ",")
+//            .map(\.trimmed)
+//            .filter { !$0.isEmpty }
+//    }
+//
+//    static func text(_ value: String?) -> String? {
+//        guard let value = value?.trimmed, !value.isEmpty else {
+//            return nil
+//        }
+//
+//        return value
+//    }
+//
+//    private static func makeFormatter(_ format: String) -> DateFormatter {
+//        let formatter = DateFormatter()
+//        formatter.calendar = Calendar(identifier: .gregorian)
+//        formatter.locale = Locale(identifier: "en_US_POSIX")
+//        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+//        formatter.dateFormat = format
+//        return formatter
+//    }
+//}
 
 extension Media.Draft {
-    nonisolated init(from stream: Xtream.VodStream, categoryID: Category.ID?) {
+    nonisolated init(from stream: Xtream.VodStream, categoryID: Category.ID? = nil) {
         self.id = nil
         self.sourceID = stream.id
         self.type = .movie
@@ -81,7 +81,7 @@ extension Media.Draft {
         self.rating = stream.rating
     }
     
-    nonisolated init(from stream: Xtream.SeriesStream, categoryID: Category.ID?) {
+    nonisolated init(from stream: Xtream.SeriesStream, categoryID: Category.ID? = nil) {
         self.id = nil
         self.sourceID = stream.id
         self.type = .series
