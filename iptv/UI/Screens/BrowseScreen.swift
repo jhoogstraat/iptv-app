@@ -13,42 +13,20 @@ enum BrowseSort: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
-//private func streamSortDescriptors(for browseSort: BrowseSort) -> [SortDescriptor<Movie>] {
-//    switch browseSort {
-//    case .title:
-//        [
-//            SortDescriptor(\Movie.name, order: .forward),
-//            SortDescriptor(\Movie.rating, order: .reverse),
-//            SortDescriptor(\Movie.added, order: .reverse),
-//            SortDescriptor(\Movie.sourceId, order: .forward)
-//        ]
-//    case .newest:
-//        [
-//            SortDescriptor(\Movie.added, order: .reverse),
-//            SortDescriptor(\Movie.rating, order: .reverse),
-//            SortDescriptor(\Movie.name, order: .forward),
-//            SortDescriptor(\Movie.sourceId, order: .forward)
-//        ]
-//    case .rating:
-//        [
-//            SortDescriptor(\Movie.rating, order: .reverse),
-//            SortDescriptor(\Movie.added, order: .reverse),
-//            SortDescriptor(\Movie.name, order: .forward),
-//            SortDescriptor(\Movie.sourceId, order: .forward)
-//        ]
-//    }
-//}
-
 struct BrowseScreen: View {
-    @State var type: MediaType = .movie
-    @State var selectedCategory: Category.ID? = nil
-    @State var queryText: String = ""
-    @State var sort: BrowseSort = .title
-   
+    // Dependencies
     @Environment(ActiveSession.self) var session
     
-    @FetchAll(Category.where { $0.type.eq(MediaType.movie) }) private var categories: [Category]
+   // State
+    @State var type: MediaType = .movie
+    @State var selectedCategory: Category.ID? = nil
+    @State var searchText: String = ""
+    @State var sort: BrowseSort = .title
     
+    @FetchAll(Category.where { $0.type.eq(MediaType.movie) })
+    private var categories: [Category]
+   
+    // Helpers
     var category: Category? { categories.first { $0.id == selectedCategory } }
     
     var groups: Array<(key: String, value: [Category])> {
@@ -72,17 +50,6 @@ struct BrowseScreen: View {
             }
     }
     
-    //    private var emptyCatalogMessage: String {
-    //        switch contentType {
-    //        case .vod:
-    //            "No movies were returned by the provider."
-    //        case .series:
-    //            "No series were returned by the provider."
-    //        case .live:
-    //            "No channels were returned by the provider."
-    //        }
-    //    }
-    
     var body: some View {
         NavigationStack {
             if categories.isEmpty {
@@ -92,17 +59,13 @@ struct BrowseScreen: View {
                     Text("The configured provider did not return any movies.")
                 }
             } else if let selectedCategory {
-                CoverGrid(
-                    category: $selectedCategory,
-                    searchText: $queryText,
-                    sort: $sort
-                )
+                CoverGridSection(selectedCategoryID: selectedCategory, sort: sort, filter: searchText)
             } else {
                 ProgressView()
             }
         }
         .navigationTitle(fallbackScreentitle)
-        .searchable(text: $queryText, prompt: "Search \(fallbackScreentitle)")
+        .searchable(text: $searchText, prompt: "Search \(fallbackScreentitle)")
         .task {
             // TODO: Find last selected category and reopen
             if selectedCategory == nil, let id = categories.first?.id {
@@ -131,7 +94,9 @@ struct BrowseScreen: View {
                     Section(group.key) {
                         ForEach(group.value, id: \.id) { category in
                             Button(category.title) {
-                                selectedCategory = category.id
+                                withAnimation(.interpolatingSpring(duration: 0.22)) {
+                                    selectedCategory = category.id
+                                }
                             }
                         }
                     }
@@ -146,90 +111,46 @@ struct BrowseScreen: View {
 //                sortMenu
 //            }
         }
-//                .withBackgroundActivityToolbar()
-//        .toolbar {
-////                    let groups = Dictionary(grouping: categories) { $0.group }.map { (key: $0.key, categories: $0.value) }
-//            ToolbarItem(placement: .principal) {
-//                Menu {
-//                    ForEach(categories) { category in
-//                        Button(category.title) {
-//                            selectedCategory = category
-//                        }
-//                    }
-////                                if let title = categoryGroup.key {
-////                                    Section(title) {
-////                                        CategorySelector(selectedCategory: $selectedCategory, categories: categoryGroup.categories)
-////                                    }
-////                                } else {
-////                            CategorySelector(selectedCategory: $selectedCategory, categories: categories)
-////                                }
-////                            }
+    }
+
+//    private var sortMenu: some View {
+//        Menu {
+//            Picker("Sort", selection: $sort) {
+//                ForEach(BrowseSort.allCases) { sort in
+//                    Text(sort.rawValue)
+//                        .tag(sort)
 //                }
-////                        label: {
-////                            categorySelectorLabel(title: selectedCategory?.name ?? fallbackScreentitle)
-////                        }
-//                .buttonStyle(.plain)
-//                .help("Category: \(selectedCategory?.name ?? "No Category Selected")")
 //            }
-
-//            ToolbarItem(placement: .primaryAction) {
-//                sortMenu
-//            }
+//        } label: {
+//            Image(systemName: "arrow.up.arrow.down")
 //        }
-    }
-
-    @ViewBuilder
-    private func categorySelectorLabel(title: String) -> some View {
-        #if os(macOS)
-        Text(title)
-            .font(.headline)
-            .lineLimit(1)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 6)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.7))
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
-            )
-        #else
-        Text(title)
-            .font(.headline)
-            .lineLimit(1)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-        #endif
-    }
-
-    private var sortMenu: some View {
-        Menu {
-            Picker("Sort", selection: $sort) {
-                ForEach(BrowseSort.allCases) { sort in
-                    Text(sort.rawValue)
-                        .tag(sort)
-                }
-            }
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-        }
-        .help("Sort: \(sort.rawValue)")
-    }
-
-//    private func reconcileSelection() {
-//        guard !categories.isEmpty else {
-//            selectedCategory = nil
-//            return
-//        }
-//
-//        if let selectedCategory, categories.contains(where: { $0.id == selectedCategory }) {
-//            return
-//        }
-//
-//        selectedCategory = categories.first
+//        .help("Sort: \(sort.rawValue)")
 //    }
+}
 
+struct CoverGridSection: View {
+    let selectedCategoryID: Category.ID
+    let sort: BrowseSort
+    let filter: String
+   
+    @FetchAll private var media: [Media]
+    
+    init(selectedCategoryID: Category.ID, sort: BrowseSort, filter: String) {
+        self.selectedCategoryID = selectedCategoryID
+        self.sort = sort
+        self.filter = filter
+        
+        _media = FetchAll(Media.where {
+            $0.categoryID.eq(selectedCategoryID)
+                .and($0.title.contains(filter))
+        })
+    }
+    
+    var body: some View {
+        CoverGrid(media: media)
+            .id(selectedCategoryID)
+            .transition(.scale(scale: 0.9).combined(with: .opacity))
+    }
 }
 
 private struct CoverGrid: View {
@@ -239,52 +160,31 @@ private struct CoverGrid: View {
         static let posterAspectRatio: CGFloat = 2 / 3
     }
     
-    @Binding var category: Category.ID?
-    @Binding var searchText: String
-    @Binding var sort: BrowseSort
-    
-    @State private var error: String?
-   
-    @State @FetchAll var media: [Media] = []
+    let media: [Media]
     
     var body: some View {
             ScrollView {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
-                    ForEach(media) { media in
-                        return NavigationLink {
-                            ContentUnavailableView("Not yet implemented", systemImage: "fail")
-//                            MovieDetailScreen(movie: movie)
-                        } label: {
-                            BrowsePosterTile(media: media)
+                    if media.isEmpty {
+                        ForEach(0..<10) { idx in
+                            BrowseSkeletonTile()
                         }
-                        .buttonStyle(.plain)
+                    } else {
+                        ForEach(media) { media in
+                            NavigationLink {
+                                ContentUnavailableView("Not yet implemented", systemImage: "fail")
+    //                            MovieDetailScreen(movie: movie)
+                            } label: {
+                                BrowsePosterTile(media: media)
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                 }
                 .padding(.horizontal)
                 .padding(.bottom, 20)
             }
-            .task(id: [category, searchText, sort] as [AnyHashable]) {
-                await updateQuery()
-            }
         }
-    
-    private func updateQuery() async {
-       do {
-           try await $media.wrappedValue.load(
-           Media
-            .where { $0.categoryID.eq(category) }
-//             .order {
-//               if order == .forward {
-//                 $0.timestamp
-//               } else {
-//                 $0.timestamp.desc()
-//               }
-//             }
-         )
-       } catch {
-         // Handle error...
-       }
-     }
     
     private var gridColumns: [GridItem] {
         [
@@ -358,8 +258,7 @@ private struct CoverGrid: View {
                     .padding(6)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    BrowseSkeletonTile()
                 }
             }
         }
@@ -379,17 +278,7 @@ private struct CoverGrid: View {
                     .background(.thinMaterial)
                     .clipShape(.rect(cornerRadius: 8))
                 }
-                
-                Spacer()
-                
-//                if let languageText = media.language {
-//                    Text(languageText)
-//                        .font(.footnote.weight(.semibold))
-//                        .padding(.horizontal, 2)
-//                        .padding(4)
-//                        .background(.thinMaterial)
-//                        .clipShape(.rect(cornerRadius: 8))
-//                }
+               Spacer()
             }
             .padding(6)
         }
@@ -463,6 +352,7 @@ private struct CoverGrid: View {
         }
     }
 }
+
 
 struct CategorySelector: View {
     @Binding var selectedCategory: Category?
