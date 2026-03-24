@@ -47,8 +47,7 @@ struct SessionManagerTests {
             )
         )
 
-        #expect(providerManager.hasActiveProvider == true)
-        #expect(providerManager.syncManager != nil)
+        #expect(sessionManager.hasActiveSession == true)
 
         let activeProviderCount = try database.read {
             try Provider.where { $0.isActive.eq(true) }.fetchCount($0)
