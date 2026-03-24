@@ -18,24 +18,16 @@ struct IPTVApp: App {
     
     var body: some Scene {
         WindowGroup {
-            if let session = sessionManager.session {
-                ContentView()
-                    .environment(sessionManager)
-                    .environment(session)
+            OnboardingShellView(sessionManager: sessionManager)
 #if os(macOS)
-                    .toolbar(removing: .title)
-                    .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+                .toolbar(removing: .title)
+                .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
 #endif
 
 #if os(macOS) || os(visionOS)
-                    .frame(minWidth: 600, maxWidth: .infinity, minHeight: 960, maxHeight: .infinity)
+                .frame(minWidth: 600, maxWidth: .infinity, minHeight: 960, maxHeight: .infinity)
 #endif
-                    .preferredColorScheme(.dark)
-            } else {
-                NavigationView {
-                    SettingsScreen(sessionManager: sessionManager)
-                }
-            }
+                .preferredColorScheme(.dark)
         }
         #if !os(tvOS)
         .windowResizability(.contentSize)
@@ -69,6 +61,44 @@ struct IPTVApp: App {
         ImagePipeline.Configuration.isSignpostLoggingEnabled = true
 
         self.sessionManager = sessionManager
+    }
+}
+
+private struct OnboardingShellView: View {
+    let sessionManager: SessionManager
+
+    @State private var isPresentingProviderSetup = false
+    @State private var performedInitialPresentationCheck = false
+
+    var body: some View {
+        Group {
+            if let session = sessionManager.session {
+                ContentView(presentProviderSetup: presentProviderSetup)
+                    .environment(session)
+            } else {
+                ContentView(presentProviderSetup: presentProviderSetup)
+            }
+        }
+        .environment(sessionManager)
+        .popover(isPresented: $isPresentingProviderSetup) {
+            ProviderSetupPopover(sessionManager: sessionManager)
+        }
+        .onAppear {
+            guard !performedInitialPresentationCheck else { return }
+            performedInitialPresentationCheck = true
+            if !sessionManager.hasActiveSession {
+                isPresentingProviderSetup = true
+            }
+        }
+        .onChange(of: sessionManager.hasActiveSession) { _, hasActiveSession in
+            if hasActiveSession {
+                isPresentingProviderSetup = false
+            }
+        }
+    }
+
+    private func presentProviderSetup() {
+        isPresentingProviderSetup = true
     }
 }
 

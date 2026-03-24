@@ -65,30 +65,6 @@ struct MediaCount: FetchKeyRequest {
   }
 }
 
-@Observable
-class ProviderFields {
-    var name: String
-    var endpoint: String
-    var username: String
-    var password: String
-    
-    var isValid: Bool {
-        !name.isEmpty && !username.isEmpty && !password.isEmpty && URL(string: endpoint) != nil
-    }
-    
-    func build(id id: Provider.ID?) -> Provider.Draft? {
-        guard isValid else { return nil }
-        return .init(id: id, name: name, username: username, password: password, endpoint: URL(string: endpoint)!, isActive: true)
-    }
-    
-    init(name: String, endpoint: String, username: String, password: String) {
-        self.name = name
-        self.endpoint = endpoint
-        self.username = username
-        self.password = password
-    }
-}
-
 struct SettingsScreen: View {
     private struct PrefixOption: Identifiable, Equatable {
         let prefix: String
@@ -105,6 +81,7 @@ struct SettingsScreen: View {
     private let sessionManager: SessionManager
     
     @State private var providerFields: ProviderFields = .init(name: "", endpoint: "", username: "", password: "")
+    @State private var providerErrorMessage: String?
     
     @State private var excludedPrefixesInput = ""
     @State private var availablePrefixOptions: [PrefixOption] = []
@@ -219,43 +196,15 @@ struct SettingsScreen: View {
     }
     
     private var providerConfigurationSection: some View {
-        let session = sessionManager.hasActiveSession
-        
-        return Section {
-            LabeledContent("Type") {
-                Text("Xtream API")
-                    .foregroundStyle(session ? .primary : .secondary)
-                    .fixedSize()
-            }
-            
-            TextField("Name", text: $providerFields.name, prompt: Text("Name your provider"))
-                .textContentType(.username)
-            
-            TextField("URL", text: $providerFields.endpoint, prompt: Text("example.com or https://example.com"))
-                .textContentType(.URL)
-                .autocorrectionDisabled()
-            
-            TextField("Username", text: $providerFields.username, prompt: Text("Required"))
-                .textContentType(.username)
-            
-            SecureField("Password", text: $providerFields.password, prompt: Text("Required"))
-                .textContentType(.password)
-            
-            HStack {
-                Spacer()
-                
-                Button("Save", action: save)
-//                    .buttonStyle(.borderedProminent)
-                    .disabled(!providerFields.isValid)
-                
-                Button("Refresh", role: .destructive, action: clear)
-                    .disabled(!sessionManager.hasActiveSession)
-            }
-        } header: {
-            Text("Provider")
-        } footer: {
-            Text("Provider credentials unlock catalog loading, search, recommendations, and playback.")
-        }
+        ProviderEditorSection(
+            fields: providerFields,
+            isConfigured: sessionManager.hasActiveSession,
+            isSaving: false,
+            saveLabel: "Save",
+            errorMessage: providerErrorMessage,
+            onSave: save,
+            onClear: clear
+        )
     }
     
     private var librarySection: some View {
@@ -381,7 +330,8 @@ struct SettingsScreen: View {
     
     private func save() {
         guard let provider = providerFields.build(id: provider?.id) else {
-            fatalError("Should validate provider fields before calling save()")
+            providerErrorMessage = "Please complete all provider fields."
+            return
         }
        
         do {
@@ -390,13 +340,20 @@ struct SettingsScreen: View {
             } else {
                 try sessionManager.initialize(provider)
             }
+            providerErrorMessage = nil
         } catch {
-            fatalError("\(error)")
+            providerErrorMessage = error.localizedDescription
         }
     }
     
     private func clear() {
-        try? sessionManager.clear()
+        do {
+            try sessionManager.clear()
+            providerErrorMessage = nil
+            providerFields = .init(name: "", endpoint: "", username: "", password: "")
+        } catch {
+            providerErrorMessage = error.localizedDescription
+        }
     }
 }
 
