@@ -14,38 +14,17 @@ enum BrowseSort: String, CaseIterable, Identifiable {
 }
 
 struct BrowseScreen: View {
-    // Dependencies
-    @Environment(ActiveSession.self) var session
-   
-    // Input
-    let type: MediaType = .movie
-    
-   // State
-    @State var selectedCategoryID: Category.ID? = nil
-    @State var searchText: String = ""
-    @State var sort: BrowseSort = .title
-    
-    @FetchAll(Category.where { $0.type.eq(MediaType.movie) })
-    private var categories: [Category]
-   
-    // Helpers
-    var category: Category? { categories.first { $0.id == selectedCategoryID } }
-    
-    var groups: Array<(key: String, value: [Category])> {
-        Dictionary(grouping: categories) { element in
-            if let match = element.title.firstMatch(of: #/\|(.*)\|(.*)/#) {
-                return String(match.output.1)
-            } else {
-                return "  "
-            }
-        }.sorted(by: { $0.key < $1.key })
+    @Environment(SessionManager.self) private var sessionManager
+
+    let type: MediaType
+    let presentProviderSetup: () -> Void
+
+    init(type: MediaType = .movie, presentProviderSetup: @escaping () -> Void = {}) {
+        self.type = type
+        self.presentProviderSetup = presentProviderSetup
     }
-    
-    private var fallbackScreentitle: String {
-        if let category {
-            return category.title
-        }
-        
+
+    private var screenTitle: String {
         return switch type {
             case .movie:
                 "Movies"
@@ -56,6 +35,64 @@ struct BrowseScreen: View {
         }
     }
     
+    var body: some View {
+        Group {
+            if sessionManager.hasActiveSession {
+                ProviderBrowseContent(type: type)
+            } else {
+                ContentUnavailableView {
+                    Label("Quite empty in here", systemImage: "tray")
+                } description: {
+                    Text("Add a provider to start syncing your library and browse movies.")
+                } actions: {
+                    Button("Add Provider", action: presentProviderSetup)
+                        .buttonStyle(.borderedProminent)
+                }
+                .navigationTitle(screenTitle)
+            }
+        }
+    }
+}
+
+private struct ProviderBrowseContent: View {
+    @Environment(ActiveSession.self) private var session
+
+    let type: MediaType
+
+    @State private var selectedCategoryID: Category.ID?
+    @State private var searchText = ""
+    @State private var sort: BrowseSort = .title
+
+    @FetchAll(Category.where { $0.type.eq(MediaType.movie) })
+    private var categories: [Category]
+
+    private var category: Category? { categories.first { $0.id == selectedCategoryID } }
+
+    private var groups: Array<(key: String, value: [Category])> {
+        Dictionary(grouping: categories) { element in
+            if let match = element.title.firstMatch(of: #/\|(.*)\|(.*)/#) {
+                return String(match.output.1)
+            } else {
+                return "  "
+            }
+        }.sorted(by: { $0.key < $1.key })
+    }
+
+    private var fallbackScreenTitle: String {
+        if let category {
+            return category.title
+        }
+
+        return switch type {
+            case .movie:
+                "Movies"
+            case .series:
+                "Series"
+            default:
+                "Content"
+        }
+    }
+
     var body: some View {
         Group {
             if categories.isEmpty {
@@ -70,26 +107,24 @@ struct BrowseScreen: View {
                 ProgressView()
             }
         }
-        .navigationTitle(fallbackScreentitle)
-        .searchable(text: $searchText, prompt: "Search \(fallbackScreentitle)")
+        .navigationTitle(fallbackScreenTitle)
+        .searchable(text: $searchText, prompt: "Search \(fallbackScreenTitle)")
         .task {
-            // TODO: Find last selected category and reopen
             if selectedCategoryID == nil, let id = categories.first?.id {
                 selectedCategoryID = id
             }
         }
         .task(id: selectedCategoryID) {
-            // Fetch media for category if not yet initialized
             guard let category, category.updatedAt == nil else {
                 return
             }
-            
+
             do {
                 try await session.syncManager.updateMovies(in: category.id)
             } catch is CancellationError {
                 print("Cancelled update movies task")
             } catch {
-                fatalError("\(error.localizedDescription), \(#file) \(#line) - \(#function) - \(#column) - \(#fileID)")
+                assertionFailure("Failed to update movies: \(error.localizedDescription)")
             }
         }
         .toolbar {
@@ -112,20 +147,6 @@ struct BrowseScreen: View {
             }
         }
     }
-
-//    private var sortMenu: some View {
-//        Menu {
-//            Picker("Sort", selection: $sort) {
-//                ForEach(BrowseSort.allCases) { sort in
-//                    Text(sort.rawValue)
-//                        .tag(sort)
-//                }
-//            }
-//        } label: {
-//            Image(systemName: "arrow.up.arrow.down")
-//        }
-//        .help("Sort: \(sort.rawValue)")
-//    }
 }
 
 struct CoverGridSection: View {

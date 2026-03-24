@@ -10,13 +10,14 @@ import Foundation
 
 /// A view that presents the app's user interface.
 struct ContentView: View {
+    let presentProviderSetup: () -> Void
+
     /// Keep track of tab view customizations in app storage.
 #if !os(macOS) && !os(tvOS)
     @AppStorage("sidebarCustomizations") var tabViewCustomization: TabViewCustomization
 #endif
     
     @Environment(SessionManager.self) private var sessionManager
-    @Environment(ActiveSession.self) private var session
     
     @State private var selectedTab: Tabs = .home
     
@@ -44,7 +45,7 @@ struct ContentView: View {
                 TabSection("Watch") {
                     Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
                         NavigationStack {
-                            BrowseScreen()
+                            BrowseScreen(presentProviderSetup: presentProviderSetup)
                         }
 //                        ScopedPlaceholderView(
 //                            title: "Movies In Progress",
@@ -110,5 +111,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(presentProviderSetup: {})
 }
