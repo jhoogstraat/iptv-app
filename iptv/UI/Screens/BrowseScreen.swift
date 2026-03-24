@@ -16,10 +16,12 @@ enum BrowseSort: String, CaseIterable, Identifiable {
 struct BrowseScreen: View {
     // Dependencies
     @Environment(ActiveSession.self) var session
+   
+    // Input
+    let type: MediaType = .movie
     
    // State
-    @State var type: MediaType = .movie
-    @State var selectedCategory: Category.ID? = nil
+    @State var selectedCategoryID: Category.ID? = nil
     @State var searchText: String = ""
     @State var sort: BrowseSort = .title
     
@@ -27,7 +29,7 @@ struct BrowseScreen: View {
     private var categories: [Category]
    
     // Helpers
-    var category: Category? { categories.first { $0.id == selectedCategory } }
+    var category: Category? { categories.first { $0.id == selectedCategoryID } }
     
     var groups: Array<(key: String, value: [Category])> {
         Dictionary(grouping: categories) { element in
@@ -40,6 +42,10 @@ struct BrowseScreen: View {
     }
     
     private var fallbackScreentitle: String {
+        if let category {
+            return category.title
+        }
+        
         return switch type {
             case .movie:
                 "Movies"
@@ -47,19 +53,19 @@ struct BrowseScreen: View {
                 "Series"
             default:
                "Content"
-            }
+        }
     }
     
     var body: some View {
-        NavigationStack {
+        Group {
             if categories.isEmpty {
                 ContentUnavailableView {
                     Text("No movies available")
                 } description: {
                     Text("The configured provider did not return any movies.")
                 }
-            } else if let selectedCategory {
-                CoverGridSection(selectedCategoryID: selectedCategory, sort: sort, filter: searchText)
+            } else if let selectedCategoryID {
+                CoverGridSection(selectedCategoryID: selectedCategoryID, sort: sort, filter: searchText)
             } else {
                 ProgressView()
             }
@@ -68,11 +74,11 @@ struct BrowseScreen: View {
         .searchable(text: $searchText, prompt: "Search \(fallbackScreentitle)")
         .task {
             // TODO: Find last selected category and reopen
-            if selectedCategory == nil, let id = categories.first?.id {
-                selectedCategory = id
+            if selectedCategoryID == nil, let id = categories.first?.id {
+                selectedCategoryID = id
             }
         }
-        .task(id: selectedCategory) {
+        .task(id: selectedCategoryID) {
             // Fetch media for category if not yet initialized
             guard let category, category.updatedAt == nil else {
                 return
@@ -87,29 +93,23 @@ struct BrowseScreen: View {
             }
         }
         .toolbar {
-            Spacer()
-
-            Menu {
-                ForEach(groups, id: \.key) { group in
-                    Section(group.key) {
-                        ForEach(group.value, id: \.id) { category in
-                            Button(category.title) {
-                                withAnimation(.interpolatingSpring(duration: 0.22)) {
-                                    selectedCategory = category.id
+            ToolbarItem(placement: .automatic) {
+                Menu {
+                    ForEach(groups, id: \.key) { group in
+                        Section(group.key) {
+                            ForEach(group.value, id: \.id) { category in
+                                Button(category.title) {
+                                    withAnimation(.interpolatingSpring(duration: 0.22)) {
+                                        selectedCategoryID = category.id
+                                    }
                                 }
                             }
                         }
                     }
+                } label: {
+                    Label(category?.title ?? "Category", systemImage: "line.3.horizontal.decrease.circle")
                 }
-            } label: {
-                Text(category?.title ?? "")
-                    .padding(.horizontal, 30)
             }
-            .buttonStyle(.plain)
-            
-//            ToolbarItem(placement: .primaryAction) {
-//                sortMenu
-//            }
         }
     }
 
@@ -172,7 +172,7 @@ private struct CoverGrid: View {
                     } else {
                         ForEach(media) { media in
                             NavigationLink {
-                                ContentUnavailableView("Not yet implemented", systemImage: "fail")
+                                ContentUnavailableView("Not yet implemented", systemImage: "film")
     //                            MovieDetailScreen(movie: movie)
                             } label: {
                                 BrowsePosterTile(media: media)
