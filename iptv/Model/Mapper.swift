@@ -94,11 +94,21 @@ extension Media.Draft {
 }
 
 extension Category.Draft {
-    nonisolated init(from category: Xtream.Category, type: MediaType) {
+    nonisolated init(from category: Xtream.Category, type: Xtream.ContentType) {
         self.id = nil
         self.sourceID = category.id
-        self.type = type
+        self.type = .from(type)
         self.title = category.name
+    }
+}
+
+extension MediaType {
+    nonisolated static func from(_ contentType: Xtream.ContentType) -> MediaType {
+        switch contentType {
+            case .vod: .movie
+            case .series: .series
+            case .live: .movie // FIXME: Fail
+        }
     }
 }
 

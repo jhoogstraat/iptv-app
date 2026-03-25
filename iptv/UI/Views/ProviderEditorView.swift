@@ -96,15 +96,18 @@ struct ProviderEditorSection: View {
 }
 
 struct ProviderSetupPopover: View {
-    private let sessionManager: SessionManager
+    
+    // Deps
+    private let providerManager: ProviderManager
 
+    // State
     @State private var providerFields = ProviderFields(name: "", endpoint: "", username: "", password: "")
     @State private var errorMessage: String?
 
-    init(sessionManager: SessionManager) {
-        self.sessionManager = sessionManager
+    init(providerManager: ProviderManager) {
+        self.providerManager = providerManager
     }
-
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -139,7 +142,7 @@ struct ProviderSetupPopover: View {
         }
 
         do {
-            try sessionManager.initialize(provider)
+            try providerManager.initialize(provider)
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription

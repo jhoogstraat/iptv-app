@@ -8,8 +8,6 @@
 import SwiftUI
 
 struct FavoritesScreen: View {
-    @Environment(ActiveSession.self) private var session
-    
     @Query private var favorites: [Media]
     @Query private var continueWatching: [WatchActivity]
     

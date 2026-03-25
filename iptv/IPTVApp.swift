@@ -14,11 +14,13 @@ import Sharing
 
 @main
 struct IPTVApp: App {
-    private let sessionManager: SessionManager
+    private let providerManager: ProviderManager
+    private let mustOnboard: Bool
     
     var body: some Scene {
         WindowGroup {
-            OnboardingShellView(sessionManager: sessionManager)
+            ContentView()
+                .environment(providerManager)
 #if os(macOS)
                 .toolbar(removing: .title)
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
@@ -35,7 +37,8 @@ struct IPTVApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsScreen(sessionManager: sessionManager)
+            SettingsScreen()
+                .environment(providerManager)
         }
         #endif
         
@@ -48,59 +51,23 @@ struct IPTVApp: App {
     
     /// Load video metadata and initialize the model container and video player model.
     init() {
-        let userDefaults = UserDefaults.standard
-        
         prepareDependencies {
             $0.defaultDatabase = try! appDatabase()
-            $0.defaultAppStorage = userDefaults
+            $0.defaultAppStorage = UserDefaults.standard
         }
         
-        let sessionManager = SessionManager()
+        let providerManager = ProviderManager()
+       
+        // FIXME: Handle error gracefully
+        try! providerManager.loadActive()
         
-        sessionManager.load()
         ImagePipeline.Configuration.isSignpostLoggingEnabled = true
 
-        self.sessionManager = sessionManager
+        self.providerManager = providerManager
+        self.mustOnboard = !providerManager.hasActiveProvider
     }
 }
 
-private struct OnboardingShellView: View {
-    let sessionManager: SessionManager
-
-    @State private var isPresentingProviderSetup = false
-    @State private var performedInitialPresentationCheck = false
-
-    var body: some View {
-        Group {
-            if let session = sessionManager.session {
-                ContentView(presentProviderSetup: presentProviderSetup)
-                    .environment(session)
-            } else {
-                ContentView(presentProviderSetup: presentProviderSetup)
-            }
-        }
-        .environment(sessionManager)
-        .popover(isPresented: $isPresentingProviderSetup) {
-            ProviderSetupPopover(sessionManager: sessionManager)
-        }
-        .onAppear {
-            guard !performedInitialPresentationCheck else { return }
-            performedInitialPresentationCheck = true
-            if !sessionManager.hasActiveSession {
-                isPresentingProviderSetup = true
-            }
-        }
-        .onChange(of: sessionManager.hasActiveSession) { _, hasActiveSession in
-            if hasActiveSession {
-                isPresentingProviderSetup = false
-            }
-        }
-    }
-
-    private func presentProviderSetup() {
-        isPresentingProviderSetup = true
-    }
-}
 
 /// A global log of events for the app.
 private let logger = Logger()

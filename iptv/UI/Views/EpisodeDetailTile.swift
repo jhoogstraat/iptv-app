@@ -13,7 +13,6 @@ struct EpisodeDetailTile: View {
     let episode: Episode
 
     @Environment(Player.self) private var player
-//    @Environment(ActiveSession.self) private var session
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var isLoading = true

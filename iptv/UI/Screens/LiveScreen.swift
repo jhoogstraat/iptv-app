@@ -8,8 +8,6 @@
 import SwiftUI
 
 struct LiveScreen: View {
-    @Environment(ActiveSession.self) private var session
-    
     @State private var selectedCategoryID: String?
     @State private var queryText = ""
     @State private var isPresentingSettings = false

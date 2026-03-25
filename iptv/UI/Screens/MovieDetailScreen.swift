@@ -18,7 +18,6 @@ struct MovieDetailScreen: View {
     let movie: Movie
 
     @Environment(Player.self) private var player
-//    @Environment(ActiveSession.self) private var session
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var state: MovieDetailState = .fetching

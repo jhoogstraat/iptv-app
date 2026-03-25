@@ -10,16 +10,18 @@ import Foundation
 
 /// A view that presents the app's user interface.
 struct ContentView: View {
-    let presentProviderSetup: () -> Void
-
+    
+    // Dependencies
+    @Environment(ProviderManager.self) private var providerManager
+    
+    // State
+    @State private var isPresentingProviderSetup = false
+    @State private var selectedTab: Tabs = .home
+   
     /// Keep track of tab view customizations in app storage.
 #if !os(macOS) && !os(tvOS)
     @AppStorage("sidebarCustomizations") var tabViewCustomization: TabViewCustomization
 #endif
-    
-    @Environment(SessionManager.self) private var sessionManager
-    
-    @State private var selectedTab: Tabs = .home
     
     var body: some View {
             TabView(selection: $selectedTab) {
@@ -45,20 +47,29 @@ struct ContentView: View {
                 TabSection("Watch") {
                     Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
                         NavigationStack {
-                            BrowseScreen(presentProviderSetup: presentProviderSetup)
+                            BrowseScreen(type: .movie)
+                                .requireSessionOrElse {
+                                    ContentUnavailableView {
+                                        Label("Quite empty in here", systemImage: "tray")
+                                    } description: {
+                                        Text("Add a provider to start syncing your library and browse movies.")
+                                    }
+                                }
                         }
-//                        ScopedPlaceholderView(
-//                            title: "Movies In Progress",
-//                            message: "The movies browser is being migrated to SQLiteData."
-//                        )
                     }
                     .customizationID(Tabs.movies.customizationID)
                     
                     Tab(Tabs.series.name, systemImage: Tabs.series.symbol, value: Tabs.series) {
-                        ScopedPlaceholderView(
-                            title: "Series In Progress",
-                            message: "The series browser is being migrated to SQLiteData."
-                        )
+                        NavigationStack {
+                            BrowseScreen(type: .series)
+                                .requireSessionOrElse {
+                                    ContentUnavailableView {
+                                        Label("Quite empty in here", systemImage: "tray")
+                                    } description: {
+                                        Text("Add a provider to start syncing your library and browse movies.")
+                                    }
+                                }
+                        }
                     }
                     .customizationID(Tabs.series.customizationID)
                     
@@ -90,7 +101,7 @@ struct ContentView: View {
                 TabSection("Settings") {
                     Tab(Tabs.settings.name, systemImage: Tabs.settings.symbol, value: Tabs.settings) {
                         NavigationStack {
-                            SettingsScreen(sessionManager: sessionManager)
+                            SettingsScreen()
                         }
                     }
                     .customizationID(Tabs.settings.customizationID)
@@ -102,8 +113,16 @@ struct ContentView: View {
             .tabViewCustomization($tabViewCustomization)
 #endif
 #if os(macOS)
-            .overlay(alignment: .bottomTrailing) {
-                // TODO: Activity view indicator
+//            .overlay(alignment: .bottomTrailing) {
+//                // TODO: Activity view indicator
+//            }
+            .popover(isPresented: $isPresentingProviderSetup) {
+                ProviderSetupPopover(providerManager: providerManager)
+            }
+            .onChange(of: providerManager.hasActiveProvider, initial: true) { _, hasActiveProvider in
+                if !hasActiveProvider {
+                    isPresentingProviderSetup = true
+                }
             }
 #endif
 
@@ -111,5 +130,6 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView(presentProviderSetup: {})
+    ContentView()
+        .environment(ProviderManager())
 }

@@ -14,56 +14,15 @@ enum BrowseSort: String, CaseIterable, Identifiable {
 }
 
 struct BrowseScreen: View {
-    @Environment(SessionManager.self) private var sessionManager
-
     let type: MediaType
-    let presentProviderSetup: () -> Void
-
-    init(type: MediaType = .movie, presentProviderSetup: @escaping () -> Void = {}) {
-        self.type = type
-        self.presentProviderSetup = presentProviderSetup
-    }
-
-    private var screenTitle: String {
-        return switch type {
-            case .movie:
-                "Movies"
-            case .series:
-                "Series"
-            default:
-               "Content"
-        }
-    }
+  
+    @Environment(Session.self) var session
     
-    var body: some View {
-        Group {
-            if sessionManager.hasActiveSession {
-                ProviderBrowseContent(type: type)
-            } else {
-                ContentUnavailableView {
-                    Label("Quite empty in here", systemImage: "tray")
-                } description: {
-                    Text("Add a provider to start syncing your library and browse movies.")
-                } actions: {
-                    Button("Add Provider", action: presentProviderSetup)
-                        .buttonStyle(.borderedProminent)
-                }
-                .navigationTitle(screenTitle)
-            }
-        }
-    }
-}
-
-private struct ProviderBrowseContent: View {
-    @Environment(ActiveSession.self) private var session
-
-    let type: MediaType
-
     @State private var selectedCategoryID: Category.ID?
     @State private var searchText = ""
     @State private var sort: BrowseSort = .title
 
-    @FetchAll(Category.where { $0.type.eq(MediaType.movie) })
+    @FetchAll
     private var categories: [Category]
 
     private var category: Category? { categories.first { $0.id == selectedCategoryID } }
@@ -73,7 +32,7 @@ private struct ProviderBrowseContent: View {
             if let match = element.title.firstMatch(of: #/\|(.*)\|(.*)/#) {
                 return String(match.output.1)
             } else {
-                return "  "
+                return "---"
             }
         }.sorted(by: { $0.key < $1.key })
     }
@@ -92,26 +51,40 @@ private struct ProviderBrowseContent: View {
                 "Content"
         }
     }
+    
+    init(type: MediaType) {
+        self.type = type
+        self._categories = FetchAll((Category.where { $0.type.eq(type) }))
+    }
+
+    private var screenTitle: String {
+        return switch type {
+            case .movie:
+                "Movies"
+            case .series:
+                "Series"
+            default:
+               "Content"
+        }
+    }
 
     var body: some View {
         Group {
             if categories.isEmpty {
                 ContentUnavailableView {
-                    Text("No movies available")
+                    Text("No \(type) available")
                 } description: {
-                    Text("The configured provider did not return any movies.")
+                    Text("The configured provider did not return any \(type).")
                 }
             } else if let selectedCategoryID {
                 CoverGridSection(selectedCategoryID: selectedCategoryID, sort: sort, filter: searchText)
-            } else {
-                ProgressView()
             }
         }
         .navigationTitle(fallbackScreenTitle)
         .searchable(text: $searchText, prompt: "Search \(fallbackScreenTitle)")
         .task {
-            if selectedCategoryID == nil, let id = categories.first?.id {
-                selectedCategoryID = id
+            if selectedCategoryID == nil {
+                selectedCategoryID = categories.first?.id
             }
         }
         .task(id: selectedCategoryID) {
@@ -120,7 +93,7 @@ private struct ProviderBrowseContent: View {
             }
 
             do {
-                try await session.syncManager.updateMovies(in: category.id)
+                try await session.update(type, in: category.id)
             } catch is CancellationError {
                 print("Cancelled update movies task")
             } catch {
@@ -400,5 +373,6 @@ struct CategorySelector: View {
     let _ = prepareDependencies {
         $0.defaultDatabase = try! appDatabase()
     }
-    BrowseScreen()
+    BrowseScreen(type: .movie)
+        .environment(ProviderManager())
 }

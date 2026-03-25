@@ -10,9 +10,7 @@ import OSLog
 
 struct MovieTileRow: View {
     let category: MovieCategory
-    
-//    @Environment(ActiveSession.self) private var session
-    
+
     var body: some View {
         Section {
             Group {
