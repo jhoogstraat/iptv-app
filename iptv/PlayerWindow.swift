@@ -12,14 +12,14 @@ import SwiftUI
 struct PlayerWindow: Scene {
     /// An object that controls the video playback behavior.
     var player: Player
-    var sessionManager: ProviderStore
+    var providerManager: ProviderStore
 
     var body: some Scene {
         // The macOS client presents the player view in a separate window.
         WindowGroup(id: PlayerView.identifier) {
             PlayerView()
                 .environment(player)
-                .environment(sessionManager)
+                .environment(providerManager)
                 .onAppear {
                     player.play()
                 }

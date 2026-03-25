@@ -78,11 +78,8 @@ struct SettingsScreen: View {
         }
     }
     
-    private let sessionManager: SessionManager
-    
     @State private var providerFields: ProviderFields = .init(name: "", endpoint: "", username: "", password: "")
     @State private var providerErrorMessage: String?
-    
     @State private var excludedPrefixesInput = ""
     @State private var availablePrefixOptions: [PrefixOption] = []
     @State private var selectedVisiblePrefixes: Set<String> = []
@@ -91,14 +88,13 @@ struct SettingsScreen: View {
     @Dependency(\.defaultDatabase) var database
     
     @FetchOne(Provider.where(\.isActive)) var provider: Provider?
+    
     @Fetch(MediaCount(provider: nil)) var mediaCount = MediaCount.Value()
     
+    @Environment(ProviderManager.self) private var providerManager
+    
     @Environment(\.horizontalSizeClass) var sizeClass
-    
-    init(sessionManager: SessionManager) {
-        self.sessionManager = sessionManager
-    }
-    
+   
     var body: some View {
 #if os(macOS)
         TabView {
@@ -125,12 +121,12 @@ struct SettingsScreen: View {
                     supportSection
                 }
             }
-        }.task(id: sessionManager.session?.provider) {
-            if let provider {
-                providerFields.name = provider.name
-                providerFields.endpoint = provider.endpoint.absoluteString
-                providerFields.username = provider.username
-                providerFields.password = provider.password
+        }.task(id: providerManager.session) {
+            if let session = providerManager.session {
+                providerFields.name = session.provider.name
+                providerFields.endpoint = session.provider.endpoint.absoluteString
+                providerFields.username = session.provider.username
+                providerFields.password = session.provider.password
             }
         }
         .formStyle(.grouped)
@@ -151,54 +147,44 @@ struct SettingsScreen: View {
     
     @ViewBuilder
     private var providerOverviewSection: some View {
-        let session = sessionManager.hasActiveSession
+        let hasActiveProvider = providerManager.hasActiveProvider
         Section {
             let layout = sizeClass == .compact
                         ? AnyLayout(VStackLayout(spacing: 20))
                         : AnyLayout(HStackLayout(spacing: 20))
 
             layout {
-                StatsCard(title: "Movies", value: "\(mediaCount.movies)", subtitle: syncDescription(sessionManager.session?.syncManager.movieSync))
-                StatsCard(title: "Series", value: "\(mediaCount.series)", subtitle: syncDescription(sessionManager.session?.syncManager.seriesSync))
+                StatsCard(title: "Movies", value: "\(mediaCount.movies)", subtitle: "Categories")
+                StatsCard(title: "Series", value: "\(mediaCount.series)", subtitle: "Categories")
                 StatsCard(title: "TV", value: "Soon", subtitle: "Live TV stats will appear here once TV support lands.")
             }
             
             LabeledContent("Status") {
                 HStack(spacing: 6) {
-                    Image(systemName: session ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    Text(session ? "All good" : "Needs Setup")
+                    Image(systemName: hasActiveProvider ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    Text(hasActiveProvider ? "All good" : "Needs Setup")
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(session ? .green : .orange)
+                .foregroundStyle(hasActiveProvider ? .green : .orange)
             }
         }
     }
     
     var providerStatus: String {
-        if !sessionManager.hasActiveSession { return "Needs Setup" }
-        if sessionManager.session?.syncManager.movieSync == .active || sessionManager.session?.syncManager.seriesSync == .active { return "Syncing" }
-        if sessionManager.session?.syncManager.movieSync == .success && sessionManager.session?.syncManager.seriesSync == .success { return "All Good" }
-        if sessionManager.session?.syncManager.movieSync == .failure || sessionManager.session?.syncManager.seriesSync == .failure { return "Error" }
-        return "All Good!"
-    }
-    
-    func syncDescription(_ state: SyncManager.SyncState?) -> String {
-        if let state {
-            switch state {
-                case .idle: return "Not syncing"
-                case .active: return "Syncing"
-                case .failure: return "Failed"
-                case .success: return "Synced"
-            }
-        } else {
-            return "..."
+        guard let session = providerManager.session else { return "Needs Setup" }
+        
+        switch session.sync {
+            case .active: return "Syncing"
+            case .success: return "All Good"
+            case .failure : return "Error"
+            case .idle: return "..."
         }
     }
     
     private var providerConfigurationSection: some View {
         ProviderEditorSection(
             fields: providerFields,
-            isConfigured: sessionManager.hasActiveSession,
+            isConfigured: providerManager.hasActiveProvider,
             isSaving: false,
             saveLabel: "Save",
             errorMessage: providerErrorMessage,
@@ -212,7 +198,7 @@ struct SettingsScreen: View {
             LabeledContent("Excluded Prefixes") {
                 Text("TODO")
                 //                Text(excludedPrefixesSummary)
-                //                    .foregroundStyle(sessionManager.hasActiveSession ? .primary : .secondary)
+                //                    .foregroundStyle(providerManager.hasActiveProvider ? .primary : .secondary)
                 //                    .multilineTextAlignment(.trailing)
             }
             
@@ -220,7 +206,7 @@ struct SettingsScreen: View {
                 print("TODO")
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!sessionManager.hasActiveSession)
+            .disabled(!providerManager.hasActiveProvider)
             
             Toggle("Group categories by language", isOn: .constant(false))
                 .disabled(true)
@@ -336,9 +322,9 @@ struct SettingsScreen: View {
        
         do {
             if provider.id != nil {
-                try sessionManager.upsert(provider: provider)
+                try providerManager.update(provider: provider)
             } else {
-                try sessionManager.initialize(provider)
+                try providerManager.initialize(provider)
             }
             providerErrorMessage = nil
         } catch {
@@ -348,7 +334,9 @@ struct SettingsScreen: View {
     
     private func clear() {
         do {
-            try sessionManager.clear()
+            if let provider {
+                try providerManager.delete(provider: provider.id)
+            }
             providerErrorMessage = nil
             providerFields = .init(name: "", endpoint: "", username: "", password: "")
         } catch {
@@ -358,5 +346,7 @@ struct SettingsScreen: View {
 }
 
 #Preview {
-    SettingsScreen(sessionManager: .init())
+    let _ = prepareDependencies { $0.defaultDatabase = try! appDatabase() }
+    SettingsScreen()
+        .environment(ProviderManager())
 }

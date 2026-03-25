@@ -18,7 +18,6 @@ struct PlayerView: View {
     static let identifier = "PlayerView"
 
     @Environment(Player.self) private var player
-    @Environment(ActiveSession.self) private var session
 
     @State private var isShowingControls = true
     @State private var scrubTime: Double?

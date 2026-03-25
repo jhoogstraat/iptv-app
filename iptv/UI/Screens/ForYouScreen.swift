@@ -9,7 +9,6 @@ import SwiftUI
 import OSLog
 
 struct ForYouScreen: View {
-    @Environment(ActiveSession.self) private var session
     @Environment(Player.self) private var player
 
     @State private var isPresentingSettings = false
