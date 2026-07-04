@@ -14,7 +14,7 @@ struct ForYouHeroView: View {
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            AsyncImage(url: item.cover) { phase in
+            AsyncImage(url: item.coverURL) { phase in
                 switch phase {
                 case .success(let image):
                     image
@@ -43,7 +43,7 @@ struct ForYouHeroView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                Text(item.name)
+                Text(item.title)
                     .font(.title.weight(.bold))
                     .lineLimit(2)
 

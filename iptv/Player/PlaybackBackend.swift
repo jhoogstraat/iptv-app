@@ -121,9 +121,10 @@ struct PlaybackBackendFactory {
         self.builders = [{ VLCPlaybackBackend() }, { AVPlaybackBackend() }]
     }
 
-    func selectBackend(for url: URL) -> (any PlaybackBackend)? {
+    func selectBackend(for url: URL, excluding excluded: Set<PlaybackBackendID> = []) -> (any PlaybackBackend)? {
         for builder in builders {
             let backend = builder()
+            guard !excluded.contains(backend.id) else { continue }
             guard backend.isAvailable else { continue }
             guard backend.canPlay(url: url) else { continue }
             return backend

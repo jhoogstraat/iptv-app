@@ -58,19 +58,20 @@ struct PlayerView: View {
     }
     
     private var eyebrowText: String? {
-        if let genre = player.currentItem?.info?.genre.joined() {
-            return genre
+        guard let item = player.currentItem else { return nil }
+
+        switch item.type {
+        case .movie:
+            return "Movie"
+        case .series:
+            return "Series"
+        case .episode:
+            return "Episode"
         }
-        
-        if let category = player.currentItem?.category?.name {
-            return category
-        }
-        
-        return nil
     }
 
     private var synopsisText: String? {
-        player.currentItem?.info?.plot
+        nil
     }
 
     private var primaryDisplayQuality: QualityVariant? {
@@ -88,7 +89,7 @@ struct PlayerView: View {
             badges.append(OverlayBadge(label: backend))
         }
 
-        if let resolution = primaryDisplayQuality?.resolution ?? player.currentItem?.source.resolution {
+        if let resolution = primaryDisplayQuality?.resolution {
             badges.append(OverlayBadge(label: resolution))
         }
 
@@ -105,9 +106,6 @@ struct PlayerView: View {
     }
 
     private var preferredAudioBadgeText: String? {
-        if let description = player.currentItem?.source.audioDescription {
-            return description
-        }
 
         if let selectedTrack = player.audioTracks.first(where: { $0.id == player.selectedAudioTrackID }) {
             return selectedTrack.label
@@ -121,7 +119,7 @@ struct PlayerView: View {
     }
 
     private var displayTitle: String {
-        player.currentItem?.name ?? "No item loaded"
+        player.currentItem?.title ?? "No item loaded"
     }
 
     private var controlsFadeAnimation: Animation {
@@ -1426,7 +1424,8 @@ struct PlayerView: View {
     }
 
     private func toggleFavorite() async {
-        player.currentItem?.isFavorite.toggle()
+        guard player.currentItem != nil else { return }
+        isFavorite.toggle()
     }
 
     #if os(iOS)
@@ -1541,6 +1540,6 @@ private struct OutputRoutePickerButton: UIViewRepresentable {
 }
 #endif
 
-#Preview(traits: .previewData) {
+#Preview {
     PlayerView()
 }

@@ -10,6 +10,8 @@ import Foundation
 import Observation
 import OSLog
 
+private nonisolated let logger = Logger(subsystem: "IPTV", category: "Player")
+
 /// The presentation modes the player supports.
 enum Presentation {
     /// Presents the player as a child of a parent user interface.
@@ -144,7 +146,7 @@ final class Player {
     }
 
     /// Loads a stream for playback in the requested presentation.
-    func load(_ media: PlayableMedia, presentation: Presentation, autoplay: Bool = true) {
+    func load(_ media: Media, presentation: Presentation, autoplay: Bool = true) {
         currentItem = media
         shouldAutoPlay = autoplay
         didFallbackForCurrentItem = false
@@ -162,10 +164,11 @@ final class Player {
         loadSavedPreferencesForCurrentProfile()
 
         do {
-            try activateBackend(for: media)
+            let url = try playbackURL(for: media)
+            try activateBackend(for: url)
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            try backend?.load(url: media.source.url, autoplay: autoplay)
+            try backend?.load(url: url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
         } catch {
             processTerminalFailure(error)
@@ -478,23 +481,13 @@ final class Player {
 
     // MARK: - Internals
 
-    private func activateBackend(for media: PlayableMedia, excluding excluded: Set<PlaybackBackendID> = []) throws {
-        guard let selected = backendFactory.selectBackend(for: media.source.url) else {
-            throw PlaybackRuntimeError.noRendererAvailable
-        }
-
-        eventTask?.cancel()
-        eventTask = nil
-        backend?.stop()
-
-        backend = selected
-        activeBackendID = selected.id
-        rendererRevision += 1
-        bindEvents(for: selected)
+    private func playbackURL(for media: Media) throws -> URL {
+        _ = media
+        throw PlaybackRuntimeError.missingPlaybackURL
     }
-    
-    private func activateBackend(for media: Episode, excluding excluded: Set<PlaybackBackendID> = []) throws {
-        guard let selected = backendFactory.selectBackend(for: media.source.url) else {
+
+    private func activateBackend(for url: URL, excluding excluded: Set<PlaybackBackendID> = []) throws {
+        guard let selected = backendFactory.selectBackend(for: url, excluding: excluded) else {
             throw PlaybackRuntimeError.noRendererAvailable
         }
 
@@ -807,10 +800,11 @@ final class Player {
         logger.info("Attempting automatic playback fallback to AV backend.")
 
         do {
-            try activateBackend(for: currentItem, excluding: [.vlc])
+            let url = try playbackURL(for: currentItem)
+            try activateBackend(for: url, excluding: [.vlc])
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            try backend?.load(url: currentItem.source.url, autoplay: shouldAutoPlay)
+            try backend?.load(url: url, autoplay: shouldAutoPlay)
             playbackState = .loading
             errorMessage = nil
         } catch {
