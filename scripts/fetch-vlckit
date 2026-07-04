@@ -15,66 +15,62 @@ fi
 
 source "$LOCK_FILE"
 
-mkdir -p \
-  "$ROOT_DIR/Vendor/VLCKit/cache" \
-  "$ROOT_DIR/Vendor/VLCKit/iOS" \
-  "$ROOT_DIR/Vendor/VLCKit/macOS" \
-  "$ROOT_DIR/Vendor/VLCKit/tvOS"
+CACHE_DIR="$ROOT_DIR/Vendor/VLCKit/cache"
+FRAMEWORK_DIR="$ROOT_DIR/Vendor/VLCKit/VLCKit.xcframework"
+ARCHIVE_PATH="$CACHE_DIR/$VLCKIT_ARCHIVE"
+TMP_DIR=""
+cleanup() {
+  if [[ -n "$TMP_DIR" ]]; then
+    rm -rf "$TMP_DIR"
+  fi
+}
+trap cleanup EXIT
+
+
+mkdir -p "$CACHE_DIR"
 
 download() {
-  local url="$1"
-  local archive="$2"
-  local expected="$3"
-  local destination="$ROOT_DIR/Vendor/VLCKit/cache/$archive"
   local actual=""
 
-  if [[ -f "$destination" ]]; then
-    actual="$("$SHA_BIN" -a 256 "$destination" | "$AWK_BIN" '{print $1}')"
-    if [[ "$actual" == "$expected" ]]; then
-      echo "Using cached $archive"
+  if [[ -f "$ARCHIVE_PATH" ]]; then
+    actual="$("$SHA_BIN" -a 256 "$ARCHIVE_PATH" | "$AWK_BIN" '{print $1}')"
+    if [[ "$actual" == "$VLCKIT_SHA256" ]]; then
+      echo "Using cached $VLCKIT_ARCHIVE"
       return
     fi
   fi
 
-  echo "Downloading $archive"
-  "$CURL_BIN" -fL -o "$destination" "$url"
+  echo "Downloading $VLCKIT_ARCHIVE"
+  "$CURL_BIN" -fL -o "$ARCHIVE_PATH" "$VLCKIT_URL"
 }
 
 verify_sha() {
-  local archive="$1"
-  local expected="$2"
-  local path="$ROOT_DIR/Vendor/VLCKit/cache/$archive"
   local actual
 
-  actual="$("$SHA_BIN" -a 256 "$path" | "$AWK_BIN" '{print $1}')"
-  if [[ "$actual" != "$expected" ]]; then
-    echo "Checksum mismatch for $archive" >&2
-    echo "Expected: $expected" >&2
+  actual="$("$SHA_BIN" -a 256 "$ARCHIVE_PATH" | "$AWK_BIN" '{print $1}')"
+  if [[ "$actual" != "$VLCKIT_SHA256" ]]; then
+    echo "Checksum mismatch for $VLCKIT_ARCHIVE" >&2
+    echo "Expected: $VLCKIT_SHA256" >&2
     echo "Actual:   $actual" >&2
     exit 1
   fi
 }
 
 extract_xcframework() {
-  local archive="$1"
-  local root="$2"
-  local destination="$3"
+  TMP_DIR="$(mktemp -d "$ROOT_DIR/Vendor/VLCKit/.extract.XXXXXX")"
 
-  rm -rf "$destination"
-  mkdir -p "$destination"
-  "$TAR_BIN" -xf "$ROOT_DIR/Vendor/VLCKit/cache/$archive" -C "$destination" --strip-components=1 "$root/VLCKit.xcframework"
+  rm -rf \
+    "$FRAMEWORK_DIR" \
+    "$ROOT_DIR/Vendor/VLCKit/iOS" \
+    "$ROOT_DIR/Vendor/VLCKit/macOS" \
+    "$ROOT_DIR/Vendor/VLCKit/tvOS"
+
+  "$TAR_BIN" -xf "$ARCHIVE_PATH" -C "$TMP_DIR" "$VLCKIT_ROOT/VLCKit.xcframework"
+  mv "$TMP_DIR/$VLCKIT_ROOT/VLCKit.xcframework" "$FRAMEWORK_DIR"
 }
 
-download "$VLCKIT_IOS_URL" "$VLCKIT_IOS_ARCHIVE" "$VLCKIT_IOS_SHA256"
-download "$VLCKIT_MACOS_URL" "$VLCKIT_MACOS_ARCHIVE" "$VLCKIT_MACOS_SHA256"
-download "$VLCKIT_TVOS_URL" "$VLCKIT_TVOS_ARCHIVE" "$VLCKIT_TVOS_SHA256"
+download
+verify_sha
+extract_xcframework
 
-verify_sha "$VLCKIT_IOS_ARCHIVE" "$VLCKIT_IOS_SHA256"
-verify_sha "$VLCKIT_MACOS_ARCHIVE" "$VLCKIT_MACOS_SHA256"
-verify_sha "$VLCKIT_TVOS_ARCHIVE" "$VLCKIT_TVOS_SHA256"
-
-extract_xcframework "$VLCKIT_IOS_ARCHIVE" "$VLCKIT_IOS_ROOT" "$ROOT_DIR/Vendor/VLCKit/iOS"
-extract_xcframework "$VLCKIT_MACOS_ARCHIVE" "$VLCKIT_MACOS_ROOT" "$ROOT_DIR/Vendor/VLCKit/macOS"
-extract_xcframework "$VLCKIT_TVOS_ARCHIVE" "$VLCKIT_TVOS_ROOT" "$ROOT_DIR/Vendor/VLCKit/tvOS"
-
-echo "VLCKit artifacts are available under $ROOT_DIR/Vendor/VLCKit"
+echo "VLCKit artifact is available at $FRAMEWORK_DIR"

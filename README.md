@@ -4,7 +4,7 @@ Native SwiftUI IPTV client targeting Apple platforms.
 
 ## Status
 
-This repository uses pinned VLCKit 4 binary artifacts. A fresh clone needs one setup step to download the exact locked versions into `Vendor/VLCKit/`.
+This repository uses a pinned VLCKit 4 fat xcframework artifact. A fresh clone needs one setup step to download the exact locked version into `Vendor/VLCKit/VLCKit.xcframework`.
 
 ## Project Layout
 
@@ -16,7 +16,7 @@ This repository uses pinned VLCKit 4 binary artifacts. A fresh clone needs one s
 ## Requirements
 
 - Xcode 26+
-- Network access to download the pinned VLCKit artifacts
+- Network access to download the pinned VLCKit artifact
 
 ## Local VLCKit Setup
 
@@ -26,7 +26,7 @@ Run:
 ./scripts/fetch-vlckit
 ```
 
-The pinned artifact URLs and SHA-256 checksums live in [ThirdParty/vlckit.lock](/Users/U765382/Developer/iptv/ThirdParty/vlckit.lock).
+The pinned artifact URL and SHA-256 checksum live in [ThirdParty/vlckit.lock](ThirdParty/vlckit.lock).
 
 ## Build
 

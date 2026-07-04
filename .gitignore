@@ -11,10 +11,4 @@ xcuserdata/
 
 # Local binary dependencies
 Vendor/VLCKit/cache/*
-Vendor/VLCKit/iOS/*
-Vendor/VLCKit/macOS/*
-Vendor/VLCKit/tvOS/*
-!Vendor/VLCKit/cache/.gitkeep
-!Vendor/VLCKit/iOS/.gitkeep
-!Vendor/VLCKit/macOS/.gitkeep
-!Vendor/VLCKit/tvOS/.gitkeep
+Vendor/VLCKit/VLCKit.xcframework/
