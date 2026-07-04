@@ -13,7 +13,7 @@ struct ContinueWatchingCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ZStack(alignment: .bottomLeading) {
-                AsyncImage(url: item.cover) { phase in
+                AsyncImage(url: item.coverURL) { phase in
                     switch phase {
                     case .success(let image):
                         image
@@ -28,17 +28,12 @@ struct ContinueWatchingCardView: View {
                     }
                 }
 
-                if let progress = item.activity?.progress {
-                    ProgressView(value: progress)
-                        .tint(.white)
-                        .padding(8)
-                }
             }
             .frame(height: 195)
             .background(Color.secondary.opacity(0.12))
             .clipShape(.rect(cornerRadius: 10))
 
-            Text(item.name)
+            Text(item.title)
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
 

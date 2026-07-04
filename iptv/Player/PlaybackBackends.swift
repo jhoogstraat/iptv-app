@@ -110,6 +110,7 @@ private struct SystemOutputRouteController {
 enum PlaybackRuntimeError: LocalizedError {
     case backendFailure(String)
     case noRendererAvailable
+    case missingPlaybackURL
 
     var errorDescription: String? {
         switch self {
@@ -117,6 +118,8 @@ enum PlaybackRuntimeError: LocalizedError {
             return message
         case .noRendererAvailable:
             return "No supported playback backend is available for this stream."
+        case .missingPlaybackURL:
+            return "Playback is unavailable because the synced media record does not include a stream URL."
         }
     }
 }
@@ -523,8 +526,6 @@ extension VLCPlaybackBackend: VLCMediaPlayerDelegate {
         switch newState {
         case .opening:
             continuation.yield(.buffering(true))
-        case .buffering:
-            continuation.yield(.buffering(true))
         case .playing:
             continuation.yield(.advancedStateChanged)
             continuation.yield(.buffering(false))
@@ -553,7 +554,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
 
     var isAvailable: Bool { false }
 
-    func canPlay(url: URL, contentType: String, containerExtension: String?) -> Bool {
+    func canPlay(url: URL) -> Bool {
         false
     }
 

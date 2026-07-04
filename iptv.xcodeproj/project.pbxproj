@@ -60,25 +60,6 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
-				Player/AVKitContentView.swift,
-				Player/PlaybackBackend.swift,
-				Player/PlaybackBackends.swift,
-				Player/PlayerAdvancedModels.swift,
-				Player/PlayerRendererContainer.swift,
-				Player/PlayerView.swift,
-				Player/VLCCompatibility.swift,
-				Player/VLCKitContentView.swift,
-				PlayerWindow.swift,
-				State/Player.swift,
-				UI/Screens/FavoritesScreen.swift,
-				UI/Screens/ForYouScreen.swift,
-				UI/Screens/MovieDetailScreen.swift,
-				UI/Views/EpisodeDetailTile.swift,
-				UI/Views/ForYou/ContinueWatchingCardView.swift,
-				UI/Views/ForYou/ForYouHeroView.swift,
-				UI/Views/ForYou/ForYouRailView.swift,
-				UI/Views/MovieTileRow.swift,
-				UI/Views/ViewModifiers.swift,
 			);
 			target = 1A0D265D2E6728660091AF6A /* iptv */;
 		};
@@ -96,11 +77,6 @@
 		1A0D26722E6728670091AF6A /* iptvTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = iptvTests;
-			sourceTree = "<group>";
-		};
-		1A0D267C2E6728670091AF6A /* iptvUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = iptvUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -142,7 +118,6 @@
 			children = (
 				1A0D26602E6728660091AF6A /* iptv */,
 				1A0D26722E6728670091AF6A /* iptvTests */,
-				1A0D267C2E6728670091AF6A /* iptvUITests */,
 				1A1352572E6B8DD2002345D7 /* Frameworks */,
 				1A0D265F2E6728660091AF6A /* Products */,
 			);
@@ -233,9 +208,6 @@
 			);
 			dependencies = (
 				1A0D267B2E6728670091AF6A /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				1A0D267C2E6728670091AF6A /* iptvUITests */,
 			);
 			name = iptvUITests;
 			packageProductDependencies = (
