@@ -193,7 +193,7 @@ struct CoverGridSection: View {
     }
 
     var body: some View {
-        CoverGrid(media: filteredMedia)
+        CoverGrid(media: filteredMedia, categories: categories)
             .id(filterState)
             .transition(.scale(scale: 0.9).combined(with: .opacity))
     }
@@ -207,7 +207,7 @@ private struct CoverGrid: View {
     }
     
     let media: [Media]
-    
+    let categories: [Category]
     var body: some View {
             ScrollView {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
@@ -218,8 +218,7 @@ private struct CoverGrid: View {
                     } else {
                         ForEach(media) { media in
                             NavigationLink {
-                                ContentUnavailableView("Not yet implemented", systemImage: "film")
-    //                            MovieDetailScreen(movie: movie)
+                                MediaDetailDestination(media: media, categoryTitle: categoryTitle(for: media))
                             } label: {
                                 BrowsePosterTile(media: media)
                             }
@@ -245,26 +244,11 @@ private struct CoverGrid: View {
         ]
     }
     
-    //    private func destination(for media: Media) -> some View {
-    //        let video = row
-    //        switch contentType {
-    //        case .vod:
-    //            return AnyView(MovieDetailScreen(video: video))
-    //        case .series:
-    //            return AnyView(
-    //                EpisodeDetailTile(video: video)
-    //                    .navigationTitle(video.name)
-    //            )
-    //        case .live:
-    //            return AnyView(
-    //                ScopedPlaceholderView(
-    //                    title: "Live Episodes Are Unavailable",
-    //                    message: "Episode detail only applies to series content."
-    //                )
-    //                .navigationTitle(video.name)
-    //            )
-    //        }
-    //    }
+    private func categoryTitle(for media: Media) -> String? {
+        guard let categoryID = media.categoryID else { return nil }
+        return categories.first { $0.id == categoryID }?.title
+    }
+    
     
     private struct BrowsePosterTile: View {
         let media: Media

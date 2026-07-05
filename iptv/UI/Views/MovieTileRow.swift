@@ -30,7 +30,7 @@ struct MovieTileRow: View {
                     } else {
                         ForEach(media) { item in
                             NavigationLink {
-                                ContentUnavailableView("Not yet implemented", systemImage: "film")
+                                MediaDetailDestination(media: item, categoryTitle: category.title)
                             } label: {
                                 VideoTile(media: item)
                                     .frame(width: 170, height: 9 / 6 * 170)

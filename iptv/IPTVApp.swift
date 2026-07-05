@@ -15,10 +15,14 @@ import Sharing
 @main
 struct IPTVApp: App {
     private let providerManager: ProviderManager
-    
+    @State private var player = Player()
     var body: some Scene {
         WindowGroup {
             AppRootView()
+                #if !os(visionOS)
+                .withVideoPlayer()
+                #endif
+                .environment(player)
                 .environment(providerManager)
 #if os(macOS)
                 .toolbar(removing: .title)
@@ -43,8 +47,7 @@ struct IPTVApp: App {
         
         // The video player window
         #if os(macOS)
-        // TODO: Implement player
-//        PlayerWindow()
+        PlayerWindow(player: player, providerManager: providerManager)
         #endif
     }
     

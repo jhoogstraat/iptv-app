@@ -167,7 +167,7 @@ struct SearchScreen: View {
         } else {
             List(results) { media in
                 NavigationLink {
-                    ContentUnavailableView("Details not yet implemented", systemImage: media.type == .movie ? "film" : "tv")
+                    MediaDetailDestination(media: media, categoryTitle: category(for: media)?.title)
                 } label: {
                     SearchResultRow(media: media, category: category(for: media))
                 }
