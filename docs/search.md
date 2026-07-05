@@ -7,7 +7,7 @@ Search helps users find local library items quickly across synced Movies and Ser
 ## Status
 
 - Target state: scoped search works inside Movies and Series; global Search queries Movies and Series together; filters and sorting are available from the global surface; results are provider-scoped and backed by local data/indexes.
-- Current implementation: global `SearchScreen` is a placeholder. The only active search behavior is `BrowseScreen.searchable`, which filters titles inside the selected category through the local `Media` query.
+- Current implementation: global `SearchScreen` queries local Movies and Series from SQLiteData, supports text search, scope selection, shared category/group/rating filters, prefix visibility, and deterministic title/newest/rating sorts. Detail routing is still placeholder-only.
 - Existing planning docs: `docs/search-implementation-spec.md` and `docs/library-search-spec.md` describe prior planned search architecture; this feature doc is the canonical cross-run target summary.
 
 ## User Experience
@@ -50,11 +50,10 @@ Search helps users find local library items quickly across synced Movies and Ser
 
 ## Current Gaps / Planned Work
 
-- `SearchScreen` currently renders `ContentUnavailableView("Search not yet implemented")`.
-- No search index store or orchestrator exists in the current file tree.
-- Browse scoped search is category-scoped only, not full Movies/Series scoped search.
-- No filter chips, sort controls, indexing progress, or global results UI exists.
-- Current schema lacks many fields needed for advanced search filters.
+- No dedicated full-text search index or relevance scoring exists; current global search filters local `Media.title`.
+- Result navigation still opens placeholder details rather than the final movie/series detail surfaces.
+- Query failures/retry affordances and indexing progress are not represented because the current implementation reads directly from local tables.
+- Current schema lacks many fields needed for advanced search filters such as genre, language, added recency, audio language, and subtitle language.
 - Favorites and continue watching are not currently searchable local entities.
 
 ## Notes for Agents

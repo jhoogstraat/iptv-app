@@ -6,9 +6,9 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ## Status
 
-- Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating, genre, language, recency, audio language, and subtitle language are planned metadata-backed filters.
-- Current implementation: selected-category title filtering exists in `BrowseScreen`; prefix grouping exists in the category menu; global filters are not implemented; `BrowseSort` exists but is not applied.
-- Current schema limitation: `Media` has title, rating, category, cover URL, TMDB ID, and timestamps, but no genre, year, language, added date, audio track, or subtitle track fields.
+- Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating, genre, language, recency, audio language, and subtitle language remain metadata-backed expansion points.
+- Current implementation: `BrowseScreen` and `SearchScreen` share a local filter bar with category, category-group/prefix, minimum rating, and deterministic sort controls. `BrowseSort` is applied through `LibraryFilterEngine`; prefix visibility is stored per provider in `UserDefaults` and affects browse/search local results.
+- Current schema limitation: `Media` has title, rating, category, cover URL, TMDB ID, and timestamps, but no genre, year, catalog language, original added date, audio track, or subtitle track fields.
 
 ## User Experience
 
@@ -35,9 +35,9 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ## Data and State
 
-- Current filter state: `searchText` in `BrowseScreen`, `selectedCategoryID`, planned prefix visibility in Settings.
-- Current sort state: `BrowseSort.title`, `.newest`, `.rating` exists but does not affect the query.
-- Current usable fields: `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Category.title`.
+- Current filter state: `searchText`, selected category, selected category group/prefixes, and minimum rating in browse/search; provider-scoped hidden prefix visibility in Settings.
+- Current sort state: `BrowseSort.title`, `.newest`, and `.rating` are applied in memory with deterministic tie-breakers after local fetches.
+- Current usable fields: `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Media.sourceID`, and `Category.title`.
 - Planned fields/indexes: normalized category prefix/group, rating bounds, genre, year, original added date, language, audio language, subtitle language, and provider-scoped visibility preferences.
 
 ## Key Files
@@ -62,12 +62,10 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ## Current Gaps / Planned Work
 
-- No multi-button browse filter bar, filter summary button, popovers, or modal filter selectors exist.
-- `BrowseSort` is unused.
-- Prefix visibility controls in Settings are disabled/TODO.
-- Min rating can use current `Media.rating`, but the UI and query wiring are absent.
 - Audio/subtitle language filters require metadata not currently stored in the library schema.
-- Genre, year, recency, and language filters require schema or search-index expansion.
+- Genre, year, recency, original added date, and catalog language filters require schema or search-index expansion before UI can honestly expose them.
+- Prefix visibility is persisted per provider in `UserDefaults`; a future multi-provider library schema should move this into provider-scoped local tables alongside normalized category metadata.
+- Recommendations are still a placeholder surface, so prefix visibility cannot affect recommendation rails until `ForYouScreen` is backed by local recommendation queries.
 
 ## Notes for Agents
 

@@ -114,12 +114,16 @@ struct SettingsScreen: View {
     
     @State private var providerFields: ProviderFields = .init(name: "", endpoint: "", username: "", password: "")
     @State private var providerErrorMessage: String?
+    @State private var hiddenCategoryGroups: Set<String> = []
+    @State private var isPrefixSelectorPresented = false
+    @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
   
     @Dependency(\.defaultDatabase) var database
     
     @FetchOne(Provider.where(\.isActive)) var provider: Provider?
     
     @Fetch(MediaCount(provider: nil)) var mediaCount = MediaCount.Value()
+    @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var categories: [Category]
     
     @Environment(ProviderManager.self) private var providerManager
     
@@ -133,6 +137,18 @@ struct SettingsScreen: View {
                 }
         }
         .task(id: providerManager.session) { populateProviderFieldsFromSession() }
+        .task(id: provider?.id) { loadPrefixVisibility() }
+        .task(id: prefixVisibilityRevision) { loadPrefixVisibility() }
+        .sheet(isPresented: $isPrefixSelectorPresented) {
+            CategoryPrefixVisibilitySelector(
+                groupKeys: detectedCategoryGroups,
+                hiddenGroupKeys: hiddenCategoryGroups
+            ) { nextHiddenGroups in
+                hiddenCategoryGroups = nextHiddenGroups
+                CategoryPrefixVisibilityStore.setHiddenGroupKeys(nextHiddenGroups, for: provider?.id)
+                isPrefixSelectorPresented = false
+            }
+        }
     }
     
     private func populateProviderFieldsFromSession() {
@@ -252,27 +268,22 @@ struct SettingsScreen: View {
     private var librarySection: some View {
         Section {
             LabeledContent("Excluded Prefixes") {
-                Text("TODO")
-                //                Text(excludedPrefixesSummary)
-                //                    .foregroundStyle(providerManager.hasActiveProvider ? .primary : .secondary)
-                //                    .multilineTextAlignment(.trailing)
+                Text(excludedPrefixesSummary)
+                    .foregroundStyle(providerManager.hasActiveProvider ? .primary : .secondary)
+                    .multilineTextAlignment(.trailing)
             }
-            
+
             Button("Choose Visible Prefixes") {
-                print("TODO")
+                hiddenCategoryGroups = CategoryPrefixVisibilityStore.hiddenGroupKeys(for: provider?.id)
+                isPrefixSelectorPresented = true
             }
             .buttonStyle(.borderedProminent)
-            .disabled(!providerManager.hasActiveProvider)
-            
-            Toggle("Group categories by language", isOn: .constant(false))
+            .disabled(!providerManager.hasActiveProvider || detectedCategoryGroups.isEmpty)
+
+            Toggle("Group categories by prefix", isOn: .constant(true))
                 .disabled(true)
-            
-            TextField(text: .constant(""), prompt: Text("Not configured")) {
-                Text("Category Prefix")
-            }
-            .disabled(true)
-            
-            Picker("Language Source", selection: .constant(LibraryLanguageSource.automatic)) {
+
+            Picker("Language Source", selection: .constant(LibraryLanguageSource.prefix)) {
                 ForEach(LibraryLanguageSource.allCases) { source in
                     Text(source.title)
                         .tag(source)
@@ -282,8 +293,35 @@ struct SettingsScreen: View {
         } header: {
             Text("Library Organization")
         } footer: {
-            Text("All detected prefixes start visible. Deselect a prefix to hide matching categories across browse, search, and recommendations.")
+            Text("All detected prefixes start visible. Hidden prefixes are provider-scoped and are excluded from browse and search. Language filters currently use inferred category prefixes only; catalog, audio, and subtitle language metadata are not stored yet.")
         }
+    }
+
+    private var detectedCategoryGroups: [String] {
+        Set(categories.map { CategoryGrouping.key(for: $0.title) })
+            .sorted {
+                CategoryGrouping.title(for: $0).localizedStandardCompare(CategoryGrouping.title(for: $1)) == .orderedAscending
+            }
+    }
+
+    private var excludedPrefixesSummary: String {
+        guard providerManager.hasActiveProvider else { return "No active provider" }
+        guard !detectedCategoryGroups.isEmpty else { return "None detected" }
+        guard !hiddenCategoryGroups.isEmpty else { return "None" }
+
+        let hiddenTitles = hiddenCategoryGroups
+            .sorted { CategoryGrouping.title(for: $0) < CategoryGrouping.title(for: $1) }
+            .map { CategoryGrouping.title(for: $0) }
+
+        if hiddenTitles.count <= 3 {
+            return hiddenTitles.joined(separator: ", ")
+        }
+
+        return "\(hiddenTitles.prefix(3).joined(separator: ", ")) + \(hiddenTitles.count - 3) more"
+    }
+
+    private func loadPrefixVisibility() {
+        hiddenCategoryGroups = CategoryPrefixVisibilityStore.hiddenGroupKeys(for: provider?.id)
     }
     
     
@@ -365,6 +403,118 @@ struct SettingsScreen: View {
         } catch {
             providerErrorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct CategoryPrefixVisibilitySelector: View {
+    let groupKeys: [String]
+    let hiddenGroupKeys: Set<String>
+    let onApply: (Set<String>) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var draftHiddenGroupKeys: Set<String>
+
+    init(
+        groupKeys: [String],
+        hiddenGroupKeys: Set<String>,
+        onApply: @escaping (Set<String>) -> Void
+    ) {
+        self.groupKeys = groupKeys
+        self.hiddenGroupKeys = hiddenGroupKeys
+        self.onApply = onApply
+        self._draftHiddenGroupKeys = State(initialValue: hiddenGroupKeys)
+    }
+
+    private var filteredGroupKeys: [String] {
+        guard !searchText.isEmpty else { return groupKeys }
+
+        return groupKeys.filter {
+            CategoryGrouping.title(for: $0).localizedStandardContains(searchText)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button("Show All Prefixes") {
+                        draftHiddenGroupKeys.removeAll()
+                    }
+                    .disabled(draftHiddenGroupKeys.isEmpty)
+                }
+
+                Section {
+                    ForEach(filteredGroupKeys, id: \.self) { groupKey in
+                        CategoryPrefixVisibilityRow(
+                            title: CategoryGrouping.title(for: groupKey),
+                            isHidden: draftHiddenGroupKeys.contains(groupKey)
+                        ) {
+                            toggleVisibility(for: groupKey)
+                        }
+                    }
+                } header: {
+                    Text("Detected Prefixes")
+                } footer: {
+                    Text("Hidden prefixes are excluded from local browse and search results for this provider.")
+                }
+            }
+            .navigationTitle("Visible Prefixes")
+#if !os(macOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .searchable(text: $searchText, prompt: "Search Prefixes")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply") {
+                        onApply(draftHiddenGroupKeys)
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggleVisibility(for groupKey: String) {
+        if draftHiddenGroupKeys.contains(groupKey) {
+            draftHiddenGroupKeys.remove(groupKey)
+        } else {
+            draftHiddenGroupKeys.insert(groupKey)
+        }
+    }
+}
+
+private struct CategoryPrefixVisibilityRow: View {
+    let title: String
+    let isHidden: Bool
+    let toggle: () -> Void
+
+    private var visibilityText: String { isHidden ? "Hidden" : "Visible" }
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(.primary)
+
+                    Text(visibilityText)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Image(systemName: isHidden ? "circle" : "checkmark.circle.fill")
+                    .foregroundStyle(isHidden ? Color.secondary : Color.blue)
+            }
+        }
+        .accessibilityLabel("\(title), \(visibilityText.lowercased())")
     }
 }
 
