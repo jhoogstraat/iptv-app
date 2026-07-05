@@ -15,11 +15,10 @@ import Sharing
 @main
 struct IPTVApp: App {
     private let providerManager: ProviderManager
-    private let mustOnboard: Bool
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            AppRootView()
                 .environment(providerManager)
 #if os(macOS)
                 .toolbar(removing: .title)
@@ -64,7 +63,6 @@ struct IPTVApp: App {
         ImagePipeline.Configuration.isSignpostLoggingEnabled = true
 
         self.providerManager = providerManager
-        self.mustOnboard = !providerManager.hasActiveProvider
     }
 }
 

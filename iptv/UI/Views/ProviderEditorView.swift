@@ -16,17 +16,40 @@ final class ProviderFields {
     var password: String
 
     var isValid: Bool {
-        !name.isEmpty && !username.isEmpty && !password.isEmpty && URL(string: endpoint) != nil
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedName.isEmpty,
+              !trimmedUsername.isEmpty,
+              !trimmedPassword.isEmpty
+        else {
+            return false
+        }
+
+        return (try? ProviderEndpoint.normalize(endpoint)) != nil
     }
 
-    func build(id: Provider.ID?) -> Provider.Draft? {
-        guard isValid else { return nil }
+    func build(id: Provider.ID?, kind: ProviderSourceKind) -> Provider.Draft? {
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedName.isEmpty,
+              !trimmedUsername.isEmpty,
+              !trimmedPassword.isEmpty,
+              let normalizedEndpoint = try? ProviderEndpoint.normalize(endpoint)
+        else {
+            return nil
+        }
+
         return .init(
             id: id,
-            name: name,
-            username: username,
-            password: password,
-            endpoint: URL(string: endpoint)!,
+            kind: kind,
+            name: trimmedName,
+            username: trimmedUsername,
+            password: trimmedPassword,
+            endpoint: normalizedEndpoint,
             isActive: true
         )
     }
@@ -42,33 +65,39 @@ final class ProviderFields {
 struct ProviderEditorSection: View {
     @Bindable var fields: ProviderFields
 
+    let sourceKind: ProviderSourceKind
     let isConfigured: Bool
     let isSaving: Bool
     let saveLabel: String
     let errorMessage: String?
+    var saveAccessibilityIdentifier = "onboarding.provider.save"
     let onSave: () -> Void
     let onClear: (() -> Void)?
 
     var body: some View {
         Section {
             LabeledContent("Type") {
-                Text("Xtream API")
+                Text(sourceKind.title)
                     .foregroundStyle(isConfigured ? .primary : .secondary)
                     .fixedSize()
             }
 
             TextField("Name", text: $fields.name, prompt: Text("Name your provider"))
                 .textContentType(.username)
+                .accessibilityIdentifier("onboarding.provider.name")
 
             TextField("URL", text: $fields.endpoint, prompt: Text("example.com or https://example.com"))
                 .textContentType(.URL)
                 .autocorrectionDisabled()
+                .accessibilityIdentifier("onboarding.provider.url")
 
             TextField("Username", text: $fields.username, prompt: Text("Required"))
                 .textContentType(.username)
+                .accessibilityIdentifier("onboarding.provider.username")
 
             SecureField("Password", text: $fields.password, prompt: Text("Required"))
                 .textContentType(.password)
+                .accessibilityIdentifier("onboarding.provider.password")
 
             if let errorMessage {
                 Text(errorMessage)
@@ -81,6 +110,7 @@ struct ProviderEditorSection: View {
 
                 Button(saveLabel, action: onSave)
                     .disabled(!fields.isValid || isSaving)
+                    .accessibilityIdentifier(saveAccessibilityIdentifier)
 
                 if let onClear {
                     Button("Refresh", role: .destructive, action: onClear)
@@ -91,61 +121,6 @@ struct ProviderEditorSection: View {
             Text("Provider")
         } footer: {
             Text("Provider credentials unlock catalog loading, search, recommendations, and playback.")
-        }
-    }
-}
-
-struct ProviderSetupPopover: View {
-    
-    // Deps
-    private let providerManager: ProviderManager
-
-    // State
-    @State private var providerFields = ProviderFields(name: "", endpoint: "", username: "", password: "")
-    @State private var errorMessage: String?
-
-    init(providerManager: ProviderManager) {
-        self.providerManager = providerManager
-    }
-    
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text("Add a provider to start syncing your library and unlock browsing.")
-                        .foregroundStyle(.secondary)
-                }
-
-                ProviderEditorSection(
-                    fields: providerFields,
-                    isConfigured: false,
-                    isSaving: false,
-                    saveLabel: "Add Provider",
-                    errorMessage: errorMessage,
-                    onSave: save,
-                    onClear: nil
-                )
-            }
-            .navigationTitle("Add Provider")
-#if os(macOS)
-            .formStyle(.grouped)
-            .padding(20)
-            .frame(minWidth: 520, minHeight: 420)
-#endif
-        }
-    }
-
-    private func save() {
-        guard let provider = providerFields.build(id: nil) else {
-            errorMessage = "Please complete all provider fields."
-            return
-        }
-
-        do {
-            try providerManager.initialize(provider)
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
         }
     }
 }

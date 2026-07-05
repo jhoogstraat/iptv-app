@@ -6,82 +6,93 @@ import Testing
 @testable import iptv
 
 @MainActor
-@Suite(.dependency(\.defaultDatabase, try appDatabase()))
+@Suite(.serialized)
 struct SessionManagerTests {
-    @Dependency(\.defaultDatabase) var database
-
-    init() throws {
-        try resetDatabase()
-    }
-    
     @Test func loadWithoutActiveProviderSetsNoProviderState() throws {
-        let providerManager = ProviderManager()
-        try providerManager.loadActive()
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let providerManager = ProviderManager(database: database)
+            try providerManager.loadActive()
 
-        #expect(providerManager.hasActiveProvider == false)
-        #expect(providerManager.activeProviderID == nil)
-        #expect(providerManager.syncManager == nil)
+            #expect(providerManager.hasActiveProvider == false)
+            #expect(providerManager.session == nil)
+        }
     }
 
     @Test func loadWithActiveProviderSetsProviderState() throws {
-        let providerID = try insertProvider(name: "Primary", isActive: true)
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
 
-        let providerManager = ProviderManager()
-        try providerManager.loadActive()
+            let providerManager = ProviderManager(database: database)
+            try providerManager.loadActive()
 
-        #expect(providerManager.hasActiveProvider == true)
-        #expect(providerManager.syncManager != nil)
-        #expect(providerManager.activeProviderID == providerID)
+            #expect(providerManager.hasActiveProvider == true)
+            #expect(providerManager.session != nil)
+            #expect(providerManager.session?.providerID == providerID)
+        }
     }
 
     @Test func initializeCreatesAnActiveProviderSession() throws {
-        let providerManager = ProviderManager()
-        try providerManager.initialize(
-            .init(
-                id: nil,
-                name: "Bootstrap",
-                username: "user",
-                password: "pass",
-                endpoint: #require(URL(string: "https://example.com")),
-                isActive: true
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let providerManager = ProviderManager(database: database)
+            try providerManager.initialize(
+                .init(
+                    id: nil,
+                    kind: .xtream,
+                    name: "Bootstrap",
+                    username: "user",
+                    password: "pass",
+                    endpoint: #require(URL(string: "https://example.com")),
+                    isActive: true
+                )
             )
-        )
 
-        #expect(sessionManager.hasActiveSession == true)
+            #expect(providerManager.hasActiveProvider == true)
+            #expect(providerManager.session != nil)
 
-        let activeProviderCount = try database.read {
-            try Provider.where { $0.isActive.eq(true) }.fetchCount($0)
+            let activeProviderCount = try database.read {
+                try Provider.where { $0.isActive.eq(true) }.fetchCount($0)
+            }
+
+            #expect(activeProviderCount == 1)
         }
-
-        #expect(activeProviderCount == 1)
     }
 
     @Test func clearRemovesProviderAndLibraryRows() throws {
-        try insertProvider(name: "Primary", isActive: true)
-        try insertLibraryRows()
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            try insertProvider(name: "Primary", isActive: true, database: database)
+            try insertLibraryRows(database)
 
-        let providerManager = ProviderManager()
-        try providerManager.loadActive()
-        try providerManager.delete(provider: providerManager.activeProviderID!)
+            let providerManager = ProviderManager(database: database)
+            try providerManager.loadActive()
+            try providerManager.delete(provider: try #require(providerManager.session?.providerID))
 
-        #expect(providerManager.hasActiveProvider == false)
-        #expect(providerManager.activeProviderID == nil)
-        #expect(providerManager.syncManager == nil)
+            #expect(providerManager.hasActiveProvider == false)
+            #expect(providerManager.session == nil)
 
-        let counts = try database.read {
-            (
-                try Provider.fetchCount($0),
-                try Category.fetchCount($0),
-                try Media.fetchCount($0)
-            )
+            let counts = try database.read {
+                (
+                    try Provider.fetchCount($0),
+                    try Category.fetchCount($0),
+                    try Media.fetchCount($0)
+                )
+            }
+
+            #expect(counts.0 == 0)
+            #expect(counts.1 == 0)
+            #expect(counts.2 == 0)
         }
-
-        #expect(counts.0 == 0)
-        #expect(counts.1 == 0)
-        #expect(counts.2 == 0)
     }
 
-    private func resetDatabase() throws {
+    private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
+        let database = try appDatabase()
+        return try operation(database)
+    }
+
+    private func resetDatabase(_ database: any DatabaseWriter) throws {
         try database.write { db in
             try Media.delete().execute(db)
             try Category.delete().execute(db)
@@ -90,7 +101,12 @@ struct SessionManagerTests {
     }
 
     @discardableResult
-    private func insertProvider(name: String, isActive: Bool) throws -> Provider.ID {
+    private func insertProvider(
+        name: String,
+        isActive: Bool,
+        isInitialized: Bool = true,
+        database: any DatabaseWriter
+    ) throws -> Provider.ID {
         let endpoint = try #require(URL(string: "https://example.com"))
         var providerID: Provider.ID?
 
@@ -98,6 +114,7 @@ struct SessionManagerTests {
             let provider = try Provider.insert {
                 Provider.Draft(
                     id: nil,
+                    kind: .xtream,
                     name: name,
                     username: "user",
                     password: "pass",
@@ -109,12 +126,14 @@ struct SessionManagerTests {
             .fetchOne(db)!
 
             providerID = provider.id
+
+            try Provider.find(provider.id).update { $0.isInitialized = #bind(isInitialized) }.execute(db)
         }
 
         return try #require(providerID)
     }
 
-    private func insertLibraryRows() throws {
+    private func insertLibraryRows(_ database: any DatabaseWriter) throws {
         try database.write { db in
             try #sql("""
             INSERT INTO "categories" ("sourceID", "type", "title", "updatedAt")
