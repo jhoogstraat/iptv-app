@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SQLiteData
+import xtream_swift
 
 @Observable
 final class ProviderFields {
@@ -27,7 +28,7 @@ final class ProviderFields {
             return false
         }
 
-        return (try? ProviderEndpoint.normalize(endpoint)) != nil
+        return (try? XtreamEndpoint.normalizeBaseURL(endpoint)) != nil
     }
 
     func build(id: Provider.ID?, kind: ProviderSourceKind) -> Provider.Draft? {
@@ -38,7 +39,7 @@ final class ProviderFields {
         guard !trimmedName.isEmpty,
               !trimmedUsername.isEmpty,
               !trimmedPassword.isEmpty,
-              let normalizedEndpoint = try? ProviderEndpoint.normalize(endpoint)
+              let normalizedEndpoint = try? XtreamEndpoint.normalizeBaseURL(endpoint)
         else {
             return nil
         }

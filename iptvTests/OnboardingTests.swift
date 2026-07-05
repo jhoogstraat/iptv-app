@@ -15,14 +15,20 @@ struct OnboardingTests {
     }
 
     @Test func providerFieldsBuildNormalizesEndpointAndKind() throws {
-        let fields = ProviderFields(name: " Primary ", endpoint: "example.com", username: " user ", password: " pass ")
+        let cases = [
+            (input: "example.com", expectedEndpoint: "http://example.com"),
+            (input: "https://example.com/player_api.php", expectedEndpoint: "https://example.com"),
+            (input: "https://example.com/player_api.php/player_api.php", expectedEndpoint: "https://example.com"),
+        ]
 
-        let draft = try #require(fields.build(id: nil, kind: .xtream))
+        for testCase in cases {
+            let fields = ProviderFields(name: " Primary ", endpoint: testCase.input, username: " user ", password: " pass ")
 
-        #expect(draft.kind == .xtream)
-        #expect(draft.endpoint.absoluteString.hasSuffix("/player_api.php"))
-        #expect(draft.endpoint.scheme == "http")
-        #expect(draft.isActive == true)
+            let draft = try #require(fields.build(id: nil, kind: .xtream))
+
+            #expect(draft.kind == .xtream)
+            #expect(draft.endpoint.absoluteString == testCase.expectedEndpoint)
+        }
     }
 
     @Test func requiresOnboardingWhenNoActiveProviderExists() throws {
@@ -74,7 +80,7 @@ struct OnboardingTests {
 
     @discardableResult
     private func insertProvider(isInitialized: Bool, database: any DatabaseWriter) throws -> Provider.ID {
-        let endpoint = try #require(URL(string: "https://example.com/player_api.php"))
+        let endpoint = try #require(URL(string: "https://example.com"))
 
         return try database.write { db in
             let provider = try Provider.insert {

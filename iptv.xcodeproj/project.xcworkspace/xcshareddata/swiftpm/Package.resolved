@@ -150,8 +150,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/jhoogstraat/xtream-swift.git",
       "state" : {
-        "revision" : "d879e168dcdedd3579b6f5a6322e7083e1817b44",
-        "version" : "3.2.0"
+        "revision" : "b6351b6cd136619cdc607d10993e682f421075da",
+        "version" : "3.3.0"
       }
     }
   ],

@@ -8,6 +8,7 @@
 import OSLog
 import Foundation
 import SQLiteData
+import xtream_swift
 
 func appDatabase() throws -> any DatabaseWriter {
     @Dependency(\.context) var context
@@ -75,6 +76,17 @@ func appDatabase() throws -> any DatabaseWriter {
         ) STRICT
         """).execute(db)
         
+    }
+    
+    migrator.registerMigration("Normalize provider base endpoints") { db in
+        let providers = try Provider.fetchAll(db)
+        for provider in providers {
+            guard let normalized = try? XtreamEndpoint.normalizeBaseURL(provider.endpoint.absoluteString),
+                  normalized != provider.endpoint
+            else { continue }
+
+            try Provider.find(provider.id).update { $0.endpoint = #bind(normalized) }.execute(db)
+        }
     }
     
     try migrator.migrate(database)
