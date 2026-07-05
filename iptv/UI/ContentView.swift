@@ -11,11 +11,6 @@ import Foundation
 /// A view that presents the app's user interface.
 struct ContentView: View {
     
-    // Dependencies
-    @Environment(ProviderManager.self) private var providerManager
-    
-    // State
-    @State private var isPresentingProviderSetup = false
     @State private var selectedTab: Tabs = .home
    
     /// Keep track of tab view customizations in app storage.
@@ -100,9 +95,7 @@ struct ContentView: View {
 //#if !os(macOS)
                 TabSection("Settings") {
                     Tab(Tabs.settings.name, systemImage: Tabs.settings.symbol, value: Tabs.settings) {
-                        NavigationStack {
-                            SettingsScreen()
-                        }
+                        SettingsScreen()
                     }
                     .customizationID(Tabs.settings.customizationID)
                 }
@@ -111,19 +104,6 @@ struct ContentView: View {
             .tabViewStyle(.sidebarAdaptable)
 #if !os(macOS) && !os(tvOS)
             .tabViewCustomization($tabViewCustomization)
-#endif
-#if os(macOS)
-//            .overlay(alignment: .bottomTrailing) {
-//                // TODO: Activity view indicator
-//            }
-            .popover(isPresented: $isPresentingProviderSetup) {
-                ProviderSetupPopover(providerManager: providerManager)
-            }
-            .onChange(of: providerManager.hasActiveProvider, initial: true) { _, hasActiveProvider in
-                if !hasActiveProvider {
-                    isPresentingProviderSetup = true
-                }
-            }
 #endif
 
     }

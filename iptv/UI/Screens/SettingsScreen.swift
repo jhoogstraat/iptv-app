@@ -48,6 +48,51 @@ private enum PlaybackPreference: String, CaseIterable, Identifiable {
     }
 }
 
+private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
+    case provider
+    case library
+    case playback
+    case about
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+            case .provider: "Provider"
+            case .library: "Library"
+            case .playback: "Playback"
+            case .about: "About"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+            case .provider: "Connection, credentials, and sync status"
+            case .library: "Category visibility and organization"
+            case .playback: "Player defaults and media behavior"
+            case .about: "Version, help, and legal information"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+            case .provider: "key.horizontal"
+            case .library: "square.grid.2x2"
+            case .playback: "play.rectangle"
+            case .about: "info.circle"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+            case .provider: .blue
+            case .library: .purple
+            case .playback: .red
+            case .about: .gray
+        }
+    }
+}
+
 struct MediaCount: FetchKeyRequest {
   struct Value {
       var movies = 0
@@ -66,24 +111,9 @@ struct MediaCount: FetchKeyRequest {
 }
 
 struct SettingsScreen: View {
-    private struct PrefixOption: Identifiable, Equatable {
-        let prefix: String
-        let matches: Int
-        let categoryNames: [String]
-        
-        var id: String { prefix }
-        
-        var sampleLabel: String {
-            categoryNames.prefix(2).joined(separator: ", ")
-        }
-    }
     
     @State private var providerFields: ProviderFields = .init(name: "", endpoint: "", username: "", password: "")
     @State private var providerErrorMessage: String?
-    @State private var excludedPrefixesInput = ""
-    @State private var availablePrefixOptions: [PrefixOption] = []
-    @State private var selectedVisiblePrefixes: Set<String> = []
-    @State private var prefixDiscoveryError: String?
   
     @Dependency(\.defaultDatabase) var database
     
@@ -96,55 +126,94 @@ struct SettingsScreen: View {
     @Environment(\.horizontalSizeClass) var sizeClass
    
     var body: some View {
-#if os(macOS)
-        TabView {
-            Tab("Provider", systemImage: "key.horizontal") {
-                Form {
-                    providerOverviewSection
-                    providerConfigurationSection
+        NavigationStack {
+            settingsOverview
+                .navigationDestination(for: SettingsDestination.self) { destination in
+                    settingsDetail(for: destination)
                 }
+        }
+        .task(id: providerManager.session) { populateProviderFieldsFromSession() }
+    }
+    
+    private func populateProviderFieldsFromSession() {
+        guard let session = providerManager.session else { return }
+
+        providerFields.name = session.provider.name
+        providerFields.endpoint = session.provider.endpoint.absoluteString
+        providerFields.username = session.provider.username
+        providerFields.password = session.provider.password
+    }
+    
+    @ViewBuilder
+    private var settingsOverview: some View {
+        Form {
+            Section {
+                SettingsHeaderCard()
             }
-            
-            Tab("Library", systemImage: "square.grid.2x2") {
-                Form {
-                    librarySection
+
+            Section {
+                ForEach(SettingsDestination.allCases) { destination in
+                    NavigationLink(value: destination) {
+                        SettingsDestinationRow(destination: destination)
+                    }
                 }
-            }
-            
-            Tab("Playback", systemImage: "play.rectangle") {
-                Form {
-                    playbackSection
-                }
-            }
-            Tab("About", systemImage: "info.circle") {
-                Form {
-                    supportSection
-                }
-            }
-        }.task(id: providerManager.session) {
-            if let session = providerManager.session {
-                providerFields.name = session.provider.name
-                providerFields.endpoint = session.provider.endpoint.absoluteString
-                providerFields.username = session.provider.username
-                providerFields.password = session.provider.password
             }
         }
         .formStyle(.grouped)
+        .navigationTitle("Settings")
+#if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+#if os(macOS)
         .padding(20)
         .frame(minWidth: 800, minHeight: 600)
-#else
-        Form {
-            providerOverviewSection
-            providerConfigurationSection
-            librarySection
-            playbackSection
-            supportSection
-        }
-        .navigationTitle("Settings")
-        .navigationBarTitleDisplayMode(.inline)
 #endif
     }
     
+    @ViewBuilder
+    private func settingsDetail(for destination: SettingsDestination) -> some View {
+        switch destination {
+            case .provider:
+                settingsDetailForm(title: "Provider") {
+                    providerOverviewSection
+                    providerConfigurationSection
+                }
+            case .library:
+                settingsDetailForm(title: "Library") {
+                    librarySection
+                }
+            case .playback:
+                settingsDetailForm(title: "Playback") {
+                    playbackSection
+                }
+            case .about:
+                settingsDetailForm(title: "About") {
+                    supportSection
+                }
+        }
+    }
+    
+    @ViewBuilder
+    private func settingsDetailForm<Content: View>(
+        title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        Form {
+            content()
+        }
+        .formStyle(.grouped)
+        .navigationTitle(title)
+#if !os(macOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+#if os(macOS)
+        .padding(20)
+        .frame(minWidth: 520, minHeight: 420)
+#endif
+    }
+    
+
+
     @ViewBuilder
     private var providerOverviewSection: some View {
         let hasActiveProvider = providerManager.hasActiveProvider
@@ -170,20 +239,11 @@ struct SettingsScreen: View {
         }
     }
     
-    var providerStatus: String {
-        guard let session = providerManager.session else { return "Needs Setup" }
-        
-        switch session.sync {
-            case .active: return "Syncing"
-            case .success: return "All Good"
-            case .failure : return "Error"
-            case .idle: return "..."
-        }
-    }
     
     private var providerConfigurationSection: some View {
         ProviderEditorSection(
             fields: providerFields,
+            sourceKind: provider?.kind ?? .xtream,
             isConfigured: providerManager.hasActiveProvider,
             isSaving: false,
             saveLabel: "Save",
@@ -230,39 +290,6 @@ struct SettingsScreen: View {
         }
     }
     
-    private func prefixSelectorRow(for option: PrefixOption) -> some View {
-        Button {
-            print("TODO")
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: selectedVisiblePrefixes.contains(option.prefix) ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(selectedVisiblePrefixes.contains(option.prefix) ? Color.accentColor : .secondary)
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(option.prefix)
-                            .font(.headline.monospaced())
-                        Spacer()
-                        Text(selectedVisiblePrefixes.contains(option.prefix) ? "Visible" : "Hidden")
-                            .foregroundStyle(.secondary)
-                    }
-                    
-                    if !option.sampleLabel.isEmpty {
-                        Text(option.sampleLabel)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-                    
-                    Text("\(option.matches) categor\(option.matches == 1 ? "y" : "ies")")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-            }
-            .contentShape(.rect)
-        }
-        .buttonStyle(.plain)
-    }
     
     private var playbackSection: some View {
         Section {
@@ -315,7 +342,7 @@ struct SettingsScreen: View {
     }
     
     private func save() {
-        guard let provider = providerFields.build(id: provider?.id) else {
+        guard let provider = providerFields.build(id: provider?.id, kind: provider?.kind ?? .xtream) else {
             providerErrorMessage = "Please complete all provider fields."
             return
         }
@@ -342,6 +369,61 @@ struct SettingsScreen: View {
         } catch {
             providerErrorMessage = error.localizedDescription
         }
+    }
+}
+
+private struct SettingsHeaderCard: View {
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 36, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Text("Settings")
+                .font(.title2.weight(.bold))
+
+            Text("Manage your IPTV provider, library organization, playback defaults, and app information.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(24)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+private struct SettingsDestinationRow: View {
+    let destination: SettingsDestination
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsIconBadge(systemImage: destination.systemImage, tint: destination.tint)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(destination.title)
+                    .font(.headline)
+
+                Text(destination.subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+private struct SettingsIconBadge: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 28, height: 28)
+            .background(tint, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
     }
 }
 

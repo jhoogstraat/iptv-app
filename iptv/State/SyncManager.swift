@@ -37,45 +37,67 @@ final class SyncManager {
     private let service: XtreamService
 
     @ObservationIgnored
-    @Dependency(\.defaultDatabase) var database
+    private let database: any DatabaseWriter
     
     // State
     var movieSync = SyncStatus.idle
     var seriesSync = SyncStatus.idle
     var liveSync = SyncStatus.idle
+    private(set) var initialSyncPhase: InitialSyncPhase = .idle
+    private(set) var lastErrorMessage: String?
     
-    init(service: XtreamService) {
+    
+    init(service: XtreamService, database: (any DatabaseWriter)? = nil) {
+        @Dependency(\.defaultDatabase) var defaultDatabase
         self.service = service
+        self.database = database ?? defaultDatabase
     }
 
     func sync(provider id: Provider.ID) async -> SyncStatus {
+        initialSyncPhase = .clearingLibrary
+        lastErrorMessage = nil
+        movieSync = .idle
+        seriesSync = .idle
+        liveSync = .idle
+
         do {
             try await database.write { db in
                 try Media.delete().execute(db)
                 try Category.delete().execute(db)
             }
         } catch {
-            self.movieSync = .failure
+            movieSync = .failure
+            initialSyncPhase = .failed
+            lastErrorMessage = error.localizedDescription
             logger.warning("Error deleting stale data: \(error.localizedDescription, privacy: .public)")
             return .failure
         }
         
         do {
-            self.movieSync = .active
+            initialSyncPhase = .syncingMovies
+            movieSync = .active
             try await syncCategories(.vod)
-            self.movieSync = .success
+            movieSync = .success
         } catch {
-            self.movieSync = .failure
+            movieSync = .failure
+            initialSyncPhase = .failed
+            lastErrorMessage = error.localizedDescription
             logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
             return .failure
         }
         
         do {
-            self.seriesSync = .active
+            initialSyncPhase = .syncingSeries
+            seriesSync = .active
             try await syncCategories(.series)
-            self.seriesSync = .success
+            seriesSync = .success
+            initialSyncPhase = .succeeded
+            lastErrorMessage = nil
+            return .success
         } catch {
-            self.seriesSync = .failure
+            seriesSync = .failure
+            initialSyncPhase = .failed
+            lastErrorMessage = error.localizedDescription
             logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
             return .failure
         }
@@ -89,7 +111,6 @@ final class SyncManager {
 //                logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
 //            }
         
-        return .success
     }
 
     private func syncCategories(_ type: Xtream.ContentType) async throws {
@@ -195,6 +216,15 @@ final class SyncManager {
 extension SyncManager {
     enum SyncStatus: Equatable {
         case idle, active, success, failure
+    }
+    
+    enum InitialSyncPhase: Equatable {
+        case idle
+        case clearingLibrary
+        case syncingMovies
+        case syncingSeries
+        case succeeded
+        case failed
     }
     
     enum SyncError: Error {

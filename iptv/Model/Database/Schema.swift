@@ -43,6 +43,7 @@ func appDatabase() throws -> any DatabaseWriter {
             "username" TEXT NOT NULL,
             "password" TEXT NOT NULL,
             "endpoint" TEXT NOT NULL,
+            "kind" TEXT NOT NULL DEFAULT 'xtream',
             "isInitialized" INTEGER NOT NULL DEFAULT 0,
             "isActive" INTEGER NOT NULL DEFAULT 0,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -81,9 +82,18 @@ func appDatabase() throws -> any DatabaseWriter {
     return database
 }
 
+enum ProviderSourceKind: String, CaseIterable, Identifiable, Sendable, QueryBindable {
+    case xtream = "xtream"
+
+    var id: String { rawValue }
+    var title: String { "Xtream API" }
+    var subtitle: String { "Use one Xtream-compatible source for movies, series, and live TV." }
+}
+
 @Table
 nonisolated struct Provider: Hashable, Identifiable, Sendable {
     let id: Int
+    var kind: ProviderSourceKind = .xtream
     var name: String
     var username: String
     var password: String

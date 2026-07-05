@@ -15,7 +15,7 @@ final class Session {
    
     // MARK: - Dependencies
     @ObservationIgnored
-    @Dependency(\.defaultDatabase) var database
+    private let database: any DatabaseWriter
    
     private let syncManager: SyncManager
     
@@ -23,9 +23,11 @@ final class Session {
     var providerID: Provider.ID
     
    // MARK: - Init
-    init(syncManager: SyncManager, providerID: Provider.ID) {
+    init(syncManager: SyncManager, providerID: Provider.ID, database: (any DatabaseWriter)? = nil) {
+        @Dependency(\.defaultDatabase) var defaultDatabase
         self.syncManager = syncManager
         self.providerID = providerID
+        self.database = database ?? defaultDatabase
     }
     
     // MARK: - Helper
@@ -39,8 +41,18 @@ final class Session {
         if syncManager.movieSync == .failure || syncManager.seriesSync == .failure { return .failure }
         return .idle
     }
+    
+    var initialSyncPhase: SyncManager.InitialSyncPhase { syncManager.initialSyncPhase }
+    var syncErrorMessage: String? { syncManager.lastErrorMessage }
+    var movieSyncStatus: SyncManager.SyncStatus { syncManager.movieSync }
+    var seriesSyncStatus: SyncManager.SyncStatus { syncManager.seriesSync }
    
     // MARK: - Methods
+    @discardableResult
+    func runInitialSync() async -> SyncManager.SyncStatus {
+        await syncManager.sync(provider: providerID)
+    }
+    
     func update(_ type: MediaType, in category: Category.ID) async throws {
         switch type {
             case .movie:

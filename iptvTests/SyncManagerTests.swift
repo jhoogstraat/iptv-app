@@ -7,57 +7,56 @@ import xtream_swift
 @testable import iptv
 
 @MainActor
-@Suite(.dependency(\.defaultDatabase, try appDatabase()))
+@Suite(.serialized)
 struct SyncManagerTests {
-    @Dependency(\.defaultDatabase) var database
-    
-    @Test func syncPersistsMoviesAndSeries() async throws {
-        let urlConfiguration = URLSessionConfiguration.ephemeral
-//        urlConfiguration.protocolClasses = [StubXtreamURLProtocol.self]
-        let http = HTTPClient.init(configuration: urlConfiguration)
-        
-        let syncManager = SyncManager(
-            service: XtreamService(
-                client: http,
-                baseURL: try #require(URL(string: "https://example.com")),
-                username: "",
-                password: "",
+    @Test func syncPersistsMovieAndSeriesCategories() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let urlConfiguration = URLSessionConfiguration.ephemeral
+            urlConfiguration.protocolClasses = [StubXtreamURLProtocol.self]
+            let http = HTTPClient(configuration: urlConfiguration)
+            
+            let syncManager = SyncManager(
+                service: XtreamService(
+                    client: http,
+                    baseURL: try #require(URL(string: "https://example.com")),
+                    username: "user",
+                    password: "pass",
+                ),
+                database: database
             )
-        )
 
-        #expect(syncManager.movieSync == .idle)
-        #expect(syncManager.seriesSync == .idle)
+            #expect(syncManager.initialSyncPhase == .idle)
+            #expect(syncManager.movieSync == .idle)
+            #expect(syncManager.seriesSync == .idle)
 
-        await syncManager.sync(provider: Provider.ID())
-        
-        #expect(syncManager.movieSync == .success)
-//        #expect(syncManager.seriesSync == .success)
+            let result = await syncManager.sync(provider: Provider.ID())
+            
+            #expect(result == .success)
+            #expect(syncManager.initialSyncPhase == .succeeded)
+            #expect(syncManager.movieSync == .success)
+            #expect(syncManager.seriesSync == .success)
 
-        let count = try await database.read {
-            (try Category.fetchCount($0), try Media.fetchCount($0))
+            let count = try await database.read {
+                (try Category.fetchCount($0), try Media.fetchCount($0))
+            }
+            
+            #expect(count.0 == 3)
+            #expect(count.1 == 0)
         }
-        
-        print(count)
-        
-        #expect(count.0 > 10)
-        #expect(count.1 > 10)
-//        let movieCategories = try await database.read {
-//            try iptv.Category.where { $0.type.eq(#bind(iptv.MediaType.movie)) }.fetchAll($0)
-//        }
-//        let seriesCategories = try await database.read {
-//            try iptv.Category.where { $0.type.eq(#bind(iptv.MediaType.series)) }.fetchAll($0)
-//        }
-//        let movies = try await database.read {
-//            try iptv.Media.where { $0.type.eq(#bind(iptv.MediaType.movie)) }.fetchAll($0)
-//        }
-//        let series = try await database.read {
-//            try iptv.Media.where { $0.type.eq(#bind(iptv.MediaType.series)) }.fetchAll($0)
-//        }
-
-//        #expect(Set(movieCategories.map(\.title)) == ["Action", "Drama"])
-//        #expect(Set(seriesCategories.map(\.title)) == ["Sci-Fi"])
-//        #expect(Set(movies.map(\.title)) == ["Movie One", "Movie Two"])
-//        #expect(Set(series.map(\.title)) == ["Series One"])
+    }
+    
+    private func withTestDatabase<T>(_ operation: (any DatabaseWriter) async throws -> T) async throws -> T {
+        let database = try appDatabase()
+        return try await operation(database)
+    }
+    
+    private func resetDatabase(_ database: any DatabaseWriter) throws {
+        try database.write { db in
+            try Media.delete().execute(db)
+            try Category.delete().execute(db)
+            try Provider.delete().execute(db)
+        }
     }
 }
 
