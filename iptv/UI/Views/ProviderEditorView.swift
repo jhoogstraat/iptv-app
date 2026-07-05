@@ -77,12 +77,6 @@ struct ProviderEditorSection: View {
 
     var body: some View {
         Section {
-            LabeledContent("Type") {
-                Text(sourceKind.title)
-                    .foregroundStyle(isConfigured ? .primary : .secondary)
-                    .fixedSize()
-            }
-
             TextField("Name", text: $fields.name, prompt: Text("Name your provider"))
                 .textContentType(.username)
                 .accessibilityIdentifier("onboarding.provider.name")

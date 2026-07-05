@@ -52,7 +52,7 @@
 		1A0D265E2E6728660091AF6A /* iptv.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = iptv.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0D266F2E6728670091AF6A /* iptvTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iptvTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A0D26792E6728670091AF6A /* iptvUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iptvUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1A89EEDD2F4A9B9500332D6A /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = "VLCKit.xcframework"; path = Vendor/VLCKit/VLCKit.xcframework; sourceTree = SOURCE_ROOT; };
+		1A89EEDD2F4A9B9500332D6A /* VLCKit.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = VLCKit.xcframework; path = Vendor/VLCKit/VLCKit.xcframework; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */

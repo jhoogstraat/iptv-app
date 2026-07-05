@@ -17,6 +17,8 @@ import UIKit
 import VLCKit
 #endif
 
+private let playbackLogger = Logger(subsystem: "IPTV", category: "Playback")
+
 private enum SystemOutputRouteID {
     static let automatic = "__route_automatic__"
     static let speaker = "__route_speaker__"
@@ -88,7 +90,7 @@ private struct SystemOutputRouteController {
                 break
             }
         } catch {
-            logger.error("Failed to set output route \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            playbackLogger.error("Failed to set output route \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
         #else
         _ = id
