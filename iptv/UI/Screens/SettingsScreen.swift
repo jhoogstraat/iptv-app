@@ -148,10 +148,6 @@ struct SettingsScreen: View {
     private var settingsOverview: some View {
         Form {
             Section {
-                SettingsHeaderCard()
-            }
-
-            Section {
                 ForEach(SettingsDestination.allCases) { destination in
                     NavigationLink(value: destination) {
                         SettingsDestinationRow(destination: destination)
@@ -369,27 +365,6 @@ struct SettingsScreen: View {
         } catch {
             providerErrorMessage = error.localizedDescription
         }
-    }
-}
-
-private struct SettingsHeaderCard: View {
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: "gearshape.fill")
-                .font(.system(size: 36, weight: .semibold))
-                .foregroundStyle(.secondary)
-
-            Text("Settings")
-                .font(.title2.weight(.bold))
-
-            Text("Manage your IPTV provider, library organization, playback defaults, and app information.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(24)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
