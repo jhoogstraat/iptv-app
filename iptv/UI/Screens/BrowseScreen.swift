@@ -8,33 +8,41 @@
 import SwiftUI
 import SQLiteData
 
-enum BrowseSort: String, CaseIterable, Identifiable {
-    case title, newest, rating
-    var id: Self { self }
-}
 
 struct BrowseScreen: View {
     let type: MediaType
-  
-    @Environment(Session.self) var session
-    
+
+    @Environment(Session.self) private var session
+    @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
+
     @State private var selectedCategoryID: Category.ID?
+    @State private var selectedGroupKeys: Set<String> = []
     @State private var searchText = ""
     @State private var sort: BrowseSort = .title
+    @State private var minimumRating: Double?
 
     @FetchAll
     private var categories: [Category]
 
     private var category: Category? { categories.first { $0.id == selectedCategoryID } }
 
-    private var groups: Array<(key: String, value: [Category])> {
-        Dictionary(grouping: categories) { element in
-            if let match = element.title.firstMatch(of: #/\|(.*)\|(.*)/#) {
-                return String(match.output.1)
-            } else {
-                return "---"
-            }
-        }.sorted(by: { $0.key < $1.key })
+    private var hiddenGroupKeys: Set<String> {
+        _ = prefixVisibilityRevision
+        return CategoryPrefixVisibilityStore.hiddenGroupKeys(for: session.providerID)
+    }
+
+    private var visibleCategories: [Category] {
+        categories
+            .filter { !hiddenGroupKeys.contains(CategoryGrouping.key(for: $0.title)) }
+            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+
+    private var visibleCategoryIDs: [Category.ID] {
+        visibleCategories.map(\.id)
+    }
+
+    private var visibleGroupKeys: Set<String> {
+        Set(visibleCategories.map { CategoryGrouping.key(for: $0.title) })
     }
 
     private var fallbackScreenTitle: String {
@@ -43,50 +51,52 @@ struct BrowseScreen: View {
         }
 
         return switch type {
-            case .movie:
-                "Movies"
-            case .series:
-                "Series"
-            default:
-                "Content"
+        case .movie:
+            "Movies"
+        case .series:
+            "Series"
+        default:
+            "Content"
         }
     }
-    
+
+    private var filterState: LibraryFilterState {
+        LibraryFilterState(
+            selectedCategoryID: selectedCategoryID,
+            selectedGroupKeys: selectedGroupKeys,
+            minimumRating: minimumRating,
+            sort: sort
+        )
+    }
+
     init(type: MediaType) {
         self.type = type
         self._categories = FetchAll((Category.where { $0.type.eq(type) }))
     }
 
-    private var screenTitle: String {
-        return switch type {
-            case .movie:
-                "Movies"
-            case .series:
-                "Series"
-            default:
-               "Content"
-        }
-    }
-
     var body: some View {
-        Group {
-            if categories.isEmpty {
-                ContentUnavailableView {
-                    Text("No \(type) available")
-                } description: {
-                    Text("The configured provider did not return any \(type).")
-                }
-            } else if let selectedCategoryID {
-                CoverGridSection(selectedCategoryID: selectedCategoryID, sort: sort, filter: searchText)
+        VStack(spacing: 0) {
+            if !categories.isEmpty {
+                LibraryFilterBar(
+                    categories: visibleCategories,
+                    state: Binding(
+                        get: { filterState },
+                        set: { nextState in
+                            selectedCategoryID = nextState.selectedCategoryID
+                            selectedGroupKeys = nextState.selectedGroupKeys
+                            minimumRating = nextState.minimumRating
+                            sort = nextState.sort
+                        }
+                    ),
+                    clearFilters: clearFilters
+                )
+                Divider()
             }
+
+            content
         }
         .navigationTitle(fallbackScreenTitle)
         .searchable(text: $searchText, prompt: "Search \(fallbackScreenTitle)")
-        .task {
-            if selectedCategoryID == nil {
-                selectedCategoryID = categories.first?.id
-            }
-        }
         .task(id: selectedCategoryID) {
             guard let category, category.updatedAt == nil else {
                 return
@@ -100,49 +110,91 @@ struct BrowseScreen: View {
                 assertionFailure("Failed to update movies: \(error.localizedDescription)")
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Menu {
-                    ForEach(groups, id: \.key) { group in
-                        Section(group.key) {
-                            ForEach(group.value, id: \.id) { category in
-                                Button(category.title) {
-                                    withAnimation(.interpolatingSpring(duration: 0.22)) {
-                                        selectedCategoryID = category.id
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Label(category?.title ?? "Category", systemImage: "line.3.horizontal.decrease.circle")
+        .onChange(of: visibleCategoryIDs) { _, ids in
+            if let selectedCategoryID, !ids.contains(selectedCategoryID) {
+                self.selectedCategoryID = nil
+            }
+
+            selectedGroupKeys = selectedGroupKeys.intersection(visibleGroupKeys)
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if categories.isEmpty {
+            ContentUnavailableView {
+                Text("No \(fallbackScreenTitle) available")
+            } description: {
+                Text("The configured provider did not return any \(fallbackScreenTitle.lowercased()).")
+            }
+        } else if visibleCategories.isEmpty {
+            ContentUnavailableView {
+                Label("All category groups hidden", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text("Clear prefix visibility settings to show \(fallbackScreenTitle.lowercased()).")
+            } actions: {
+                Button("Clear Prefix Visibility") {
+                    CategoryPrefixVisibilityStore.setHiddenGroupKeys([], for: session.providerID)
                 }
             }
+        } else {
+            CoverGridSection(
+                type: type,
+                filterState: filterState,
+                filter: searchText,
+                categories: visibleCategories,
+                hiddenGroupKeys: hiddenGroupKeys
+            )
         }
+    }
+
+    private func clearFilters() {
+        selectedCategoryID = nil
+        selectedGroupKeys.removeAll()
+        minimumRating = nil
     }
 }
 
 struct CoverGridSection: View {
-    let selectedCategoryID: Category.ID
-    let sort: BrowseSort
+    let type: MediaType
+    let filterState: LibraryFilterState
     let filter: String
-   
+    let categories: [Category]
+    let hiddenGroupKeys: Set<String>
+
     @FetchAll private var media: [Media]
-    
-    init(selectedCategoryID: Category.ID, sort: BrowseSort, filter: String) {
-        self.selectedCategoryID = selectedCategoryID
-        self.sort = sort
+
+    init(
+        type: MediaType,
+        filterState: LibraryFilterState,
+        filter: String,
+        categories: [Category],
+        hiddenGroupKeys: Set<String>
+    ) {
+        self.type = type
+        self.filterState = filterState
         self.filter = filter
-        
+        self.categories = categories
+        self.hiddenGroupKeys = hiddenGroupKeys
+
         _media = FetchAll(Media.where {
-            $0.categoryID.eq(selectedCategoryID)
+            $0.type.eq(type)
                 .and($0.title.contains(filter))
         })
     }
-    
+
+    private var filteredMedia: [Media] {
+        LibraryFilterEngine.filteredMedia(
+            media,
+            categories: categories,
+            state: filterState,
+            hiddenGroupKeys: hiddenGroupKeys
+        )
+    }
+
     var body: some View {
-        CoverGrid(media: media)
-            .id(selectedCategoryID)
+        CoverGrid(media: filteredMedia)
+            .id(filterState)
             .transition(.scale(scale: 0.9).combined(with: .opacity))
     }
 }
@@ -348,24 +400,226 @@ private struct CoverGrid: View {
 }
 
 
-struct CategorySelector: View {
-    @Binding var selectedCategory: Category?
-    
-    @FetchAll(Category.where { $0.type.eq(MediaType.movie) }) var categories: [Category]
-    
-    var body: some View {
-        ForEach(categories) { category in
-            Text(category.title)
-//            Button {
-//                selectedCategory = category
-//            } label: {
-//                if category == selectedCategory {
-//                    Label(category.name, systemImage: "checkmark")
-//                } else {
-//                    Text(category.name)
-//                }
-//            }
+struct LibraryFilterBar: View {
+    let categories: [Category]
+    @Binding var state: LibraryFilterState
+    let clearFilters: () -> Void
+
+    private var groupSections: Array<(key: String, value: [Category])> {
+        Dictionary(grouping: categories) { category in
+            CategoryGrouping.key(for: category.title)
         }
+        .map { key, value in
+            (
+                key,
+                value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            )
+        }
+        .sorted { lhs, rhs in
+            CategoryGrouping.title(for: lhs.key).localizedStandardCompare(CategoryGrouping.title(for: rhs.key)) == .orderedAscending
+        }
+    }
+
+    private var selectedCategory: Category? {
+        categories.first { $0.id == state.selectedCategoryID }
+    }
+
+    private var activeGroupTitles: String {
+        state.selectedGroupKeys
+            .sorted { CategoryGrouping.title(for: $0) < CategoryGrouping.title(for: $1) }
+            .map { CategoryGrouping.title(for: $0) }
+            .joined(separator: ", ")
+    }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Menu {
+                    Text("\(state.activeFilterCount) filter\(state.activeFilterCount == 1 ? "" : "s") applied")
+
+                    if state.hasActiveFilters {
+                        Button(role: .destructive, action: clearFilters) {
+                            Label("Clear All Filters", systemImage: "xmark.circle")
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: "Filters",
+                        systemImage: "line.3.horizontal.decrease.circle",
+                        badgeCount: state.activeFilterCount,
+                        isActive: state.hasActiveFilters,
+                        showsChevron: true
+                    )
+                }
+                .accessibilityLabel(state.hasActiveFilters ? "\(state.activeFilterCount) filters active" : "No filters active")
+
+                Menu {
+                    Button {
+                        state.selectedCategoryID = nil
+                    } label: {
+                        Label("All Categories", systemImage: state.selectedCategoryID == nil ? "checkmark" : "rectangle.grid.1x2")
+                    }
+
+                    ForEach(groupSections, id: \.key) { section in
+                        Section(CategoryGrouping.title(for: section.key)) {
+                            ForEach(section.value) { category in
+                                Button {
+                                    state.selectedCategoryID = category.id
+                                } label: {
+                                    Label(
+                                        category.title,
+                                        systemImage: state.selectedCategoryID == category.id ? "checkmark" : "folder"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: selectedCategory?.title ?? "Category",
+                        systemImage: "folder",
+                        isActive: state.selectedCategoryID != nil,
+                        showsChevron: true
+                    )
+                }
+                .accessibilityLabel(
+                    state.selectedCategoryID == nil
+                    ? "Category filter inactive"
+                    : "Category filter active, \(selectedCategory?.title ?? "selected category")"
+                )
+
+                Menu {
+                    Button {
+                        state.selectedGroupKeys.removeAll()
+                    } label: {
+                        Label("All Groups", systemImage: state.selectedGroupKeys.isEmpty ? "checkmark" : "line.3.horizontal")
+                    }
+
+                    ForEach(groupSections, id: \.key) { section in
+                        Button {
+                            if state.selectedGroupKeys.contains(section.key) {
+                                state.selectedGroupKeys.remove(section.key)
+                            } else {
+                                state.selectedGroupKeys.insert(section.key)
+                            }
+                        } label: {
+                            Label(
+                                CategoryGrouping.title(for: section.key),
+                                systemImage: state.selectedGroupKeys.contains(section.key) ? "checkmark" : "line.3.horizontal"
+                            )
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: state.selectedGroupKeys.isEmpty ? "Group" : activeGroupTitles,
+                        systemImage: "rectangle.3.group",
+                        badgeCount: state.selectedGroupKeys.isEmpty ? 0 : state.selectedGroupKeys.count,
+                        isActive: !state.selectedGroupKeys.isEmpty,
+                        showsChevron: true
+                    )
+                }
+                .accessibilityLabel(
+                    state.selectedGroupKeys.isEmpty
+                    ? "Group filter inactive"
+                    : "Group filter active, \(state.selectedGroupKeys.count) selected"
+                )
+
+                Menu {
+                    Button {
+                        state.minimumRating = nil
+                    } label: {
+                        Label("Any Rating", systemImage: state.minimumRating == nil ? "checkmark" : "star")
+                    }
+
+                    ForEach([9.0, 8.0, 7.0], id: \.self) { rating in
+                        Button {
+                            state.minimumRating = rating
+                        } label: {
+                            Label(
+                                "\(rating.formatted())+",
+                                systemImage: state.minimumRating == rating ? "checkmark" : "star.fill"
+                            )
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: state.minimumRating.map { "\($0.formatted())+ Rating" } ?? "Rating",
+                        systemImage: "star.fill",
+                        isActive: state.minimumRating != nil,
+                        showsChevron: true
+                    )
+                }
+                .accessibilityLabel(
+                    state.minimumRating.map { "Rating filter active, minimum \($0.formatted())" } ?? "Rating filter inactive"
+                )
+
+                Menu {
+                    ForEach(BrowseSort.allCases) { sort in
+                        Button {
+                            state.sort = sort
+                        } label: {
+                            Label(
+                                sort.title,
+                                systemImage: state.sort == sort ? "checkmark" : sort.systemImage
+                            )
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: state.sort.compactTitle,
+                        systemImage: state.sort.systemImage,
+                        isActive: state.sort != .title,
+                        showsChevron: true
+                    )
+                }
+                .accessibilityLabel("Sorted by \(state.sort.title)")
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .background(.background)
+    }
+}
+
+struct FilterPill: View {
+    let title: String
+    let systemImage: String
+    var badgeCount = 0
+    let isActive: Bool
+    let showsChevron: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: systemImage)
+
+            Text(title)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+
+            if badgeCount > 0 {
+                Text("\(badgeCount)")
+                    .font(.caption2.weight(.bold))
+                    .monospacedDigit()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(isActive ? Color.white.opacity(0.22) : Color.secondary.opacity(0.18))
+                    .clipShape(Capsule())
+            }
+
+            if showsChevron {
+                Image(systemName: "chevron.down")
+                    .font(.caption.weight(.bold))
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.subheadline)
+        .foregroundStyle(isActive ? Color.white : Color.primary)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 34)
+        .background(isActive ? Color.accentColor : Color.secondary.opacity(0.14))
+        .clipShape(Capsule(style: .continuous))
+        .contentShape(Capsule(style: .continuous))
     }
 }
 

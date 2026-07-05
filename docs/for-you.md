@@ -7,7 +7,7 @@ For You is the landing and discovery experience. It should make the app feel lik
 ## Status
 
 - Target state: For You renders a personalized local discovery page using provider-scoped catalog data and watch activity.
-- Current implementation: the active `ForYouScreen` is a placeholder saying the personalized landing screen is being migrated to SQLiteData. Reusable For You view components exist under `iptv/UI/Views/ForYou/`. An older detailed document exists at `docs/for-you-legacy.md` and should be reconciled before implementation resumes.
+- Current implementation: the active `ForYouScreen` is a placeholder saying the personalized landing screen is being migrated to SQLiteData. Reusable For You view components exist under `iptv/UI/Views/ForYou/`. Browse/search prefix visibility is implemented, but no recommendation query consumes it yet. An older detailed document exists at `docs/for-you-legacy.md` and should be reconciled before implementation resumes.
 - Current navigation: `ContentView` currently inlines a For You placeholder instead of presenting `ForYouScreen`.
 
 ## User Experience
@@ -52,7 +52,7 @@ For You is the landing and discovery experience. It should make the app feel lik
 - `ContentView` does not currently use `ForYouScreen` for the home tab.
 - Watch activity persistence is not present in the current schema.
 - Recommendation model/provider files referenced by older docs are not visible in the current file tree.
-- Live, Favorites, and Downloads recommendations are planned out of scope until their data exists.
+- Prefix visibility is available for browse/search and must be applied to recommendation queries once For You is backed by local data.
 
 ## Notes for Agents
 

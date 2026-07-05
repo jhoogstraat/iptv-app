@@ -7,8 +7,8 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Status
 
 - Target state: detected category prefixes are first-class local organization metadata that can group category pickers, hide/show category groups, and feed search/recommendation filters consistently.
-- Current implementation: `BrowseScreen.groups` groups category titles by regex `#/\|(.*)\|(.*)/#`, using the first capture as the group key and `---` for unprefixed categories. Settings shows planned prefix controls but they are disabled or TODO.
-- Current limitation: grouping depends entirely on the raw `Category.title` string supplied by the provider.
+- Current implementation: `CategoryGrouping` extracts pipe-delimited prefixes from `Category.title`; browse/search filter bars expose category group selection; Settings can hide visible prefixes per provider through `UserDefaults`.
+- Current limitation: grouping depends entirely on the raw `Category.title` string supplied by the provider, and normalized category metadata is not yet stored in schema tables.
 
 ## User Experience
 
@@ -21,8 +21,8 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 
 - Current grouping source: `Category.title`.
 - Current parser: pipe-delimited title pattern, where the first pipe segment becomes the group key.
-- Current browse state: `selectedCategoryID` chooses the active category after the user selects from the grouped toolbar menu.
-- Planned state: persisted visible/excluded prefix preferences, language source selection, and normalized prefix/group metadata.
+- Current browse/search state: selected category and selected category-group keys narrow local `Media` results; Settings persists hidden prefix/group keys by provider ID.
+- Planned state: normalized prefix/group metadata columns or tables, language source configuration, and provider-scoped visibility preferences stored with the local database.
 
 ## Key Files
 
@@ -42,10 +42,9 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 
 ## Current Gaps / Planned Work
 
-- Prefix visibility persistence is not implemented.
-- `SettingsScreen.librarySection` shows `Excluded Prefixes`, `Choose Visible Prefixes`, `Group categories by language`, `Category Prefix`, and `Language Source`, but these controls are TODO or disabled.
+- Prefix visibility persistence currently uses provider-scoped `UserDefaults`, not local database rows.
+- Search and browse consume prefix visibility; recommendation surfaces cannot until `ForYouScreen` is backed by local recommendation queries.
 - The database schema has no prefix/group visibility table or category metadata columns.
-- Search and recommendation surfaces do not currently consume prefix visibility.
 - The current regex is narrow and should be treated as an implementation detail, not the final provider-agnostic parser.
 
 ## Notes for Agents
