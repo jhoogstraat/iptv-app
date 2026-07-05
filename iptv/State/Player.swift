@@ -6,9 +6,11 @@ A model object that manages stream playback and backend fallback.
 */
 
 import AVFoundation
+import Dependencies
 import Foundation
 import Observation
 import OSLog
+import SQLiteData
 
 private nonisolated let logger = Logger(subsystem: "IPTV", category: "Player")
 
@@ -112,7 +114,12 @@ final class Player {
         return PlayerFeature.allCases.compactMap(unavailableReason(for:))
     }
 
+    @ObservationIgnored
     private let backendFactory: PlaybackBackendFactory
+    @ObservationIgnored
+    private let database: any DatabaseWriter
+    @ObservationIgnored
+    private let playbackSourceResolver: any MediaPlaybackSourceResolving
     private let defaults: UserDefaults
     private var backend: (any PlaybackBackend)?
     private var eventTask: Task<Void, Never>?
@@ -127,9 +134,14 @@ final class Player {
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
+        database: (any DatabaseWriter)? = nil,
+        playbackSourceResolver: (any MediaPlaybackSourceResolving)? = nil,
         defaults: UserDefaults = .standard
     ) {
+        @Dependency(\.defaultDatabase) var defaultDatabase
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()
+        self.database = database ?? defaultDatabase
+        self.playbackSourceResolver = playbackSourceResolver ?? XtreamMediaPlaybackSourceResolver()
         self.defaults = defaults
     }
 
@@ -482,8 +494,13 @@ final class Player {
     // MARK: - Internals
 
     private func playbackURL(for media: Media) throws -> URL {
-        _ = media
-        throw PlaybackRuntimeError.missingPlaybackURL
+        guard let provider = try database.read({ db in
+            try Provider.where(\.isActive).fetchOne(db)
+        }) else {
+            throw MediaPlaybackSourceResolutionError.missingActiveProvider
+        }
+
+        return try playbackSourceResolver.playbackURL(for: media, provider: provider)
     }
 
     private func activateBackend(for url: URL, excluding excluded: Set<PlaybackBackendID> = []) throws {
@@ -634,14 +651,14 @@ final class Player {
         guard !didApplyTrackPreferencesForCurrentItem else { return }
         didApplyTrackPreferencesForCurrentItem = true
 
-        if let preferredAudioLanguageCode,
+        if preferredAudioLanguageCode != nil,
            let match = audioTracks.first {
             selectedAudioTrackID = match.id
             backend?.selectAudioTrack(id: match.id)
         }
 
         if subtitleEnabledByDefault {
-            if let preferredSubtitleLanguageCode,
+            if preferredSubtitleLanguageCode != nil,
                let match = subtitleTracks.first {
                 selectedSubtitleTrackID = match.id
                 backend?.selectSubtitleTrack(id: match.id)
@@ -822,9 +839,7 @@ final class Player {
     }
 
     private func persistProgressIfNeeded() {
-        guard let currentItem else { return }
-
-        let fraction = progressFraction
+        guard currentItem != nil else { return }
 
 //        if let persisted = lastPersistedProgressByVideoKey[key],
 //           abs(currentTime - persisted.time) < 10,
