@@ -4,7 +4,7 @@
 - Version: v1
 - Date: 2026-02-24
 - Priority: P2 (after player + library/search + profiles)
-- Implementation status (reviewed 2026-07-05): Planned-only. The Downloads tab exists, but the screen is still a not-implemented placeholder. No `DownloadManager`, `DownloadItem`, `DownloadStatus`, queue operations, manifest/storage layout, free-space checks, per-profile download library, or offline playback fallback exists in active code.
+- Implementation status (reviewed 2026-07-06): Deliberately unavailable. The Downloads tab and badge now show prerequisite/unavailable copy, but no `DownloadManager`, `DownloadItem`, `DownloadStatus`, queue operations, manifest/storage layout, free-space checks, per-profile download library, or offline playback fallback exists in active code.
 
 ## Objective
 Enable offline access for supported content with reliable queueing, storage management, and playback fallback when network is unavailable.
@@ -28,6 +28,7 @@ Enable offline access for supported content with reliable queueing, storage mana
 - Live channel recording/timeshift.
 - DRM-protected license workflows.
 - Cross-device download sync.
+- Profile management and PIN/parental controls.
 
 ## Supported Content Rules
 - Supported:
@@ -39,12 +40,14 @@ Enable offline access for supported content with reliable queueing, storage mana
 
 ## Architecture
 
+Do not add these types before the feature is ready to consume them. The required architecture remains:
+
 ## New module
 - `iptv/Model/Downloads/DownloadManager.swift` (actor/service).
 
 ## New models
 - `DownloadItem`
-  - `id`, `profileID`, `videoID`, `contentType`, `sourceURL`, `localURL`, `status`, `progress`, `createdAt`, `updatedAt`.
+  - `id`, `profileID`, `providerID`, `mediaID`, `contentType`, `sourceURL`, `localURL`, `status`, `progress`, `createdAt`, `updatedAt`.
 - `DownloadStatus`
   - `queued`, `downloading`, `paused`, `completed`, `failed`, `canceled`.
 
@@ -70,7 +73,8 @@ Enable offline access for supported content with reliable queueing, storage mana
   - mark as invalid and offer cleanup + redownload.
 
 ## UX Requirements
-- Downloads tab replaces current placeholder.
+- Until the architecture above exists, the Downloads tab must remain an explicit unavailable state.
+- Downloads tab replaces unavailable copy only when persisted queue rows and storage manifests exist.
 - Each item displays status icon, progress bar, and actionable controls.
 - Completed downloads have clear "Play Offline" affordance.
 

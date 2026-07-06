@@ -3,8 +3,8 @@
 ## Status
 - Version: v1
 - Date: 2026-02-24
-- Priority: P1 (ships with Library and Search)
-- Implementation status (reviewed 2026-07-05): Not implemented. There is no `UserProfile`, `ProfileStore`, profile picker, profile management UI, migration, or profile-scoped persistence. `Player.loadSavedPreferencesForCurrentProfile()` currently reads and writes global `UserDefaults` keys, and favorites/downloads/watch activity persistence required for profile isolation is absent or commented out.
+- Priority: P2 after provider-scoped user state
+- Implementation status (reviewed 2026-07-06): Deliberately deferred. Provider-scoped favorites and watch activity now exist, but there is still no `UserProfile`, `ProfileStore`, profile picker, profile management UI, migration, or profile-scoped playback preferences/search/download metadata. Do not add dormant profile services until a migration can create one active local profile named `Primary` and real consumers can read profile IDs.
 
 ## Objective
 Add basic household profiles with isolated user state so each user has independent favorites, watch history, and playback preferences.
@@ -44,9 +44,10 @@ Add basic household profiles with isolated user state so each user has independe
   - `profileID + providerFingerprint + contentType + videoID`.
 
 ## Migration
-- On first run after profile feature rollout:
-  - create default profile `Primary`.
-  - re-map existing watch activity and favorites into `Primary`.
+- First rollout step:
+  - create one active local profile named `Primary`.
+  - migrate existing provider-scoped watch activity and favorites into `Primary` without changing visible user data.
+  - only after that migration, widen persisted user-state keys from provider-scoped to `profileID + providerFingerprint + contentType + videoID`.
 
 ## Interfaces
 - `ProfileStore` service:
@@ -58,10 +59,11 @@ Add basic household profiles with isolated user state so each user has independe
   - `activeProfile()`.
 
 ## Integration points
-- `Player` should load and persist preferences for active profile only.
-- `WatchActivityStore` should write/read scoped by active profile.
-- `FavoritesStore` should write/read scoped by active profile.
-- Search recents should be scoped by active profile.
+- `Player` should load and persist preferences for the active profile only after profile migration exists.
+- `WatchActivityStore` should widen existing provider-scoped rows to active-profile scope during migration.
+- `FavoriteStore` should widen existing provider-scoped rows to active-profile scope during migration.
+- Search recents and filters should be scoped by active profile once recents persistence exists.
+- Downloads metadata must not be introduced until the profile migration and download queue state machine exist.
 
 ## Failure Handling
 - If profile data fails to load, app falls back to `Primary` profile and logs a recoverable error.
