@@ -6,14 +6,25 @@
 //
 
 import SwiftUI
+import SQLiteData
 
 struct EpisodeDetailTile: View {
     let series: Media?
     let episode: Media
 
     @Environment(Player.self) private var player
+    @Environment(Session.self) private var session
+    @FetchAll private var watchActivities: [WatchActivity]
     @State private var playError: String?
 
+    init(series: Media?, episode: Media) {
+        self.series = series
+        self.episode = episode
+        self._watchActivities = FetchAll(WatchActivity.where {
+            $0.mediaType.eq(episode.type)
+                .and($0.sourceID.eq(episode.sourceID))
+        })
+    }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: DetailSpacing.md) {
@@ -30,13 +41,18 @@ struct EpisodeDetailTile: View {
                             .foregroundStyle(.secondary)
                     }
 
+                    if let activity = currentWatchActivity {
+                        resumeProgress(for: activity)
+                    }
+
+
                     HStack(spacing: DetailSpacing.sm) {
                         Button {
                             playError = nil
                             player.load(episode, presentation: .inline)
                             playError = player.errorMessage
                         } label: {
-                            Label("Play", systemImage: "play.fill")
+                            Label(playButtonTitle, systemImage: shouldResumeEpisode ? "play.circle.fill" : "play.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(DetailActionStyle(variant: .primary))
@@ -92,6 +108,63 @@ struct EpisodeDetailTile: View {
                     .font(.largeTitle)
                     .foregroundStyle(.secondary)
             }
+    }
+
+    private var currentWatchActivity: WatchActivity? {
+        watchActivities.first {
+            $0.providerID == session.providerID
+                && $0.mediaType == episode.type
+                && $0.sourceID == episode.sourceID
+        }
+    }
+
+    private var shouldResumeEpisode: Bool {
+        currentWatchActivity?.isResumeEligible == true
+    }
+
+    private var playButtonTitle: String {
+        guard shouldResumeEpisode, let activity = currentWatchActivity else { return "Play" }
+        return "Resume \(Self.formatDuration(activity.currentTime))"
+    }
+
+    @ViewBuilder
+    private func resumeProgress(for activity: WatchActivity) -> some View {
+        if activity.isResumeEligible {
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: activity.progressFraction)
+
+                Text(resumeSummaryText(for: activity))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(resumeSummaryText(for: activity))
+        } else if activity.completed {
+            Text("Watched. Play starts from the beginning.")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func resumeSummaryText(for activity: WatchActivity) -> String {
+        if let remaining = activity.remainingSeconds {
+            return "\(Self.formatDuration(activity.currentTime)) watched • \(Self.formatDuration(remaining)) left"
+        }
+
+        return "\(Self.formatDuration(activity.currentTime)) watched"
+    }
+
+    private static func formatDuration(_ seconds: Double) -> String {
+        let totalSeconds = max(0, Int(seconds.rounded()))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private var aboutText: String {

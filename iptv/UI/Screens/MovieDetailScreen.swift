@@ -42,6 +42,7 @@ struct MovieDetailScreen: View {
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
     @FetchOne private var persistedMovie: Media?
+    @FetchAll private var watchActivities: [WatchActivity]
     @State private var playError: String?
     @State private var enrichmentError: String?
 
@@ -49,9 +50,26 @@ struct MovieDetailScreen: View {
         self.movie = movie
         self.categoryTitle = categoryTitle
         self._persistedMovie = FetchOne(Media.where { $0.id.eq(movie.id) })
+        self._watchActivities = FetchAll(WatchActivity.where {
+            $0.mediaType.eq(movie.type)
+                .and($0.sourceID.eq(movie.sourceID))
+        })
     }
 
     private var currentMovie: Media { persistedMovie ?? movie }
+
+    private var currentWatchActivity: WatchActivity? {
+        watchActivities.first {
+            $0.providerID == session.providerID
+                && $0.mediaType == currentMovie.type
+                && $0.sourceID == currentMovie.sourceID
+        }
+    }
+
+    private var shouldResumeCurrentMovie: Bool {
+        currentWatchActivity?.isResumeEligible == true
+    }
+
 
     var body: some View {
         GeometryReader { proxy in
@@ -160,34 +178,64 @@ struct MovieDetailScreen: View {
     }
 
     private var actionRow: some View {
-        HStack(spacing: DetailSpacing.sm) {
-            Button {
-                playError = nil
-                player.load(currentMovie, presentation: .fullWindow)
-                playError = player.errorMessage
-            } label: {
-                Label("Play", systemImage: "play.fill")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(DetailActionStyle(variant: .primary))
+        VStack(alignment: .leading, spacing: DetailSpacing.xs) {
+            HStack(spacing: DetailSpacing.sm) {
+                Button {
+                    playError = nil
+                    player.load(currentMovie, presentation: .fullWindow)
+                    playError = player.errorMessage
+                } label: {
+                    Label(playButtonTitle, systemImage: shouldResumeCurrentMovie ? "play.circle.fill" : "play.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DetailActionStyle(variant: .primary))
 
-            Button {} label: {
-                Label("Favorite unavailable", systemImage: "heart")
-                    .labelStyle(.iconOnly)
-            }
-            .buttonStyle(DetailActionStyle(variant: .icon))
-            .disabled(true)
-            .accessibilityHint("Persistent favorites are outside the active Library UX workstream.")
+                Button {} label: {
+                    Label("Favorite unavailable", systemImage: "heart")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(DetailActionStyle(variant: .icon))
+                .disabled(true)
+                .accessibilityHint("Persistent favorites are outside the active Library UX workstream.")
 
-            Button {} label: {
-                Label("Download unavailable", systemImage: "arrow.down.circle")
-                    .labelStyle(.iconOnly)
+                Button {} label: {
+                    Label("Download unavailable", systemImage: "arrow.down.circle")
+                        .labelStyle(.iconOnly)
+                }
+                .buttonStyle(DetailActionStyle(variant: .icon))
+                .disabled(true)
+                .accessibilityHint("Downloads are outside the active Library UX workstream.")
             }
-            .buttonStyle(DetailActionStyle(variant: .icon))
-            .disabled(true)
-            .accessibilityHint("Downloads are outside the active Library UX workstream.")
+            .frame(maxWidth: 620)
+
+            resumeSummary
+                .frame(maxWidth: 620, alignment: .leading)
         }
-        .frame(maxWidth: 620)
+    }
+
+    private var playButtonTitle: String {
+        guard shouldResumeCurrentMovie, let activity = currentWatchActivity else { return "Play" }
+        return "Resume \(Self.formatDuration(activity.currentTime))"
+    }
+
+    @ViewBuilder
+    private var resumeSummary: some View {
+        if let activity = currentWatchActivity, activity.isResumeEligible {
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: activity.progressFraction)
+                    .tint(.white)
+
+                Text(resumeSummaryText(for: activity))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(resumeSummaryText(for: activity))
+        } else if currentWatchActivity?.completed == true {
+            Text("Watched. Play starts from the beginning.")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.white.opacity(0.72))
+        }
     }
 
     private var metadataSection: some View {
@@ -271,6 +319,27 @@ struct MovieDetailScreen: View {
         } catch {
             enrichmentError = error.localizedDescription
         }
+    }
+
+    private func resumeSummaryText(for activity: WatchActivity) -> String {
+        if let remaining = activity.remainingSeconds {
+            return "\(Self.formatDuration(activity.currentTime)) watched • \(Self.formatDuration(remaining)) left"
+        }
+
+        return "\(Self.formatDuration(activity.currentTime)) watched"
+    }
+
+    private static func formatDuration(_ seconds: Double) -> String {
+        let totalSeconds = max(0, Int(seconds.rounded()))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private func section(_ title: String, text: String) -> some View {
@@ -798,10 +867,7 @@ private struct DetailMetadataGrid: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 96, alignment: .leading)
 
-                    Text(displayValue(for: row))
-                        .font(.body)
-                        .foregroundStyle(row.value == nil ? .tertiary : .primary)
-                        .textSelection(.enabled)
+                    selectableMetadataText(displayValue(for: row), isMissing: row.value == nil)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -812,6 +878,19 @@ private struct DetailMetadataGrid: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
+    }
+
+    @ViewBuilder
+    private func selectableMetadataText(_ value: String, isMissing: Bool) -> some View {
+        let text = Text(value)
+            .font(.body)
+            .foregroundStyle(isMissing ? .tertiary : .primary)
+
+        #if os(tvOS)
+        text
+        #else
+        text.textSelection(.enabled)
+        #endif
     }
 
     private func displayValue(for row: DetailMetadataRow) -> String {
@@ -825,7 +904,7 @@ private struct DetailMetadataGrid: View {
 private extension View {
     @ViewBuilder
     func detailNavigationChrome() -> some View {
-        #if os(iOS) || os(tvOS)
+        #if os(iOS)
         navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
         #else

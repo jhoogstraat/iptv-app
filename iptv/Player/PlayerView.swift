@@ -22,8 +22,7 @@ struct PlayerView: View {
     @State private var isShowingControls = true
     @State private var scrubTime: Double?
     @State private var hideControlsTask: Task<Void, Never>?
-    @State private var favoriteStateTask: Task<Void, Never>?
-    @State private var isFavorite = false
+
 
     #if os(iOS)
     @State private var mobileSheet: MobileSheet?
@@ -173,7 +172,6 @@ struct PlayerView: View {
         #endif
         .onDisappear {
             hideControlsTask?.cancel()
-            favoriteStateTask?.cancel()
         }
         #if os(tvOS)
         .onPlayPauseCommand {
@@ -336,6 +334,10 @@ struct PlayerView: View {
         VStack(spacing: 8) {
             #if os(iOS)
             iOSTimelineScrubber
+            #elseif os(tvOS)
+            ProgressView(value: player.progressFraction)
+                .progressViewStyle(.linear)
+                .accessibilityIdentifier("player.timeline")
             #else
             Slider(
                 value: sliderValue,
@@ -429,15 +431,6 @@ struct PlayerView: View {
                 Text(controlMessage)
                     .font(.subheadline)
                     .foregroundStyle(.yellow)
-
-                if player.canRetryEpisodeSwitch {
-                    Button("Retry") {
-                        print("TODO")
-//                        player.retryEpisodeSwitch()
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityIdentifier("player.retryEpisodeSwitch")
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -552,12 +545,7 @@ struct PlayerView: View {
                     }
                     .focused($focusedControl, equals: .more)
 
-                    if player.episodeOptions.count > 1 {
-                        Button("Episodes") {
-                            tvPanel = .episodes
-                        }
-                        .focused($focusedControl, equals: .episodes)
-                    }
+
                 }
 
                 if player.outputRoutes.count > 1 {
@@ -594,9 +582,9 @@ struct PlayerView: View {
 
     private var favoriteControlButton: some View {
         Button {
-            Task { await toggleFavorite() }
+            player.reportUnsupportedControl("Favorites are not available yet. Use media details for playback; persistent favorites are implemented in a later workstream.")
         } label: {
-            Image(systemName: isFavorite ? "heart.fill" : "heart")
+            Image(systemName: "heart.slash")
                 .font(.headline.weight(.semibold))
                 .frame(width: 42, height: 42)
                 .background(.white.opacity(0.12))
@@ -606,8 +594,9 @@ struct PlayerView: View {
         .buttonStyle(.plain)
         #endif
         .disabled(player.currentItem == nil)
-        .accessibilityLabel(isFavorite ? "Remove Favorite" : "Add Favorite")
-        .accessibilityIdentifier("player.favorite")
+        .accessibilityLabel("Favorites unavailable")
+        .accessibilityHint("Persistent favorites are outside the active playback workstream.")
+        .accessibilityIdentifier("player.favoriteUnavailable")
     }
 
     #if os(iOS)
@@ -626,12 +615,7 @@ struct PlayerView: View {
             audioControlChip
             subtitleControlChip
             moreControlChip
-//            if player.episodeOptions.count > 1 {
-//                controlChip("Episodes", icon: "list.number") {
-//                    mobileSheet = .episodes
-//                }
-//                .accessibilityIdentifier("player.chip.episodes")
-//            }
+
         }
     }
 
@@ -665,17 +649,7 @@ struct PlayerView: View {
                 }
             }
 
-//            if player.episodeOptions.count > 1 {
-//                compactMobileControlGroup {
-//                    compactIconControlButton(
-//                        systemImage: "list.number",
-//                        accessibilityLabel: "Episodes",
-//                        accessibilityIdentifier: "player.chip.episodes"
-//                    ) {
-//                        mobileSheet = .episodes
-//                    }
-//                }
-//            }
+
 
             Spacer(minLength: 0)
         }
@@ -723,11 +697,7 @@ struct PlayerView: View {
             }
             .disabled(player.currentItem == nil)
 
-//            if player.episodeOptions.count > 1 {
-//                Menu("Episodes") {
-//                    episodeMenuContent
-//                }
-//            }
+
         }
         .menuStyle(.borderlessButton)
     }
@@ -853,14 +823,7 @@ struct PlayerView: View {
             }
             .presentationDetents([.medium, .large])
 
-        case .episodes:
-            NavigationStack {
-                List {
-//                    episodeListRows
-                }
-                .navigationTitle("Episodes")
-            }
-            .presentationDetents([.medium, .large])
+
         }
     }
     #endif
@@ -887,10 +850,7 @@ struct PlayerView: View {
                 outputRouteRow
                 sleepTimerRows
             }
-        case .episodes:
-            List {
-                episodeListRows
-            }
+
         }
     }
     #endif
@@ -1034,6 +994,10 @@ struct PlayerView: View {
     }
 
     private var audioDelayStepper: some View {
+        #if os(tvOS)
+        Text("Audio delay is not available from the tvOS player controls.")
+            .foregroundStyle(.secondary)
+        #else
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Audio Delay")
@@ -1066,9 +1030,14 @@ struct PlayerView: View {
                 }
             }
         }
+        #endif
     }
 
     private var volumeSlider: some View {
+        #if os(tvOS)
+        Text("Volume is controlled with the Siri Remote or system output device.")
+            .foregroundStyle(.secondary)
+        #else
         VStack(alignment: .leading, spacing: 8) {
             Text("Volume")
             Slider(
@@ -1080,10 +1049,15 @@ struct PlayerView: View {
             )
             .accessibilityIdentifier("player.volume")
         }
+        #endif
     }
 
     @ViewBuilder
     private var brightnessSlider: some View {
+        #if os(tvOS)
+        Text("Brightness is controlled by the TV or display settings.")
+            .foregroundStyle(.secondary)
+        #else
         if player.capabilities.supportsBrightness {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Brightness")
@@ -1100,6 +1074,7 @@ struct PlayerView: View {
             Text("Brightness unavailable")
                 .foregroundStyle(.secondary)
         }
+        #endif
     }
 
     @ViewBuilder
@@ -1168,28 +1143,7 @@ struct PlayerView: View {
         }
     }
 
-//    @ViewBuilder
-//    private var episodeListRows: some View {
-//        if player.episodeOptions.count > 1 {
-//            ForEach(player.episodeOptions, id: \.id) { episode in
-//                Button {
-//                    player.quickSwitchEpisode(id: episode.id)
-//                } label: {
-//                    HStack {
-//                        Text(episode.name)
-//                            .lineLimit(1)
-//                        Spacer()
-//                        if episode.id == player.currentItem?.id {
-//                            Image(systemName: "play.fill")
-//                        }
-//                    }
-//                }
-//            }
-//        } else {
-//            Text("No alternate episodes available")
-//                .foregroundStyle(.secondary)
-//        }
-//    }
+
 
     #if os(macOS)
     @ViewBuilder
@@ -1328,18 +1282,7 @@ struct PlayerView: View {
         }
     }
 
-//    @ViewBuilder
-//    private var episodeMenuContent: some View {
-//        if player.episodeOptions.count > 1 {
-//            ForEach(player.episodeOptions, id: \.id) { episode in
-//                Button(episode.name) {
-//                    player.quickSwitchEpisode(id: episode.id)
-//                }
-//            }
-//        } else {
-//            Text("None")
-//        }
-//    }
+
     #endif
 
     private func menuLabel(_ title: String, selected: Bool) -> String {
@@ -1425,10 +1368,7 @@ struct PlayerView: View {
         #endif
     }
 
-    private func toggleFavorite() async {
-        guard player.currentItem != nil else { return }
-        isFavorite.toggle()
-    }
+
 
     #if os(iOS)
     private func updateIOSScrub(at location: CGPoint, size: CGSize) {
@@ -1491,7 +1431,6 @@ private enum MobileSheet: String, Identifiable {
     case audio
     case subtitles
     case more
-    case episodes
 
     var id: String { rawValue }
 }
@@ -1509,8 +1448,8 @@ private enum TVPanel {
     case audio
     case subtitles
     case more
-    case episodes
 }
+
 
 private enum TVControlFocus: Hashable {
     case favorite
@@ -1518,7 +1457,6 @@ private enum TVControlFocus: Hashable {
     case audio
     case subtitles
     case more
-    case episodes
 }
 #endif
 

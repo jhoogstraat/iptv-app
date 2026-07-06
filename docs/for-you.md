@@ -7,7 +7,7 @@ For You is the landing and discovery experience. It should make the app feel lik
 ## Status
 
 - Target state: For You renders a personalized local discovery page using provider-scoped catalog data and watch activity.
-- Implementation status (reviewed 2026-07-05): Partial shell only. `ForYouScreen` is a placeholder and `ContentView` inlines the same placeholder for the Home tab. Reusable For You components exist, but `ForYouRailView` is still TODO/commented, `ContinueWatchingCardView` has watch-time logic commented, and no recommendation or watch-activity query backs the surface.
+- Implementation status (reviewed 2026-07-06): Partial shell only. `ForYouScreen` is a placeholder and `ContentView` inlines the same placeholder for the Home tab. Reusable For You components exist, `ContinueWatchingCardView` can display remaining time when handed watch activity, and provider-scoped `WatchActivity` rows are now queryable for the next Continue Watching rail; no recommendation query backs the surface yet.
 - Current navigation: `Tabs.home` is the first tab, but `ContentView` currently does not present `ForYouScreen`.
 
 ## User Experience
@@ -23,8 +23,8 @@ For You is the landing and discovery experience. It should make the app feel lik
 
 - Target inputs: local Movies and Series catalog, provider-scoped watch progress, ratings, recency, categories/groups, favorites, and downloads where relevant.
 - Target outputs: hero item, continue watching rail, recommendation rails, badges, and routing metadata.
-- Current active schema does not expose watch progress, favorites, downloads, recommendation persistence, or provider foreign keys on catalog rows.
-- Existing UI components include hero, rail, and continue-watching card views, but they are skeletal and not connected to a recommendation data source.
+- `WatchActivity` persists provider-scoped movie/episode progress in SQLite with source ID, media type, title/artwork/category snapshots, current time, duration, completed flag, last watched, and updated timestamps.
+- Existing UI components include hero, rail, and continue-watching card views, but they are not connected to a recommendation or continue-watching data source.
 
 ## Key Files
 
@@ -50,7 +50,7 @@ For You is the landing and discovery experience. It should make the app feel lik
 
 - Active screen is a placeholder.
 - `ContentView` does not currently use `ForYouScreen` for the home tab.
-- Watch activity persistence is not present in the current schema.
+- Continue Watching still needs a rail/query layer that reads unfinished, meaningful `WatchActivity` rows for the active provider.
 - Recommendation model/provider files referenced by older docs are not visible in the current file tree.
 - Prefix visibility is available for browse/search and must be applied to recommendation queries once For You is backed by local data.
 

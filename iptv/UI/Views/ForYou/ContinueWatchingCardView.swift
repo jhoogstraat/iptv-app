@@ -9,6 +9,12 @@ import SwiftUI
 
 struct ContinueWatchingCardView: View {
     let item: Media
+    let activity: WatchActivity?
+
+    init(item: Media, activity: WatchActivity? = nil) {
+        self.item = item
+        self.activity = activity
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -37,12 +43,11 @@ struct ContinueWatchingCardView: View {
                 .font(.footnote.weight(.semibold))
                 .lineLimit(1)
 
-//            if let activity = item.activity?,
-//               let remaining = activity.remainingSeconds {
-//                Text("\(formattedDuration(remaining)) left")
-//                    .font(.caption)
-//                    .foregroundStyle(.secondary)
-//            }
+            if let remaining = activity?.remainingSeconds {
+                Text("\(formattedDuration(remaining)) left")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
