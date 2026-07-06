@@ -31,6 +31,8 @@ enum MediaPlaybackSourceResolutionError: Equatable, LocalizedError {
                 return "This movie cannot be resolved to a playable stream."
             case .episode:
                 return "This episode cannot be resolved to a playable stream."
+            case .live:
+                return "This live channel cannot be resolved to a playable stream."
             }
         }
     }
@@ -45,6 +47,8 @@ struct XtreamMediaPlaybackSourceResolver: MediaPlaybackSourceResolving {
         case .episode:
             return playbackURL(for: media, provider: provider, contentType: .series)
         case .series:
+            throw MediaPlaybackSourceResolutionError.unsupportedCollection(media.type)
+        case .live:
             throw MediaPlaybackSourceResolutionError.unsupportedCollection(media.type)
         }
     }

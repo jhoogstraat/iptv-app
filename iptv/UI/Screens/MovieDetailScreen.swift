@@ -24,6 +24,11 @@ struct MediaDetailDestination: View {
             SeriesDetailScreen(series: media, categoryTitle: categoryTitle)
         case .episode:
             EpisodeDetailTile(series: media, episode: media)
+        case .live:
+            ScopedPlaceholderView(
+                title: "Live TV details unavailable",
+                message: "Live channel details are not part of this local-data foundation workstream."
+            )
         }
     }
 }

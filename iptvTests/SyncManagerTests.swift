@@ -12,19 +12,7 @@ struct SyncManagerTests {
     @Test func syncPersistsMovieAndSeriesCategories() async throws {
         try await withTestDatabase { database in
             try resetDatabase(database)
-            let urlConfiguration = URLSessionConfiguration.ephemeral
-            urlConfiguration.protocolClasses = [StubXtreamURLProtocol.self]
-            let http = HTTPClient(configuration: urlConfiguration)
-            
-            let syncManager = SyncManager(
-                service: XtreamService(
-                    client: http,
-                    baseURL: try #require(URL(string: "https://example.com")),
-                    username: "user",
-                    password: "pass",
-                ),
-                database: database
-            )
+            let syncManager = try makeSyncManager(database: database)
 
             #expect(syncManager.initialSyncPhase == .idle)
             #expect(syncManager.movieSync == .idle)
@@ -45,7 +33,84 @@ struct SyncManagerTests {
             #expect(count.1 == 0)
         }
     }
+
+    @Test func categoryHydrationStatesReflectLazyCoverage() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(database: database)
+            let result = await syncManager.sync(provider: Provider.ID())
+            #expect(result == .success)
+
+            let categories = try await database.read {
+                try Category.fetchAll($0)
+            }
+            let movieCategory = try #require(categories.first { $0.sourceID == "100" && $0.type == .movie })
+            let emptyMovieCategory = try #require(categories.first { $0.sourceID == "200" && $0.type == .movie })
+            let session = Session(syncManager: syncManager, providerID: Provider.ID(), database: database)
+
+            #expect(session.hydrationState(for: movieCategory) == .unhydrated)
+
+            try await syncManager.updateMovies(in: movieCategory.id)
+            #expect(session.hydrationState(for: movieCategory) == .populated(1))
+
+            try await syncManager.updateMovies(in: emptyMovieCategory.id)
+            #expect(session.hydrationState(for: emptyMovieCategory) == .empty)
+
+            do {
+                try await syncManager.updateMovies(in: Category.ID(-1))
+            } catch {
+                // Expected: missing categories expose a failed state for consumers.
+            }
+
+            guard case .failed = syncManager.categoryHydrationStates[Category.ID(-1)] else {
+                Issue.record("Missing category did not record a failed hydration state")
+                return
+            }
+        }
+    }
+
+    @Test func mediaUpsertsScopeRemoteSourceIDsByType() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(database: database)
+            let result = await syncManager.sync(provider: Provider.ID())
+            #expect(result == .success)
+
+            let categories = try await database.read {
+                try Category.fetchAll($0)
+            }
+            let movieCategory = try #require(categories.first { $0.sourceID == "100" && $0.type == .movie })
+            let seriesCategory = try #require(categories.first { $0.sourceID == "100" && $0.type == .series })
+
+            try await syncManager.updateMovies(in: movieCategory.id)
+            try await syncManager.updateSeries(in: seriesCategory.id)
+
+            let matchingMedia = try await database.read {
+                try Media.where { $0.sourceID.eq(1) }.fetchAll($0)
+            }
+
+            #expect(matchingMedia.count == 2)
+            #expect(Set(matchingMedia.map(\.type)) == [.movie, .series])
+            #expect(Set(matchingMedia.compactMap(\.categoryID)) == [movieCategory.id, seriesCategory.id])
+        }
+    }
     
+    private func makeSyncManager(database: any DatabaseWriter) throws -> SyncManager {
+        let urlConfiguration = URLSessionConfiguration.ephemeral
+        urlConfiguration.protocolClasses = [StubXtreamURLProtocol.self]
+        let http = HTTPClient(configuration: urlConfiguration)
+
+        return SyncManager(
+            service: XtreamService(
+                client: http,
+                baseURL: try #require(URL(string: "https://example.com")),
+                username: "user",
+                password: "pass",
+            ),
+            database: database
+        )
+    }
+
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) async throws -> T) async throws -> T {
         let database = try appDatabase()
         return try await operation(database)
@@ -53,6 +118,7 @@ struct SyncManagerTests {
     
     private func resetDatabase(_ database: any DatabaseWriter) throws {
         try database.write { db in
+            try CategoryPrefixVisibility.delete().execute(db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
             try Provider.delete().execute(db)
@@ -84,41 +150,38 @@ private final class StubXtreamURLProtocol: URLProtocol {
                 ["category_id": "200", "category_name": "Drama"],
             ]
         case "get_vod_streams":
-            payload = [
-                [
-                    "stream_id": 1,
-                    "num": 1,
-                    "name": "Movie One",
-                    "category_id": "100",
-                    "stream_icon": "https://example.com/movie-one.jpg",
-                    "added": "0",
-                    "rating": 8.1,
-                    "tmdb": "111",
-                    "is_adult": 0,
-                ],
-                [
-                    "stream_id": 2,
-                    "num": 2,
-                    "name": "Movie Two",
-                    "category_id": "200",
-                    "stream_icon": "https://example.com/movie-two.jpg",
-                    "added": "0",
-                    "rating": 7.4,
-                    "tmdb": "222",
-                    "is_adult": 0,
-                ],
-            ]
+            let categoryID = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "category_id" })?
+                .value
+            if categoryID == "100" {
+                payload = [
+                    [
+                        "stream_id": 1,
+                        "num": 1,
+                        "name": "Movie One",
+                        "category_id": "100",
+                        "stream_icon": "https://example.com/movie-one.jpg",
+                        "added": "0",
+                        "rating": 8.1,
+                        "tmdb": "111",
+                        "is_adult": 0,
+                    ],
+                ]
+            } else {
+                payload = []
+            }
         case "get_series_categories":
             payload = [
-                ["category_id": "300", "category_name": "Sci-Fi"],
+                ["category_id": "100", "category_name": "Sci-Fi"],
             ]
         case "get_series":
             payload = [
                 [
-                    "series_id": 3,
+                    "series_id": 1,
                     "num": 1,
                     "name": "Series One",
-                    "category_id": "300",
+                    "category_id": "100",
                     "cover": "https://example.com/series-one.jpg",
                     "rating": 9.0,
                     "tmdb": "333",

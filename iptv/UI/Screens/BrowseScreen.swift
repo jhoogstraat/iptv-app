@@ -25,6 +25,10 @@ struct BrowseScreen: View {
     private var categories: [Category]
 
     private var category: Category? { categories.first { $0.id == selectedCategoryID } }
+    private var categoryHydrationState: SyncManager.CategoryHydrationState {
+        category.map { session.hydrationState(for: $0) } ?? .populated(0)
+    }
+
 
     private var hiddenGroupKeys: Set<String> {
         _ = prefixVisibilityRevision
@@ -98,17 +102,7 @@ struct BrowseScreen: View {
         .navigationTitle(fallbackScreenTitle)
         .searchable(text: $searchText, prompt: "Search \(fallbackScreenTitle)")
         .task(id: selectedCategoryID) {
-            guard let category, category.updatedAt == nil else {
-                return
-            }
-
-            do {
-                try await session.update(type, in: category.id)
-            } catch is CancellationError {
-                print("Cancelled update movies task")
-            } catch {
-                assertionFailure("Failed to update movies: \(error.localizedDescription)")
-            }
+            await hydrateSelectedCategoryIfNeeded()
         }
         .onChange(of: visibleCategoryIDs) { _, ids in
             if let selectedCategoryID, !ids.contains(selectedCategoryID) {
@@ -143,7 +137,12 @@ struct BrowseScreen: View {
                 filterState: filterState,
                 filter: searchText,
                 categories: visibleCategories,
-                hiddenGroupKeys: hiddenGroupKeys
+                hiddenGroupKeys: hiddenGroupKeys,
+                selectedCategory: category,
+                hydrationState: categoryHydrationState,
+                retryHydration: {
+                    Task { await hydrateSelectedCategory(force: true) }
+                }
             )
         }
     }
@@ -153,6 +152,24 @@ struct BrowseScreen: View {
         selectedGroupKeys.removeAll()
         minimumRating = nil
     }
+
+    private func hydrateSelectedCategoryIfNeeded() async {
+        guard categoryHydrationState == .unhydrated else { return }
+        await hydrateSelectedCategory(force: false)
+    }
+
+    private func hydrateSelectedCategory(force: Bool) async {
+        guard let category else { return }
+        if !force, session.hydrationState(for: category) != .unhydrated { return }
+
+        do {
+            try await session.update(type, in: category.id)
+        } catch is CancellationError {
+            return
+        } catch {
+            assertionFailure("Failed to hydrate category: \(error.localizedDescription)")
+        }
+    }
 }
 
 struct CoverGridSection: View {
@@ -161,7 +178,9 @@ struct CoverGridSection: View {
     let filter: String
     let categories: [Category]
     let hiddenGroupKeys: Set<String>
-
+    let selectedCategory: Category?
+    let hydrationState: SyncManager.CategoryHydrationState
+    let retryHydration: () -> Void
     @FetchAll private var media: [Media]
 
     init(
@@ -169,14 +188,19 @@ struct CoverGridSection: View {
         filterState: LibraryFilterState,
         filter: String,
         categories: [Category],
-        hiddenGroupKeys: Set<String>
+        hiddenGroupKeys: Set<String>,
+        selectedCategory: Category?,
+        hydrationState: SyncManager.CategoryHydrationState,
+        retryHydration: @escaping () -> Void
     ) {
         self.type = type
         self.filterState = filterState
         self.filter = filter
         self.categories = categories
         self.hiddenGroupKeys = hiddenGroupKeys
-
+        self.selectedCategory = selectedCategory
+        self.hydrationState = hydrationState
+        self.retryHydration = retryHydration
         _media = FetchAll(Media.where {
             $0.type.eq(type)
                 .and($0.title.contains(filter))
@@ -192,10 +216,49 @@ struct CoverGridSection: View {
         )
     }
 
+    @ViewBuilder
     var body: some View {
-        CoverGrid(media: filteredMedia, categories: categories)
-            .id(filterState)
-            .transition(.scale(scale: 0.9).combined(with: .opacity))
+        if selectedCategory == nil, media.isEmpty {
+            ContentUnavailableView {
+                Label("Choose a category", systemImage: "folder")
+            } description: {
+                Text("Categories sync first. Open a category to lazily load its local streams.")
+            }
+        } else if let selectedCategory {
+            switch hydrationState {
+            case .unhydrated, .loading:
+                CoverGrid(media: [], categories: categories)
+            case .empty:
+                ContentUnavailableView {
+                    Label("No \(selectedCategory.title) items", systemImage: "tray")
+                } description: {
+                    Text("The provider returned this category, but no streams were found for it.")
+                }
+            case let .failed(message):
+                ContentUnavailableView {
+                    Label("Couldn’t load \(selectedCategory.title)", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(message)
+                } actions: {
+                    Button("Retry", action: retryHydration)
+                }
+            case .populated:
+                populatedGrid
+            }
+        } else {
+            populatedGrid
+        }
+    }
+
+    @ViewBuilder
+    private var populatedGrid: some View {
+        if filteredMedia.isEmpty {
+            ContentUnavailableView.search(text: filter)
+        } else {
+            CoverGrid(media: filteredMedia, categories: categories)
+                .id(filterState)
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
+        }
     }
 }
 

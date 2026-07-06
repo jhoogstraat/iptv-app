@@ -60,6 +60,85 @@ struct SessionManagerTests {
         }
     }
 
+    @Test func initializeClearsExistingLocalLibraryRows() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            try insertProvider(name: "Primary", isActive: true, database: database)
+            try insertLibraryRows(database)
+
+            let providerManager = ProviderManager(database: database)
+            try providerManager.loadActive()
+            try providerManager.initialize(
+                .init(
+                    id: nil,
+                    kind: .xtream,
+                    name: "Replacement",
+                    username: "user",
+                    password: "pass",
+                    endpoint: #require(URL(string: "https://replacement.example.com")),
+                    isActive: true
+                )
+            )
+
+            let counts = try libraryCounts(database)
+            #expect(counts.categories == 0)
+            #expect(counts.media == 0)
+        }
+    }
+
+    @Test func providerSwitchClearsCatalogAndRequiresFreshSync() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            try insertProvider(name: "Primary", isActive: true, database: database)
+            let nextProviderID = try insertProvider(name: "Next", isActive: false, database: database)
+            try insertLibraryRows(database)
+
+            let providerManager = ProviderManager(database: database)
+            try providerManager.loadActive()
+            try providerManager.change(to: nextProviderID)
+
+            let counts = try libraryCounts(database)
+            let nextProvider = try database.read { try Provider.find($0, key: nextProviderID) }
+
+            #expect(counts.categories == 0)
+            #expect(counts.media == 0)
+            #expect(nextProvider.isActive)
+            #expect(!nextProvider.isInitialized)
+            #expect(providerManager.requiresOnboarding)
+        }
+    }
+
+    @Test func providerEditClearsCatalogAndRequiresFreshSync() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
+            try insertLibraryRows(database)
+
+            let providerManager = ProviderManager(database: database)
+            try providerManager.loadActive()
+            try providerManager.update(
+                provider: .init(
+                    id: providerID,
+                    kind: .xtream,
+                    name: "Edited",
+                    username: "user",
+                    password: "pass",
+                    endpoint: #require(URL(string: "https://edited.example.com")),
+                    isActive: true
+                )
+            )
+
+            let counts = try libraryCounts(database)
+            let provider = try database.read { try Provider.find($0, key: providerID) }
+
+            #expect(counts.categories == 0)
+            #expect(counts.media == 0)
+            #expect(provider.isActive)
+            #expect(!provider.isInitialized)
+            #expect(providerManager.requiresOnboarding)
+        }
+    }
+
     @Test func clearRemovesProviderAndLibraryRows() throws {
         try withTestDatabase { database in
             try resetDatabase(database)
@@ -94,9 +173,19 @@ struct SessionManagerTests {
 
     private func resetDatabase(_ database: any DatabaseWriter) throws {
         try database.write { db in
+            try CategoryPrefixVisibility.delete().execute(db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
             try Provider.delete().execute(db)
+        }
+    }
+
+    private func libraryCounts(_ database: any DatabaseWriter) throws -> (categories: Int, media: Int) {
+        try database.read {
+            (
+                try Category.fetchCount($0),
+                try Media.fetchCount($0)
+            )
         }
     }
 

@@ -46,6 +46,23 @@ final class Session {
     var syncErrorMessage: String? { syncManager.lastErrorMessage }
     var movieSyncStatus: SyncManager.SyncStatus { syncManager.movieSync }
     var seriesSyncStatus: SyncManager.SyncStatus { syncManager.seriesSync }
+    func hydrationState(for category: Category) -> SyncManager.CategoryHydrationState {
+        if let state = syncManager.categoryHydrationStates[category.id] {
+            return state
+        }
+
+        guard category.updatedAt != nil else { return .unhydrated }
+
+        do {
+            let count = try database.read { db in
+                try Media.where { $0.categoryID.eq(category.id) }.fetchCount(db)
+            }
+            return count == 0 ? .empty : .populated(count)
+        } catch {
+            return .failed(error.localizedDescription)
+        }
+    }
+   
    
     // MARK: - Methods
     @discardableResult
@@ -59,7 +76,7 @@ final class Session {
                 try await self.syncManager.updateMovies(in: category)
             case .series:
                 try await self.syncManager.updateSeries(in: category)
-            case .episode: break
+            case .episode, .live: break
         }
     }
 }

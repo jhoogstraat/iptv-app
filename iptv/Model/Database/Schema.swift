@@ -54,17 +54,18 @@ func appDatabase() throws -> any DatabaseWriter {
         try #sql("""
         CREATE TABLE "categories"(
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "sourceID" TEXT UNIQUE NOT NULL,
+            "sourceID" TEXT NOT NULL,
             "type" INTEGER NOT NULL,
             "title" TEXT NOT NULL,
-            "updatedAt" TEXT
+            "updatedAt" TEXT,
+            UNIQUE ("sourceID", "type")
         ) STRICT
         """).execute(db)
 
         try #sql("""
         CREATE TABLE "media" (
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "sourceID" INTEGER UNIQUE NOT NULL,
+            "sourceID" INTEGER NOT NULL,
             "type" INTEGER NOT NULL,
             "title" TEXT NOT NULL,
             "categoryID" INTEGER,
@@ -72,7 +73,20 @@ func appDatabase() throws -> any DatabaseWriter {
             "coverURL" TEXT,
             "rating" REAL,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("sourceID", "type"),
             FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        CREATE TABLE "category_prefix_visibility" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "providerID" INTEGER NOT NULL,
+            "groupKey" TEXT NOT NULL,
+            "isHidden" INTEGER NOT NULL DEFAULT 1,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("providerID", "groupKey"),
+            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
         ) STRICT
         """).execute(db)
         
@@ -87,6 +101,70 @@ func appDatabase() throws -> any DatabaseWriter {
 
             try Provider.find(provider.id).update { $0.endpoint = #bind(normalized) }.execute(db)
         }
+    }
+
+    migrator.registerMigration("Scope catalog identity and prefix visibility") { db in
+        try #sql("""
+        CREATE TABLE "new_categories"(
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "sourceID" TEXT NOT NULL,
+            "type" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "updatedAt" TEXT,
+            UNIQUE ("sourceID", "type")
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        INSERT INTO "new_categories" ("id", "sourceID", "type", "title", "updatedAt")
+        SELECT "id", "sourceID", "type", "title", "updatedAt" FROM "categories"
+        """).execute(db)
+
+        try #sql("""
+        CREATE TABLE "new_media" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "sourceID" INTEGER NOT NULL,
+            "type" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "categoryID" INTEGER,
+            "tmdbID" TEXT,
+            "coverURL" TEXT,
+            "rating" REAL,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("sourceID", "type"),
+            FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        INSERT INTO "new_media" ("id", "sourceID", "type", "title", "categoryID", "tmdbID", "coverURL", "rating", "updatedAt")
+        SELECT "id", "sourceID", "type", "title", "categoryID", "tmdbID", "coverURL", "rating", "updatedAt" FROM "media"
+        """).execute(db)
+
+        try #sql("""
+        DROP TABLE "media"
+        """).execute(db)
+        try #sql("""
+        DROP TABLE "categories"
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "new_categories" RENAME TO "categories"
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "new_media" RENAME TO "media"
+        """).execute(db)
+
+        try #sql("""
+        CREATE TABLE IF NOT EXISTS "category_prefix_visibility" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "providerID" INTEGER NOT NULL,
+            "groupKey" TEXT NOT NULL,
+            "isHidden" INTEGER NOT NULL DEFAULT 1,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("providerID", "groupKey"),
+            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
+        ) STRICT
+        """).execute(db)
     }
     
     try migrator.migrate(database)
@@ -136,8 +214,17 @@ nonisolated struct Category: Hashable, Identifiable, Sendable {
     var updatedAt: Date?
 }
 
+@Table("category_prefix_visibility")
+nonisolated struct CategoryPrefixVisibility: Hashable, Identifiable, Sendable {
+    let id: Int
+    let providerID: Provider.ID
+    let groupKey: String
+    var isHidden: Bool = true
+    var updatedAt: Date = .now
+}
+
 enum MediaType: Int, QueryBindable {
-   case movie = 0, series = 1, episode = 2
+   case movie = 0, series = 1, episode = 2, live = 3
 }
 
 private nonisolated let logger = Logger(subsystem: "IPTV", category: "Database")
