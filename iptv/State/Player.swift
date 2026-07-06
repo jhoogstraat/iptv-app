@@ -130,6 +130,8 @@ final class Player {
     private var preferredSubtitleLanguageCode: String?
     private var subtitleEnabledByDefault = false
     private var didApplyTrackPreferencesForCurrentItem = false
+    private var currentProviderID: Provider.ID?
+    private var pendingResumeTime: Double?
     private var lastEpisodeSwitchAttemptID: Int?
 
     init(
@@ -143,6 +145,7 @@ final class Player {
         self.database = database ?? defaultDatabase
         self.playbackSourceResolver = playbackSourceResolver ?? XtreamMediaPlaybackSourceResolver()
         self.defaults = defaults
+        loadSavedPreferencesForCurrentProfile()
     }
 
     var vlcRenderer: VLCPlayerReference? {
@@ -176,7 +179,14 @@ final class Player {
         loadSavedPreferencesForCurrentProfile()
 
         do {
-            let url = try playbackURL(for: media)
+            let provider = try activeProvider()
+            currentProviderID = provider.id
+            pendingResumeTime = WatchActivityStore.resumeTime(
+                for: media,
+                providerID: provider.id,
+                database: database
+            )
+            let url = try playbackSourceResolver.playbackURL(for: media, provider: provider)
             try activateBackend(for: url)
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
@@ -202,7 +212,11 @@ final class Player {
         activeBackendID = nil
         rendererRevision += 1
 
+        persistProgressIfNeeded(force: true)
+
         currentItem = nil
+        currentProviderID = nil
+        pendingResumeTime = nil
         shouldAutoPlay = true
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -266,6 +280,12 @@ final class Player {
 
     func clearControlMessage() {
         controlMessage = nil
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
+    }
+
+    func reportUnsupportedControl(_ message: String) {
+        controlMessage = message
         canRetryEpisodeSwitch = false
         lastEpisodeSwitchAttemptID = nil
     }
@@ -455,52 +475,22 @@ final class Player {
         }
     }
 
-//    func configureEpisodeSwitcher(
-//        episodes: [Video],
-//        resolver: @escaping (Video) async throws -> PlaybackSource
-//    ) {
-//        episodeOptions = episodes
-//        episodeSourceResolver = resolver
-//    }
 
-//    func quickSwitchEpisode(id: Int) {
-//        guard let target = episodeOptions.first(where: { $0.id == id }) else { return }
-//        guard let resolver = episodeSourceResolver else {
-//            setUnsupportedFeatureMessage("Episode quick switch")
-//            return
-//        }
-//
-//        lastEpisodeSwitchAttemptID = id
-//        Task { @MainActor [weak self] in
-//            guard let self else { return }
-//            do {
-//                let source = try await resolver(target)
-//                self.canRetryEpisodeSwitch = false
-//                self.controlMessage = nil
-//                self.load(target, source, presentation: self.presentation, autoplay: true)
-//            } catch {
-//                self.controlMessage = "Could not switch episode. Try again."
-//                self.canRetryEpisodeSwitch = true
-//                logger.error("Episode quick switch failed for id \(id, privacy: .public): \(error.localizedDescription, privacy: .public)")
-//            }
-//        }
-//    }
-
-//    func retryEpisodeSwitch() {
-//        guard canRetryEpisodeSwitch, let id = lastEpisodeSwitchAttemptID else { return }
-//        quickSwitchEpisode(id: id)
-//    }
 
     // MARK: - Internals
 
-    private func playbackURL(for media: Media) throws -> URL {
+    private func activeProvider() throws -> Provider {
         guard let provider = try database.read({ db in
             try Provider.where(\.isActive).fetchOne(db)
         }) else {
             throw MediaPlaybackSourceResolutionError.missingActiveProvider
         }
 
-        return try playbackSourceResolver.playbackURL(for: media, provider: provider)
+        return provider
+    }
+
+    private func playbackURL(for media: Media) throws -> URL {
+        try playbackSourceResolver.playbackURL(for: media, provider: activeProvider())
     }
 
     private func activateBackend(for url: URL, excluding excluded: Set<PlaybackBackendID> = []) throws {
@@ -538,6 +528,7 @@ final class Player {
             errorMessage = nil
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
+            applyPendingResumeSeekIfNeeded()
 
         case .playing:
             isPlaying = true
@@ -599,8 +590,10 @@ final class Player {
 
         var nextCapabilities = backend.capabilities()
 
-        #if os(iOS) || os(tvOS)
+        #if os(iOS)
         nextCapabilities.supportsBrightness = true
+        nextCapabilities.supportsOutputRouteSelection = true
+        #elseif os(tvOS)
         nextCapabilities.supportsOutputRouteSelection = true
         #endif
 
@@ -769,19 +762,14 @@ final class Player {
     }
 
     private var currentStreamDescriptor: String {
-//        if currentPlaybackSource?.origin == .offline {
-//            return "an offline file"
-//        }
-//
-//        if let ext = currentItem?.containerExtension.lowercased(), !ext.isEmpty {
-//            return "a fixed \(ext.uppercased()) stream"
-//        }
-//
-//        if let ext = currentURL?.pathExtension.lowercased(), !ext.isEmpty {
-//            return "a fixed \(ext.uppercased()) stream"
-//        }
+        guard let currentItem else { return "the current stream" }
 
-        return "TODO"
+        if let ext = currentItem.containerExtension?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !ext.isEmpty {
+            return "a fixed \(ext.uppercased()) stream"
+        }
+
+        return currentItem.type == .episode ? "this episode stream" : "this movie stream"
     }
 
     private func setUnsupportedFeatureMessage(_ feature: String) {
@@ -800,6 +788,23 @@ final class Player {
         pause()
         presentation = .inline
         controlMessage = "Sleep timer finished. Playback paused."
+    }
+
+    private func applyPendingResumeSeekIfNeeded() {
+        guard let resumeTime = pendingResumeTime else { return }
+        pendingResumeTime = nil
+
+        guard WatchActivityStore.isResumeEligible(
+            currentTime: resumeTime,
+            duration: duration,
+            completed: false
+        ) else {
+            return
+        }
+
+        currentTime = resumeTime
+        backend?.seek(to: resumeTime)
+        controlMessage = "Resumed \(currentStreamDescriptor) at \(Self.formatTime(resumeTime))."
     }
 
     private func processFailure(_ error: Error, from backendID: PlaybackBackendID) {
@@ -838,53 +843,64 @@ final class Player {
         logger.error("Terminal playback failure: \(message, privacy: .public)")
     }
 
-    private func persistProgressIfNeeded() {
-        guard currentItem != nil else { return }
+    private func persistProgressIfNeeded(force: Bool = false) {
+        guard let currentItem, let providerID = currentProviderID else { return }
+        guard currentItem.type == .movie || currentItem.type == .episode else { return }
 
-//        if let persisted = lastPersistedProgressByVideoKey[key],
-//           abs(currentTime - persisted.time) < 10,
-//           abs(fraction - persisted.fraction) < 0.05 {
-//            return
-//        }
-//
-//        let input = WatchActivityInput(
-//            videoID: currentItem.id,
-//            contentType: currentItem.contentType,
-//            title: currentItem.name,
-//            cover: currentItem.cover,
-//            containerExtension: currentItem.containerExtension,
-//            rating: currentItem.rating
-//        )
-//
-//        let currentTime = self.currentTime
-//        let duration = self.duration
-//        Task(priority: .utility) {
-//            await watchActivityStore.recordProgress(
-//                input: input,
-//                providerFingerprint: providerFingerprint,
-//                currentTime: currentTime,
-//                duration: duration
-//            )
-//        }
+        let currentTime = self.currentTime
+        let duration = self.duration
+        let fraction: Double = if let duration, duration > 0 {
+            min(max(currentTime / duration, 0), 1)
+        } else {
+            0
+        }
+        let key = "\(providerID):\(currentItem.type.rawValue):\(currentItem.sourceID)"
+
+        if !force,
+           let persisted = lastPersistedProgressByVideoKey[key],
+           abs(currentTime - persisted.time) < 10,
+           abs(fraction - persisted.fraction) < 0.05 {
+            return
+        }
+
+        lastPersistedProgressByVideoKey[key] = (currentTime, fraction)
+        let database = self.database
+
+        Task.detached(priority: .utility) {
+            await WatchActivityStore.recordProgress(
+                for: currentItem,
+                providerID: providerID,
+                currentTime: currentTime,
+                duration: duration,
+                completed: false,
+                database: database
+            )
+        }
     }
 
     private func markCurrentItemCompleted() {
-//        guard let currentItem else { return }
-//        guard let watchActivityStore else { return }
-//        guard let providerFingerprint = providerFingerprintProvider() else { return }
-//
-//        let input = WatchActivityInput(
-//            videoID: currentItem.id,
-//            contentType: currentItem.contentType,
-//            title: currentItem.name,
-//            cover: currentItem.cover,
-//            containerExtension: currentItem.containerExtension,
-//            rating: currentItem.rating
-//        )
-//
-//        Task(priority: .utility) {
-//            await watchActivityStore.markCompleted(input: input, providerFingerprint: providerFingerprint)
-//        }
+        guard let currentItem, let providerID = currentProviderID else { return }
+        guard currentItem.type == .movie || currentItem.type == .episode else { return }
+
+        let currentTime = max(self.currentTime, duration ?? self.currentTime)
+        let duration = self.duration
+        let key = "\(providerID):\(currentItem.type.rawValue):\(currentItem.sourceID)"
+        lastPersistedProgressByVideoKey[key] = (
+            currentTime,
+            duration.map { $0 > 0 ? min(max(currentTime / $0, 0), 1) : 0 } ?? 0
+        )
+        let database = self.database
+
+        Task.detached(priority: .utility) {
+            await WatchActivityStore.recordProgress(
+                for: currentItem,
+                providerID: providerID,
+                currentTime: currentTime,
+                duration: duration,
+                completed: true,
+                database: database
+            )
+        }
     }
 
     private static func formatTime(_ rawSeconds: Double) -> String {

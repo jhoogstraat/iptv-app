@@ -25,8 +25,9 @@ final class InternetConnectionMonitor {
         self.isConnected = monitor.currentPath.status == .satisfied
 
         monitor.pathUpdateHandler = { [weak self] path in
-            Task { @MainActor in
-                self?.isConnected = path.status == .satisfied
+            let isConnected = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                self?.isConnected = isConnected
             }
         }
         monitor.start(queue: queue)

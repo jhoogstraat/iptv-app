@@ -7,8 +7,8 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, and one-time VLC-to-AV fallback exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie and persisted episode rows through `MediaPlaybackSourceResolver`, including container extensions when available, and movie/episode detail play actions can start real playback.
-- Current blocker: persisted watch progress, persisted favorites, offline playback, profile-scoped preferences, fully wired episode quick switching, and complete quality/chapter UI exposure remain incomplete.
+- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, one-time VLC-to-AV fallback, and local watch-activity persistence exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie and persisted episode rows through `MediaPlaybackSourceResolver`, including container extensions when available, and movie/episode detail play actions can start real playback with eligible resume from the local database.
+- Current blocker: persisted favorites, offline playback, profile-scoped preferences, fully wired episode quick switching, and complete quality/chapter UI exposure remain incomplete.
 
 ## User Experience
 
@@ -26,6 +26,7 @@ The video player provides stable playback controls and renderer switching across
 - `PlaybackEvent` transports ready/playing/paused/buffering/progress/advanced-state/ended/failed updates.
 - `PlayerRendererContainer` switches renderer by `activeBackendID` and `rendererRevision`.
 - `PlayerAdvancedModels` defines tracks, quality variants, chapters, output routes, capabilities, aspect ratios, and sleep timer options.
+- `WatchActivity` stores provider-scoped movie/episode progress in SQLite, keyed by active provider ID, media type, and remote source ID. Player progress and ended events write rows asynchronously and throttle routine progress updates.
 
 ## Key Files
 
@@ -54,10 +55,9 @@ The video player provides stable playback controls and renderer switching across
 
 ## Current Gaps / Planned Work
 
-- Persisted watch progress is not implemented; `persistProgressIfNeeded()` and `markCurrentItemCompleted()` are currently no-op/commented.
-- Favorite toggle in `PlayerView` is local UI state only, not persisted.
-- Some advanced preferences are learned or in-memory rather than exposed through Settings persistence.
-- Episode quick switching appears planned/commented and is not fully active, but persisted episode rows can launch through the shared player path from series detail.
+- Favorite toggle in `PlayerView` is an explicit unavailable control, not a persisted feature.
+- Some advanced preferences are learned or stored device-globally in `UserDefaults` rather than exposed through profile-scoped Settings persistence.
+- Episode quick switching is not active; persisted episode rows launch through the shared player path from series detail.
 - Offline playback integration is planned but not implemented.
 
 ## Notes for Agents

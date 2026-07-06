@@ -227,6 +227,33 @@ func appDatabase() throws -> any DatabaseWriter {
         ) STRICT
         """).execute(db)
     }
+
+    migrator.registerMigration("Create provider scoped watch activity") { db in
+        try #sql("""
+        CREATE TABLE "watch_activity" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "providerID" INTEGER NOT NULL,
+            "mediaType" INTEGER NOT NULL,
+            "sourceID" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "artworkURL" TEXT,
+            "categoryTitle" TEXT,
+            "currentTime" REAL NOT NULL DEFAULT 0,
+            "duration" REAL,
+            "completed" INTEGER NOT NULL DEFAULT 0,
+            "lastWatchedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("providerID", "mediaType", "sourceID"),
+            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "watch_activity_provider_last_watched_idx"
+        ON "watch_activity" ("providerID", "completed", "lastWatchedAt" DESC)
+        """).execute(db)
+    }
+    
     
     try migrator.migrate(database)
     
@@ -309,6 +336,227 @@ nonisolated struct CategoryPrefixVisibility: Hashable, Identifiable, Sendable {
     let groupKey: String
     var isHidden: Bool = true
     var updatedAt: Date = .now
+}
+
+@Table("watch_activity")
+nonisolated struct WatchActivity: Hashable, Identifiable, Sendable {
+    let id: Int
+    let providerID: Provider.ID
+    let mediaType: MediaType
+    let sourceID: Int
+    var title: String
+    var artworkURL: URL?
+    var categoryTitle: String?
+    var currentTime: Double = 0
+    var duration: Double?
+    var completed: Bool = false
+    var lastWatchedAt: Date = .now
+    var updatedAt: Date = .now
+
+    var progressFraction: Double {
+        guard let duration, duration > 0 else { return 0 }
+        return Swift.min(Swift.max(currentTime / duration, 0), 1)
+    }
+
+    var remainingSeconds: Double? {
+        guard let duration, duration > 0 else { return nil }
+        return Swift.max(duration - currentTime, 0)
+    }
+
+    var isResumeEligible: Bool {
+        WatchActivityStore.isResumeEligible(
+            currentTime: currentTime,
+            duration: duration,
+            completed: completed
+        )
+    }
+}
+
+enum WatchActivityStore: Sendable {
+    nonisolated static let minimumResumeSeconds = 30.0
+    nonisolated static let minimumRemainingSeconds = 30.0
+    nonisolated static let completionFraction = 0.9
+
+    nonisolated static func isResumeEligible(
+        currentTime: Double,
+        duration: Double?,
+        completed: Bool
+    ) -> Bool {
+        guard !completed, currentTime.isFinite, currentTime >= minimumResumeSeconds else {
+            return false
+        }
+
+        guard let duration, duration.isFinite, duration > 0 else {
+            return true
+        }
+
+        let remaining = duration - currentTime
+        return remaining >= minimumRemainingSeconds
+            && (currentTime / duration) < completionFraction
+    }
+
+    nonisolated static func isCompleted(currentTime: Double, duration: Double?) -> Bool {
+        guard currentTime.isFinite,
+              let duration,
+              duration.isFinite,
+              duration > 0
+        else { return false }
+
+        return duration - currentTime <= minimumRemainingSeconds
+            || (currentTime / duration) >= completionFraction
+    }
+
+    static func resumeTime(
+        for media: Media,
+        providerID: Provider.ID,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> Double? {
+        guard let activity = activity(for: media, providerID: providerID, database: suppliedDatabase),
+              activity.isResumeEligible
+        else { return nil }
+
+        return activity.currentTime
+    }
+
+    static func activity(
+        for media: Media,
+        providerID: Provider.ID,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> WatchActivity? {
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            return try database.read { db in
+                try WatchActivity
+                    .where {
+                        $0.providerID.eq(providerID)
+                            .and($0.mediaType.eq(media.type))
+                            .and($0.sourceID.eq(media.sourceID))
+                    }
+                    .fetchOne(db)
+            }
+        } catch {
+            logger.warning("Failed to read watch activity: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    static func unfinishedActivities(
+        for providerID: Provider.ID,
+        limit: Int = 20,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> [WatchActivity] {
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            let activities = try database.read { db in
+                try WatchActivity
+                    .where { $0.providerID.eq(providerID).and($0.completed.eq(false)) }
+                    .fetchAll(db)
+            }
+
+            return Array(
+                activities
+                    .filter(\.isResumeEligible)
+                    .sorted { lhs, rhs in
+                        if lhs.lastWatchedAt != rhs.lastWatchedAt {
+                            return lhs.lastWatchedAt > rhs.lastWatchedAt
+                        }
+                        if lhs.title.localizedStandardCompare(rhs.title) != .orderedSame {
+                            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+                        }
+                        return lhs.sourceID < rhs.sourceID
+                    }
+                    .prefix(Swift.max(limit, 0))
+            )
+        } catch {
+            logger.warning("Failed to read unfinished watch activity: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
+
+    nonisolated static func recordProgress(
+        for media: Media,
+        providerID: Provider.ID,
+        currentTime rawCurrentTime: Double,
+        duration rawDuration: Double?,
+        completed explicitlyCompleted: Bool,
+        database: any DatabaseWriter
+    ) async {
+        guard media.type == .movie || media.type == .episode else { return }
+        guard rawCurrentTime.isFinite else { return }
+
+        let currentTime = Swift.max(rawCurrentTime, 0)
+        let duration = resolvedDuration(rawDuration, mediaRuntimeSeconds: media.runtimeSeconds)
+        let completed = explicitlyCompleted || isCompleted(currentTime: currentTime, duration: duration)
+        let storedCurrentTime = completed ? Swift.max(currentTime, duration ?? currentTime) : currentTime
+        let now = Date()
+
+        do {
+            try await database.write { db in
+                let categoryTitle: String? = if let categoryID = media.categoryID {
+                    try? Category
+                        .select(\.title)
+                        .where { $0.id.eq(categoryID) }
+                        .fetchOne(db)
+                } else {
+                    nil
+                }
+
+                let artworkURL = media.backdropURL ?? media.coverURL
+                try WatchActivity.insert {
+                    WatchActivity.Draft(
+                        id: nil,
+                        providerID: providerID,
+                        mediaType: media.type,
+                        sourceID: media.sourceID,
+                        title: media.title,
+                        artworkURL: artworkURL,
+                        categoryTitle: categoryTitle,
+                        currentTime: storedCurrentTime,
+                        duration: duration,
+                        completed: completed,
+                        lastWatchedAt: now,
+                        updatedAt: now
+                    )
+                } onConflict: {
+                    ($0.providerID, $0.mediaType, $0.sourceID)
+                } doUpdate: {
+                    $0.title = media.title
+                    $0.artworkURL = #bind(artworkURL)
+                    $0.categoryTitle = #bind(categoryTitle)
+                    $0.currentTime = storedCurrentTime
+                    $0.duration = #bind(duration)
+                    $0.completed = completed
+                    $0.lastWatchedAt = now
+                    $0.updatedAt = now
+                }.execute(db)
+            }
+        } catch {
+            logger.warning("Failed to record watch activity: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    nonisolated static func deleteActivity(for providerID: Provider.ID, in db: Database) throws {
+        try WatchActivity
+            .where { $0.providerID.eq(providerID) }
+            .delete()
+            .execute(db)
+    }
+
+    nonisolated private static func resolvedDuration(_ rawDuration: Double?, mediaRuntimeSeconds: Int?) -> Double? {
+        if let rawDuration, rawDuration.isFinite, rawDuration > 0 {
+            return rawDuration
+        }
+
+        if let mediaRuntimeSeconds, mediaRuntimeSeconds > 0 {
+            return Double(mediaRuntimeSeconds)
+        }
+
+        return nil
+    }
 }
 
 enum MediaType: Int, QueryBindable {

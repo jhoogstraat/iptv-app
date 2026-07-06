@@ -7,8 +7,8 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Status
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
-- Implementation status (reviewed 2026-07-05): Partial. `SyncManager.sync(provider:)` clears all local `Media` and `Category`, fetches VOD and series categories, and stores category rows. `BrowseScreen` lazily hydrates unhydrated movie/series categories through `Session.update(_:in:)`, which upserts `Media` rows and stamps `Category.updatedAt`.
-- Current schema: provider, category, and media tables exist; user state, live channels, provider-isolated catalog rows, and richer metadata tables are not yet visible in the current schema.
+- Implementation status (reviewed 2026-07-06): Partial. `SyncManager.sync(provider:)` clears all local `Media` and `Category`, fetches VOD and series categories, and stores category rows. `BrowseScreen` lazily hydrates unhydrated movie/series categories through `Session.update(_:in:)`, which upserts `Media` rows and stamps `Category.updatedAt`. Provider-scoped `WatchActivity` now persists movie/episode progress separately from catalog rows.
+- Current schema: provider, category, media, series season, category prefix visibility, and watch-activity tables exist; favorites, downloads/offline, live channels, provider-isolated catalog rows, and recommendation persistence are not yet visible in the current schema.
 
 ## User Experience
 
@@ -26,6 +26,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 - `SyncManager.InitialSyncPhase`: idle, clearing library, syncing movies, syncing series, succeeded, failed.
 - `SyncManager.SyncStatus`: idle, active, success, failure.
 - `Category.updatedAt == nil` means the category has not been lazily hydrated yet.
+- `watch_activity`: provider-scoped movie/episode progress keyed by provider ID, media type, and source ID, with title/artwork/category snapshots, time/duration, completed flag, last watched, and update timestamps.
 
 ## Key Files
 
@@ -51,9 +52,9 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 - Initial sync does not currently prefetch all media rows.
 - Live categories/channels are represented in intent but not active sync behavior.
 - Background incremental sync is not implemented.
-- Provider-isolated user state tables for favorites, watch progress, downloads, and recommendations are not yet present in the current schema.
-- Media records do not include playable URL fields, added date, genre, language, audio tracks, subtitle tracks, or year.
-- Provider isolation is operational rather than schema-backed: `categories` and `media` have no provider column, provider sync/delete paths clear the singleton local library, and `ProviderManager.change(to:)` switches sessions without row-level catalog isolation.
+- Provider-isolated user state exists for category prefix visibility and watch progress; favorites, downloads, and recommendations are not yet present in the current schema.
+- Media records do not include playable URL fields, language, audio tracks, subtitle tracks, or full cast/crew normalization.
+- Provider isolation is mixed: user-state tables are provider-scoped, while `categories` and `media` have no provider column; provider sync/delete paths clear the singleton local library, and active-provider filters prevent watch progress from leaking across providers.
 
 ## Notes for Agents
 

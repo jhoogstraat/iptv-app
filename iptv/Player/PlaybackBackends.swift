@@ -785,7 +785,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func setBrightness(_ value: Double) {
-        #if os(iOS) || os(tvOS)
+        #if os(iOS)
         UIScreen.main.brightness = CGFloat(max(0, min(value, 1)))
         #else
         _ = value
