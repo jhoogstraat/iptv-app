@@ -79,6 +79,10 @@ final class Session {
             case .episode, .live: break
         }
     }
+
+    func enrichDetails(for media: Media) async throws {
+        try await syncManager.enrichDetails(for: media.id)
+    }
 }
 
 extension Session: Equatable {

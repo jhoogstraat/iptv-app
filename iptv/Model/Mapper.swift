@@ -8,66 +8,83 @@
 import Foundation
 import xtream_swift
 
-//private enum XtreamMapper {
-//    static let timestampFormatters: [DateFormatter] = [
-//        makeFormatter("yyyy-MM-dd HH:mm:ss"),
-//        makeFormatter("yyyy-MM-dd")
-//    ]
-//
-//    static func date(from value: String?) -> Date? {
-//        guard let rawValue = value?.trimmed, !rawValue.isEmpty else {
-//            return nil
-//        }
-//
-//        if let unixTimestamp = TimeInterval(rawValue) {
-//            return Date(timeIntervalSince1970: unixTimestamp)
-//        }
-//
-//        for formatter in timestampFormatters {
-//            if let parsedDate = formatter.date(from: rawValue) {
-//                return parsedDate
-//            }
-//        }
-//
-//        return nil
-//    }
-//
-//    static func duration(minutes: Int?) -> Duration? {
-//        guard let minutes else { return nil }
-//        return Duration(secondsComponent: Int64(minutes * 60), attosecondsComponent: 0)
-//    }
-//
-//    static func duration(seconds: Int?) -> Duration? {
-//        guard let seconds else { return nil }
-//        return Duration(secondsComponent: Int64(seconds), attosecondsComponent: 0)
-//    }
-//
-//    static func parseList(_ value: String?) -> [String] {
-//        guard let value else { return [] }
-//
-//        return value
-//            .split(separator: ",")
-//            .map(\.trimmed)
-//            .filter { !$0.isEmpty }
-//    }
-//
-//    static func text(_ value: String?) -> String? {
-//        guard let value = value?.trimmed, !value.isEmpty else {
-//            return nil
-//        }
-//
-//        return value
-//    }
-//
-//    private static func makeFormatter(_ format: String) -> DateFormatter {
-//        let formatter = DateFormatter()
-//        formatter.calendar = Calendar(identifier: .gregorian)
-//        formatter.locale = Locale(identifier: "en_US_POSIX")
-//        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-//        formatter.dateFormat = format
-//        return formatter
-//    }
-//}
+enum XtreamMapper {
+
+    nonisolated static func date(from value: String?) -> Date? {
+        guard let rawValue = text(value) else { return nil }
+
+        if let unixTimestamp = TimeInterval(rawValue) {
+            return Date(timeIntervalSince1970: unixTimestamp)
+        }
+
+        for format in ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd"] {
+            if let parsedDate = makeFormatter(format).date(from: rawValue) {
+                return parsedDate
+            }
+        }
+
+        return nil
+    }
+
+    nonisolated static func runtimeSeconds(from seconds: Int?, minutes: Int? = nil, duration: String? = nil) -> Int? {
+        if let seconds, seconds > 0 { return seconds }
+        if let minutes, minutes > 0 { return minutes * 60 }
+        guard let duration = text(duration) else { return nil }
+
+        if let rawValue = Int(duration), rawValue > 0 {
+            return rawValue
+        }
+
+        let components = duration
+            .split(separator: ":")
+            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+
+        switch components.count {
+        case 3:
+            return components[0] * 3600 + components[1] * 60 + components[2]
+        case 2:
+            return components[0] * 60 + components[1]
+        default:
+            return nil
+        }
+    }
+
+    nonisolated static func runtimeSeconds(fromRuntime value: String?) -> Int? {
+        guard let value = text(value) else { return nil }
+        if let minutes = Int(value), minutes > 0 {
+            return minutes * 60
+        }
+        return runtimeSeconds(from: nil, duration: value)
+    }
+
+    nonisolated static func text(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return nil
+        }
+
+        return value
+    }
+
+    nonisolated static func url(_ value: String?) -> URL? {
+        text(value).flatMap(URL.init)
+    }
+
+    nonisolated static func firstURL(_ values: [String?]?) -> URL? {
+        values?
+            .lazy
+            .compactMap { url($0) }
+            .first
+    }
+
+    nonisolated private static func makeFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = format
+        return formatter
+    }
+}
 
 extension Media.Draft {
     nonisolated init(from stream: Xtream.VodStream, categoryID: Category.ID? = nil) {
@@ -76,9 +93,23 @@ extension Media.Draft {
         self.type = .movie
         self.title = stream.name
         self.categoryID = categoryID
-        self.tmdbID = stream.tmdbId
-        self.coverURL = URL(string: stream.streamIcon)
+        self.tmdbID = XtreamMapper.text(stream.tmdbId)
+        self.coverURL = XtreamMapper.url(stream.streamIcon)
         self.rating = stream.rating
+        self.parentSeriesID = nil
+        self.seasonNumber = nil
+        self.episodeNumber = nil
+        self.containerExtension = XtreamMapper.text(stream.containerExtension)
+        self.synopsis = nil
+        self.releaseDate = nil
+        self.runtimeSeconds = nil
+        self.genre = nil
+        self.cast = nil
+        self.director = nil
+        self.trailer = XtreamMapper.text(stream.trailer)
+        self.addedAt = XtreamMapper.date(from: stream.added)
+        self.backdropURL = nil
+        self.country = nil
     }
     
     nonisolated init(from stream: Xtream.SeriesStream, categoryID: Category.ID? = nil) {
@@ -87,9 +118,50 @@ extension Media.Draft {
         self.type = .series
         self.title = stream.name
         self.categoryID = categoryID
-        self.tmdbID = stream.tmdb
-        self.coverURL = stream.cover.flatMap(URL.init)
+        self.tmdbID = XtreamMapper.text(stream.tmdb)
+        self.coverURL = XtreamMapper.url(stream.cover)
         self.rating = stream.rating
+        self.parentSeriesID = nil
+        self.seasonNumber = nil
+        self.episodeNumber = nil
+        self.containerExtension = nil
+        self.synopsis = XtreamMapper.text(stream.plot)
+        self.releaseDate = stream.releaseDate
+        self.runtimeSeconds = XtreamMapper.runtimeSeconds(fromRuntime: stream.episodeRuntime)
+        self.genre = nil
+        self.cast = XtreamMapper.text(stream.cast)
+        self.director = XtreamMapper.text(stream.director)
+        self.trailer = XtreamMapper.text(stream.youtubeTrailer)
+        self.addedAt = XtreamMapper.date(from: stream.lastModified)
+        self.backdropURL = XtreamMapper.firstURL(stream.backdropPath)
+        self.country = nil
+    }
+
+    nonisolated init?(from episode: Xtream.Episode, series: Media, categoryID: Category.ID? = nil) {
+        guard let sourceID = Int(episode.id) ?? episode.info.id else { return nil }
+
+        self.id = nil
+        self.sourceID = sourceID
+        self.type = .episode
+        self.title = episode.title
+        self.categoryID = categoryID
+        self.tmdbID = XtreamMapper.text(episode.info.tmdbId)
+        self.coverURL = XtreamMapper.url(episode.info.movieImage)
+        self.rating = episode.info.rating
+        self.parentSeriesID = series.id
+        self.seasonNumber = episode.season
+        self.episodeNumber = episode.episodeNum
+        self.containerExtension = XtreamMapper.text(episode.containerExtension)
+        self.synopsis = XtreamMapper.text(episode.info.overview)
+        self.releaseDate = XtreamMapper.date(from: episode.info.releaseDate) ?? XtreamMapper.date(from: episode.info.airDate)
+        self.runtimeSeconds = XtreamMapper.runtimeSeconds(from: episode.info.durationSecs, duration: episode.info.duration)
+        self.genre = nil
+        self.cast = XtreamMapper.text(episode.info.crew)
+        self.director = nil
+        self.trailer = nil
+        self.addedAt = XtreamMapper.date(from: episode.added)
+        self.backdropURL = XtreamMapper.firstURL(episode.info.backdropPath)
+        self.country = nil
     }
 }
 
@@ -99,6 +171,19 @@ extension Category.Draft {
         self.sourceID = category.id
         self.type = .from(type)
         self.title = category.name
+    }
+}
+
+extension SeriesSeason.Draft {
+    nonisolated init(from season: Xtream.Season, seriesID: Media.ID) {
+        self.id = nil
+        self.seriesID = seriesID
+        self.seasonNumber = season.seasonNumber
+        self.title = season.name
+        self.overview = XtreamMapper.text(season.overview)
+        self.episodeCount = season.episodeCount
+        self.coverURL = XtreamMapper.url(season.coverBig) ?? XtreamMapper.url(season.cover)
+        self.releaseDate = XtreamMapper.date(from: season.releaseDate) ?? XtreamMapper.date(from: season.airDate)
     }
 }
 

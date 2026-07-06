@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct EpisodeDetailTile: View {
-    let series: Media
+    let series: Media?
     let episode: Media
 
     @Environment(Player.self) private var player
@@ -24,9 +24,11 @@ struct EpisodeDetailTile: View {
                         .font(.largeTitle.weight(.bold))
                         .fixedSize(horizontal: false, vertical: true)
 
-                    Text(series.title)
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
+                    if let series {
+                        Text(series.title)
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
 
                     HStack(spacing: DetailSpacing.sm) {
                         Button {
@@ -59,7 +61,7 @@ struct EpisodeDetailTile: View {
 
     @ViewBuilder
     private var heroArtwork: some View {
-        AsyncImage(url: episode.coverURL ?? series.coverURL) { phase in
+        AsyncImage(url: episode.coverURL ?? series?.coverURL) { phase in
             switch phase {
             case .success(let image):
                 image
@@ -93,17 +95,36 @@ struct EpisodeDetailTile: View {
     }
 
     private var aboutText: String {
-        var lines = ["Source ID: \(episode.sourceID)"]
+        var lines: [String] = []
+
+        if let synopsis = episode.synopsis?.trimmingCharacters(in: .whitespacesAndNewlines), !synopsis.isEmpty {
+            lines.append(synopsis)
+        } else {
+            lines.append("No episode synopsis is available in the synced library record.")
+        }
+
+        if let seasonNumber = episode.seasonNumber, let episodeNumber = episode.episodeNumber {
+            lines.append("Episode: S\(seasonNumber) E\(episodeNumber)")
+        }
+
+        if let releaseDate = episode.releaseDate {
+            lines.append("Released: \(releaseDate.formatted(date: .abbreviated, time: .omitted))")
+        }
+
+        if let runtimeSeconds = episode.runtimeSeconds, runtimeSeconds > 0 {
+            lines.append("Runtime: \(runtimeSeconds / 60)m")
+        }
+
+        if let rating = episode.rating {
+            lines.append("Rating: \(rating.formatted(.number.precision(.fractionLength(1))))")
+        }
 
         if let tmdbID = episode.tmdbID, !tmdbID.isEmpty {
             lines.append("TMDB: \(tmdbID)")
         }
 
-        if let rating = episode.rating {
-            lines.append("Rating: \(rating.formatted())")
-        }
-
-        return lines.joined(separator: "\n")
+        lines.append("Source ID: \(episode.sourceID)")
+        return lines.joined(separator: "\n\n")
     }
 
     @ViewBuilder

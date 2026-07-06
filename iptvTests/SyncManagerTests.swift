@@ -94,6 +94,114 @@ struct SyncManagerTests {
             #expect(Set(matchingMedia.compactMap(\.categoryID)) == [movieCategory.id, seriesCategory.id])
         }
     }
+
+    @Test func movieDetailEnrichmentPersistsReliableMetadataAndLeavesBlankTextNil() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(database: database)
+            let result = await syncManager.sync(provider: Provider.ID())
+            #expect(result == .success)
+
+            let movieCategory = try await database.read { db in
+                let category = try Category.where { $0.sourceID.eq("100").and($0.type.eq(MediaType.movie)) }.fetchOne(db)
+                return try #require(category)
+            }
+            try await syncManager.updateMovies(in: movieCategory.id)
+
+            let movie = try await database.read { db in
+                let media = try Media.where { $0.sourceID.eq(1).and($0.type.eq(MediaType.movie)) }.fetchOne(db)
+                return try #require(media)
+            }
+            try await syncManager.enrichDetails(for: movie.id)
+
+            let enriched = try await database.read { db in
+                let media = try Media.where { $0.sourceID.eq(1).and($0.type.eq(MediaType.movie)) }.fetchOne(db)
+                return try #require(media)
+            }
+
+            #expect(enriched.title == "Detailed Movie")
+            #expect(enriched.categoryID == movieCategory.id)
+            #expect(enriched.tmdbID == "444")
+            #expect(enriched.coverURL == URL(string: "https://example.com/movie-detail.jpg"))
+            #expect(enriched.rating == 8.7)
+            #expect(enriched.containerExtension == "mkv")
+            #expect(enriched.synopsis == "Detailed plot.")
+            #expect(enriched.releaseDate == date(year: 2024, month: 2, day: 3))
+            #expect(enriched.runtimeSeconds == 5_400)
+            #expect(enriched.cast == "Lead Actor")
+            #expect(enriched.trailer == "movie-trailer")
+            #expect(enriched.addedAt == Date(timeIntervalSince1970: 10))
+            #expect(enriched.backdropURL == URL(string: "https://example.com/movie-backdrop.jpg"))
+            #expect(enriched.genre == nil)
+            #expect(enriched.director == nil)
+            #expect(enriched.country == nil)
+        }
+    }
+
+    @Test func seriesDetailEnrichmentPersistsSeasonsAndPlayableEpisodeRowsLinkedToSeries() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(database: database)
+            let result = await syncManager.sync(provider: Provider.ID())
+            #expect(result == .success)
+
+            let seriesCategory = try await database.read { db in
+                let category = try Category.where { $0.sourceID.eq("100").and($0.type.eq(MediaType.series)) }.fetchOne(db)
+                return try #require(category)
+            }
+            try await syncManager.updateSeries(in: seriesCategory.id)
+
+            let series = try await database.read { db in
+                let media = try Media.where { $0.sourceID.eq(1).and($0.type.eq(MediaType.series)) }.fetchOne(db)
+                return try #require(media)
+            }
+            try await syncManager.enrichDetails(for: series.id)
+
+            let persistedSeries = try await database.read { db in
+                let media = try Media.find(db, key: series.id)
+                return try #require(media)
+            }
+            let seasons = try await database.read { db in
+                try SeriesSeason.where { $0.seriesID.eq(series.id) }.order(by: \.seasonNumber).fetchAll(db)
+            }
+            let episodes = try await database.read { db in
+                try Media.where { $0.parentSeriesID.eq(series.id).and($0.type.eq(MediaType.episode)) }
+                    .order(by: \.episodeNumber)
+                    .fetchAll(db)
+            }
+
+            #expect(persistedSeries.type == .series)
+            #expect(persistedSeries.containerExtension == nil)
+            #expect(persistedSeries.parentSeriesID == nil)
+            #expect(persistedSeries.seasonNumber == nil)
+            #expect(persistedSeries.episodeNumber == nil)
+            #expect(persistedSeries.synopsis == "Series plot.")
+            #expect(persistedSeries.runtimeSeconds == 2_700)
+
+            #expect(seasons.map(\.seasonNumber) == [1, 2])
+            #expect(seasons.map(\.title) == ["Season 1", "Season 2"])
+            #expect(seasons.map(\.episodeCount) == [2, 1])
+            #expect(seasons.first?.overview == "Season one overview.")
+            #expect(seasons.first?.releaseDate == date(year: 2024, month: 1, day: 5))
+
+            #expect(episodes.map(\.sourceID) == [9001, 9002])
+            #expect(episodes.allSatisfy { $0.type == .episode })
+            #expect(episodes.allSatisfy { $0.parentSeriesID == series.id })
+            #expect(episodes.allSatisfy { $0.categoryID == seriesCategory.id })
+            #expect(episodes.map(\.seasonNumber) == [1, 1])
+            #expect(episodes.map(\.episodeNumber) == [1, 2])
+            #expect(episodes.map(\.containerExtension) == ["mp4", nil])
+            #expect(episodes.first?.title == "Pilot")
+            #expect(episodes.first?.synopsis == "Pilot overview.")
+            #expect(episodes.first?.runtimeSeconds == 2_700)
+            #expect(episodes.first?.releaseDate == date(year: 2024, month: 1, day: 6))
+            #expect(episodes.first?.cast == "Episode Crew")
+            #expect(episodes.last?.synopsis == nil)
+            #expect(episodes.last?.coverURL == nil)
+            #expect(episodes.last?.cast == nil)
+            #expect(episodes.last?.releaseDate == nil)
+        }
+    }
     
     private func makeSyncManager(database: any DatabaseWriter) throws -> SyncManager {
         let urlConfiguration = URLSessionConfiguration.ephemeral
@@ -118,11 +226,22 @@ struct SyncManagerTests {
     
     private func resetDatabase(_ database: any DatabaseWriter) throws {
         try database.write { db in
+            try SeriesSeason.delete().execute(db)
             try CategoryPrefixVisibility.delete().execute(db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
             try Provider.delete().execute(db)
         }
+    }
+    
+    private func date(year: Int, month: Int, day: Int) -> Date {
+        var components = DateComponents()
+        components.calendar = Calendar(identifier: .gregorian)
+        components.timeZone = TimeZone(secondsFromGMT: 0)
+        components.year = year
+        components.month = month
+        components.day = day
+        return components.date!
     }
 }
 
@@ -165,6 +284,7 @@ private final class StubXtreamURLProtocol: URLProtocol {
                         "added": "0",
                         "rating": 8.1,
                         "tmdb": "111",
+                        "container_extension": "ts",
                         "is_adult": 0,
                     ],
                 ]
@@ -185,6 +305,125 @@ private final class StubXtreamURLProtocol: URLProtocol {
                     "cover": "https://example.com/series-one.jpg",
                     "rating": 9.0,
                     "tmdb": "333",
+                ],
+            ]
+        case "get_vod_info":
+            payload = [
+                "info": [
+                    "actors": "",
+                    "age": "",
+                    "backdrop_path": ["https://example.com/movie-backdrop.jpg"],
+                    "bitrate": 0,
+                    "cast": "Lead Actor",
+                    "country": " ",
+                    "cover_big": "https://example.com/movie-cover-big.jpg",
+                    "description": "",
+                    "director": " ",
+                    "duration": "01:30:00",
+                    "episode_run_time": 90,
+                    "genre": " ",
+                    "movie_image": "https://example.com/movie-detail.jpg",
+                    "name": "Detailed Movie",
+                    "o_name": "Detailed Movie",
+                    "plot": "Detailed plot.",
+                    "releasedate": "2024-02-03",
+                    "youtube_trailer": "movie-trailer",
+                    "duration_secs": 5_400,
+                    "rating": 8.7,
+                    "runtime": 90,
+                    "tmdb_id": "444",
+                ],
+                "movie_data": [
+                    "added": "10",
+                    "category_id": "100",
+                    "container_extension": "mkv",
+                    "direct_source": "",
+                    "name": "Detailed Movie",
+                    "stream_id": 1,
+                ],
+            ]
+        case "get_series_info":
+            payload = [
+                "seasons": [
+                    [
+                        "name": "Season 1",
+                        "season_number": 1,
+                        "episode_count": 2,
+                        "overview": "Season one overview.",
+                        "air_date": "2024-01-04",
+                        "cover": "https://example.com/season-one.jpg",
+                        "cover_big": "https://example.com/season-one-big.jpg",
+                        "release_date": "2024-01-05",
+                    ],
+                    [
+                        "name": "Season 2",
+                        "season_number": 2,
+                        "episode_count": 1,
+                        "overview": " ",
+                        "cover": "",
+                        "cover_big": "",
+                    ],
+                ],
+                "info": [
+                    "name": "Detailed Series",
+                    "cover": "https://example.com/series-detail.jpg",
+                    "plot": "Series plot.",
+                    "cast": "Series Cast",
+                    "director": "Series Director",
+                    "genre": "Sci-Fi",
+                    "release_date": "2024-01-01",
+                    "last_modified": "1704067200",
+                    "rating": "9.2",
+                    "rating_5_based": "4.6",
+                    "backdrop_path": ["https://example.com/series-backdrop.jpg"],
+                    "category_id": "100",
+                    "tmdb": "555",
+                    "youtube_trailer": "series-trailer",
+                    "episode_run_time": "45",
+                ],
+                "episodes": [
+                    "1": [
+                        [
+                            "id": "9001",
+                            "episode_num": 1,
+                            "title": "Pilot",
+                            "container_extension": "mp4",
+                            "info": [
+                                "air_date": "2024-01-05",
+                                "backdrop_path": ["https://example.com/episode-backdrop.jpg"],
+                                "crew": "Episode Crew",
+                                "rating": 8.8,
+                                "id": 9001,
+                                "movie_image": "https://example.com/pilot.jpg",
+                                "overview": "Pilot overview.",
+                                "releasedate": "2024-01-06",
+                                "tmdb_id": "episode-9001",
+                                "duration_secs": 2_700,
+                                "duration": "00:45:00",
+                                "bitrate": 900,
+                            ],
+                            "added": "20",
+                            "season": 1,
+                            "direct_source": "",
+                        ],
+                        [
+                            "id": "9002",
+                            "episode_num": 2,
+                            "title": "Second Episode",
+                            "container_extension": " ",
+                            "info": [
+                                "crew": " ",
+                                "id": 9002,
+                                "movie_image": " ",
+                                "overview": " ",
+                                "duration": "0",
+                                "bitrate": 0,
+                            ],
+                            "added": "30",
+                            "season": 1,
+                            "direct_source": "",
+                        ],
+                    ],
                 ],
             ]
         default:

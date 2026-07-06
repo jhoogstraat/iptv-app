@@ -61,8 +61,21 @@ struct XtreamMediaPlaybackSourceResolver: MediaPlaybackSourceResolving {
         url.appendPathComponent(contentType.playbackPathComponent)
         url.appendPathComponent(provider.username)
         url.appendPathComponent(provider.password)
-        url.appendPathComponent(String(media.sourceID))
+        url.appendPathComponent(streamPathComponent(for: media))
 
         return url
+    }
+
+    private func streamPathComponent(for media: Media) -> String {
+        guard let containerExtension = media.containerExtension?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !containerExtension.isEmpty
+        else {
+            return String(media.sourceID)
+        }
+
+        let normalizedExtension = containerExtension.hasPrefix(".")
+            ? String(containerExtension.dropFirst())
+            : containerExtension
+        return "\(media.sourceID).\(normalizedExtension)"
     }
 }

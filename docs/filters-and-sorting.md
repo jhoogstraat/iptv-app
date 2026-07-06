@@ -6,9 +6,9 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ## Status
 
-- Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating, genre, language, recency, audio language, and subtitle language remain metadata-backed expansion points.
-- Implementation status (reviewed 2026-07-05): Partial. `BrowseScreen` and `SearchScreen` share `LibraryFilterBar` with category, category-group/prefix, minimum rating, and deterministic title/newest/rating sort controls. `LibraryFilterEngine` enforces hidden groups, category filters, OR-within selected groups, AND-across filter groups, rating exclusion for missing ratings, and sort tie-breakers; tests cover the core filter semantics.
-- Current schema limitation: `Media` has title, rating, category, cover URL, TMDB ID, and timestamps, but no genre, year, catalog language, original added date, audio track, or subtitle track fields. Persisted prefix visibility is provider-keyed `UserDefaults`, while library rows themselves are a single active-provider catalog.
+- Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating is supported; genre, country/language, recency, audio language, and subtitle language remain metadata-backed expansion points that must not appear until populated local fields can support them honestly.
+- Implementation status (reviewed 2026-07-06): `BrowseScreen` and `SearchScreen` share `LibraryFilterBar` with category, category-group/prefix, minimum rating, and deterministic title/newest/rating sort controls. `LibraryQueryNormalizer` enforces identical text semantics for Browse, Search, and `LibraryFilterEngine` matching. `LibraryFilterEngine` enforces hidden groups, category filters, OR-within selected groups, AND-across filter groups, rating exclusion for missing ratings, normalized title matching, and sort tie-breakers; tests cover the core filter semantics.
+- Current schema limitation: `Media` persists detail metadata such as synopsis, release date, runtime, genre, cast, director, trailer, added date, backdrop, country, and episode linkage when Xtream DTOs expose those fields, but filter UI remains limited to fields already populated by the local list/query path. Persisted prefix visibility is provider-keyed `UserDefaults`, while library rows themselves are a single active-provider catalog.
 
 ## User Experience
 
@@ -37,8 +37,8 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 - Current filter state: `searchText`, selected category, selected category group/prefixes, and minimum rating in browse/search; provider-scoped hidden prefix visibility in Settings.
 - Current sort state: `BrowseSort.title`, `.newest`, and `.rating` are applied in memory with deterministic tie-breakers after local fetches.
-- Current usable fields: `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Media.sourceID`, and `Category.title`.
-- Planned fields/indexes: normalized category prefix/group, rating bounds, genre, year, original added date, language, audio language, subtitle language, and provider-scoped visibility preferences.
+- Current usable fields for exposed filters: normalized `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Media.sourceID`, and `Category.title`.
+- Planned fields for future filters: persisted `Media.genre`, `Media.releaseDate`, `Media.addedAt`, `Media.country`, and real audio/subtitle language metadata once population coverage and UI contracts are implemented.
 
 ## Key Files
 
@@ -63,7 +63,7 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 ## Current Gaps / Planned Work
 
 - Audio/subtitle language filters require metadata not currently stored in the library schema.
-- Genre, year, recency, original added date, and catalog language filters require schema or search-index expansion before UI can honestly expose them.
+- Genre, release-period, country/language, and added-date values can now be persisted during detail enrichment, but filter UI is intentionally deferred until those fields are populated broadly enough to avoid misleading empty filters.
 - Prefix visibility is persisted per provider in `UserDefaults`; a future multi-provider library schema should move this into provider-scoped local tables alongside normalized category metadata.
 - Recommendations are still a placeholder surface, so prefix visibility cannot affect recommendation rails until `ForYouScreen` is backed by local recommendation queries.
 

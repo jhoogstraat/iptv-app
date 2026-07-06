@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SQLiteData
 
 struct MediaDetailDestination: View {
     let media: Media
@@ -23,7 +24,7 @@ struct MediaDetailDestination: View {
         case .series:
             SeriesDetailScreen(series: media, categoryTitle: categoryTitle)
         case .episode:
-            EpisodeDetailTile(series: media, episode: media)
+            EpisodeDetailTile(series: nil, episode: media)
         case .live:
             ScopedPlaceholderView(
                 title: "Live TV details unavailable",
@@ -38,14 +39,19 @@ struct MovieDetailScreen: View {
     let categoryTitle: String?
 
     @Environment(Player.self) private var player
+    @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @FetchOne private var persistedMovie: Media?
     @State private var playError: String?
-    @State private var favoriteIsSelected = false
+    @State private var enrichmentError: String?
 
     init(movie: Media, categoryTitle: String? = nil) {
         self.movie = movie
         self.categoryTitle = categoryTitle
+        self._persistedMovie = FetchOne(Media.where { $0.id.eq(movie.id) })
     }
+
+    private var currentMovie: Media { persistedMovie ?? movie }
 
     var body: some View {
         GeometryReader { proxy in
@@ -73,14 +79,19 @@ struct MovieDetailScreen: View {
             .background(Color.black)
             .ignoresSafeArea(edges: .top)
         }
-        .navigationTitle(movie.title)
+        .navigationTitle(currentMovie.title)
         .detailNavigationChrome()
+        .task(id: currentMovie.id) {
+            await enrichCurrentMovie()
+        }
     }
 
     private func hero(availableWidth: CGFloat, height: CGFloat, topInset: CGFloat) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        let movie = currentMovie
+
+        return ZStack(alignment: .bottomLeading) {
             DetailHeroBackdrop(
-                artworkURL: movie.coverURL,
+                artworkURL: movie.backdropURL ?? movie.coverURL,
                 height: height,
                 topInset: topInset,
                 collapseProgress: 0,
@@ -134,11 +145,17 @@ struct MovieDetailScreen: View {
         HStack(spacing: DetailSpacing.xs) {
             DetailMetaPill("Movie", systemImage: "film")
 
-            if let rating = movie.rating {
-                DetailMetaPill(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
+            if let year = releaseYear {
+                DetailMetaPill(year, systemImage: "calendar")
             }
 
-            DetailMetaPill("Local library", systemImage: "externaldrive")
+            if let runtime = formattedRuntime {
+                DetailMetaPill(runtime, systemImage: "clock")
+            }
+
+            if let rating = currentMovie.rating {
+                DetailMetaPill(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
+            }
         }
     }
 
@@ -146,7 +163,7 @@ struct MovieDetailScreen: View {
         HStack(spacing: DetailSpacing.sm) {
             Button {
                 playError = nil
-                player.load(movie, presentation: .fullWindow)
+                player.load(currentMovie, presentation: .fullWindow)
                 playError = player.errorMessage
             } label: {
                 Label("Play", systemImage: "play.fill")
@@ -154,15 +171,13 @@ struct MovieDetailScreen: View {
             }
             .buttonStyle(DetailActionStyle(variant: .primary))
 
-            Button {
-                favoriteIsSelected.toggle()
-            } label: {
-                Label(favoriteIsSelected ? "Favorited" : "Favorite", systemImage: favoriteIsSelected ? "heart.fill" : "heart")
+            Button {} label: {
+                Label("Favorite unavailable", systemImage: "heart")
                     .labelStyle(.iconOnly)
             }
             .buttonStyle(DetailActionStyle(variant: .icon))
-            .accessibilityLabel(favoriteIsSelected ? "Favorited locally" : "Mark favorite")
-            .accessibilityHint("Persistent favorites are not available until the Favorites feature is migrated.")
+            .disabled(true)
+            .accessibilityHint("Persistent favorites are outside the active Library UX workstream.")
 
             Button {} label: {
                 Label("Download unavailable", systemImage: "arrow.down.circle")
@@ -170,7 +185,7 @@ struct MovieDetailScreen: View {
             }
             .buttonStyle(DetailActionStyle(variant: .icon))
             .disabled(true)
-            .accessibilityHint("Downloads are not available until offline state is migrated.")
+            .accessibilityHint("Downloads are outside the active Library UX workstream.")
         }
         .frame(maxWidth: 620)
     }
@@ -185,18 +200,34 @@ struct MovieDetailScreen: View {
     private var availabilitySection: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             DetailSectionHeader(title: "Source and Downloads")
-            Text("Playback resolves from the active Xtream provider using the synced source identifier. Download and favorite persistence will appear here when those feature stores are available.")
+            Text("Playback resolves from the active Xtream provider using the synced source identifier. Favorites and downloads are not persisted in this workstream.")
                 .font(.body)
                 .lineSpacing(5)
                 .foregroundStyle(.secondary)
+
+            if let enrichmentError {
+                Text("Detail metadata could not be refreshed: \(enrichmentError)")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
     private var metadataRows: [DetailMetadataRow] {
-        [
+        let movie = currentMovie
+
+        return [
             DetailMetadataRow(label: "Type", value: "Movie"),
             DetailMetadataRow(label: "Category", value: categoryTitle),
             DetailMetadataRow(label: "Rating", value: movie.rating.map { $0.formatted(.number.precision(.fractionLength(1))) }),
+            DetailMetadataRow(label: "Release", value: movie.releaseDate?.formatted(date: .abbreviated, time: .omitted)),
+            DetailMetadataRow(label: "Runtime", value: formattedRuntime),
+            DetailMetadataRow(label: "Genre", value: movie.genre),
+            DetailMetadataRow(label: "Cast", value: movie.cast),
+            DetailMetadataRow(label: "Director", value: movie.director),
+            DetailMetadataRow(label: "Country", value: movie.country),
+            DetailMetadataRow(label: "Trailer", value: movie.trailer),
+            DetailMetadataRow(label: "Added", value: movie.addedAt?.formatted(date: .abbreviated, time: .shortened)),
             DetailMetadataRow(label: "TMDB", value: movie.tmdbID),
             DetailMetadataRow(label: "Source ID", value: String(movie.sourceID)),
             DetailMetadataRow(label: "Updated", value: movie.updatedAt.formatted(date: .abbreviated, time: .shortened))
@@ -204,7 +235,42 @@ struct MovieDetailScreen: View {
     }
 
     private var synopsisText: String {
-        "No synopsis is available in the synced library record yet."
+        unavailableAwareText(
+            currentMovie.synopsis,
+            fallback: "No synopsis is available in the synced library record."
+        )
+    }
+
+    private var releaseYear: String? {
+        currentMovie.releaseDate.map { String(Calendar.current.component(.year, from: $0)) }
+    }
+
+    private var formattedRuntime: String? {
+        guard let runtimeSeconds = currentMovie.runtimeSeconds, runtimeSeconds > 0 else { return nil }
+        let hours = runtimeSeconds / 3600
+        let minutes = (runtimeSeconds % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m"
+    }
+
+    private func unavailableAwareText(_ value: String?, fallback: String) -> String {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return fallback
+        }
+        return value
+    }
+
+    private func enrichCurrentMovie() async {
+        do {
+            try await session.enrichDetails(for: currentMovie)
+            enrichmentError = nil
+        } catch is CancellationError {
+            return
+        } catch {
+            enrichmentError = error.localizedDescription
+        }
     }
 
     private func section(_ title: String, text: String) -> some View {
@@ -232,8 +298,8 @@ struct MovieDetailScreen: View {
             Spacer()
 
             DetailCollapsedHeaderBar(
-                title: movie.title,
-                artworkURL: movie.coverURL,
+                title: currentMovie.title,
+                artworkURL: currentMovie.coverURL,
                 titleArtworkURL: nil,
                 progress: 1
             )
@@ -254,13 +320,27 @@ struct SeriesDetailScreen: View {
     let series: Media
     let categoryTitle: String?
 
+    @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @FetchOne private var persistedSeries: Media?
+    @FetchAll private var seasons: [SeriesSeason]
+    @FetchAll private var episodes: [Media]
     @State private var selectedTab: DetailTab = .episodes
+    @State private var selectedSeasonNumber: Int?
+    @State private var enrichmentError: String?
 
     init(series: Media, categoryTitle: String? = nil) {
         self.series = series
         self.categoryTitle = categoryTitle
+        self._persistedSeries = FetchOne(Media.where { $0.id.eq(series.id) })
+        self._seasons = FetchAll(SeriesSeason.where { $0.seriesID.eq(series.id) })
+        self._episodes = FetchAll(Media.where {
+            $0.type.eq(MediaType.episode)
+                .and($0.parentSeriesID.eq(series.id))
+        })
     }
+
+    private var currentSeries: Media { persistedSeries ?? series }
 
     var body: some View {
         GeometryReader { proxy in
@@ -298,14 +378,23 @@ struct SeriesDetailScreen: View {
             .background(Color.black)
             .ignoresSafeArea(edges: .top)
         }
-        .navigationTitle(series.title)
+        .navigationTitle(currentSeries.title)
         .detailNavigationChrome()
+        .task(id: currentSeries.id) {
+            await enrichCurrentSeries()
+        }
+        .onAppear(perform: synchronizeSelectedSeason)
+        .onChange(of: seasonNumbers) { _, _ in
+            synchronizeSelectedSeason()
+        }
     }
 
     private func hero(availableWidth: CGFloat, height: CGFloat, topInset: CGFloat) -> some View {
-        ZStack(alignment: .bottomLeading) {
+        let series = currentSeries
+
+        return ZStack(alignment: .bottomLeading) {
             DetailHeroBackdrop(
-                artworkURL: series.coverURL,
+                artworkURL: series.backdropURL ?? series.coverURL,
                 height: height,
                 topInset: topInset,
                 collapseProgress: 0,
@@ -329,13 +418,16 @@ struct SeriesDetailScreen: View {
 
                 HStack(spacing: DetailSpacing.xs) {
                     DetailMetaPill("Series", systemImage: "tv")
+                    if let year = releaseYear {
+                        DetailMetaPill(year, systemImage: "calendar")
+                    }
                     if let rating = series.rating {
                         DetailMetaPill(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
                     }
-                    DetailMetaPill("Episodes pending", systemImage: "rectangle.stack")
+                    DetailMetaPill(episodeCountTitle, systemImage: "rectangle.stack")
                 }
 
-                Text("Episode metadata has not been synced for this series yet. The detail path keeps series collections separate from playable movie streams.")
+                Text(synopsisText)
                     .font(.callout)
                     .lineSpacing(4)
                     .lineLimit(3)
@@ -343,12 +435,14 @@ struct SeriesDetailScreen: View {
                     .frame(maxWidth: 680, alignment: .leading)
 
                 HStack(spacing: DetailSpacing.sm) {
-                    Button {} label: {
-                        Label("Select Episode", systemImage: "list.bullet.rectangle")
+                    Button {
+                        selectedTab = .episodes
+                    } label: {
+                        Label(episodes.isEmpty ? "Episodes unavailable" : "Select Episode", systemImage: "list.bullet.rectangle")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(DetailActionStyle(variant: .primary))
-                    .disabled(true)
+                    .disabled(episodes.isEmpty)
 
                     Button {} label: {
                         Label("Favorite unavailable", systemImage: "heart")
@@ -378,20 +472,59 @@ struct SeriesDetailScreen: View {
             HStack {
                 DetailSectionHeader(title: "Episodes")
                 Spacer()
-                Menu("Season") {
-                    Button("Season data unavailable") {}
-                        .disabled(true)
-                }
-                .buttonStyle(DetailActionStyle(variant: .chip(selected: false)))
-                .disabled(true)
+                seasonMenu
             }
 
-            ContentUnavailableView {
-                Label("Episodes Not Synced", systemImage: "rectangle.stack.badge.person.crop")
-            } description: {
-                Text("This series route is ready for season and episode rows, but the local schema does not yet persist episode lists for a series.")
+            if filteredEpisodes.isEmpty {
+                ContentUnavailableView {
+                    Label("Episodes unavailable", systemImage: "rectangle.stack.badge.person.crop")
+                } description: {
+                    Text(episodesUnavailableDescription)
+                }
+                .frame(maxWidth: .infinity, minHeight: 220)
+            } else {
+                LazyVStack(spacing: DetailSpacing.sm) {
+                    ForEach(filteredEpisodes) { episode in
+                        NavigationLink {
+                            EpisodeDetailTile(series: currentSeries, episode: episode)
+                        } label: {
+                            SeriesEpisodeRow(episode: episode)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 220)
+
+            if let enrichmentError {
+                Text("Episode metadata could not be refreshed: \(enrichmentError)")
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var seasonMenu: some View {
+        if seasonNumbers.isEmpty {
+            Menu("Season") {
+                Button("Season data unavailable") {}
+                    .disabled(true)
+            }
+            .buttonStyle(DetailActionStyle(variant: .chip(selected: false)))
+            .disabled(true)
+        } else {
+            Menu(selectedSeasonTitle) {
+                Button("All Seasons") {
+                    selectedSeasonNumber = nil
+                }
+
+                ForEach(seasonNumbers, id: \.self) { number in
+                    Button(seasonTitle(for: number)) {
+                        selectedSeasonNumber = number
+                    }
+                }
+            }
+            .buttonStyle(DetailActionStyle(variant: .chip(selected: selectedSeasonNumber != nil)))
         }
     }
 
@@ -399,7 +532,7 @@ struct SeriesDetailScreen: View {
         VStack(alignment: .leading, spacing: DetailSpacing.lg) {
             VStack(alignment: .leading, spacing: DetailSpacing.xs) {
                 DetailSectionHeader(title: "Synopsis")
-                Text("No series synopsis is available in the synced library record yet.")
+                Text(synopsisText)
                     .font(.body)
                     .lineSpacing(5)
                     .foregroundStyle(.secondary)
@@ -413,14 +546,119 @@ struct SeriesDetailScreen: View {
     }
 
     private var metadataRows: [DetailMetadataRow] {
-        [
+        let series = currentSeries
+
+        return [
             DetailMetadataRow(label: "Type", value: "Series"),
             DetailMetadataRow(label: "Category", value: categoryTitle),
             DetailMetadataRow(label: "Rating", value: series.rating.map { $0.formatted(.number.precision(.fractionLength(1))) }),
+            DetailMetadataRow(label: "Release", value: series.releaseDate?.formatted(date: .abbreviated, time: .omitted)),
+            DetailMetadataRow(label: "Episode Run", value: formattedRuntime),
+            DetailMetadataRow(label: "Genre", value: series.genre),
+            DetailMetadataRow(label: "Cast", value: series.cast),
+            DetailMetadataRow(label: "Director", value: series.director),
+            DetailMetadataRow(label: "Trailer", value: series.trailer),
+            DetailMetadataRow(label: "Episodes", value: episodes.isEmpty ? nil : String(episodes.count)),
             DetailMetadataRow(label: "TMDB", value: series.tmdbID),
             DetailMetadataRow(label: "Source ID", value: String(series.sourceID)),
             DetailMetadataRow(label: "Updated", value: series.updatedAt.formatted(date: .abbreviated, time: .shortened))
         ]
+    }
+
+    private var sortedEpisodes: [Media] {
+        episodes.sorted { lhs, rhs in
+            switch (lhs.seasonNumber, rhs.seasonNumber) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            default:
+                break
+            }
+
+            switch (lhs.episodeNumber, rhs.episodeNumber) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (.some, nil):
+                return true
+            case (nil, .some):
+                return false
+            default:
+                return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+            }
+        }
+    }
+
+    private var filteredEpisodes: [Media] {
+        guard let selectedSeasonNumber else { return sortedEpisodes }
+        return sortedEpisodes.filter { $0.seasonNumber == selectedSeasonNumber }
+    }
+
+    private var seasonNumbers: [Int] {
+        Array(Set(seasons.map(\.seasonNumber) + episodes.compactMap(\.seasonNumber))).sorted()
+    }
+
+    private var selectedSeasonTitle: String {
+        selectedSeasonNumber.map(seasonTitle(for:)) ?? "All Seasons"
+    }
+
+    private var episodeCountTitle: String {
+        episodes.isEmpty ? "Episodes unavailable" : "\(episodes.count) Episodes"
+    }
+
+    private var episodesUnavailableDescription: String {
+        if let enrichmentError {
+            return "The provider detail request failed before episode rows could be persisted locally: \(enrichmentError)"
+        }
+        return "No playable episode rows are stored locally for this series yet. If the provider exposes series details, this screen refreshes them through sync/detail enrichment and then renders the persisted rows."
+    }
+
+    private var synopsisText: String {
+        unavailableAwareText(
+            currentSeries.synopsis,
+            fallback: "No series synopsis is available in the synced library record."
+        )
+    }
+
+    private var releaseYear: String? {
+        currentSeries.releaseDate.map { String(Calendar.current.component(.year, from: $0)) }
+    }
+
+    private var formattedRuntime: String? {
+        guard let runtimeSeconds = currentSeries.runtimeSeconds, runtimeSeconds > 0 else { return nil }
+        let minutes = runtimeSeconds / 60
+        return "\(minutes)m"
+    }
+
+    private func seasonTitle(for number: Int) -> String {
+        seasons.first { $0.seasonNumber == number }?.title ?? "Season \(number)"
+    }
+
+    private func unavailableAwareText(_ value: String?, fallback: String) -> String {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+            return fallback
+        }
+        return value
+    }
+
+    private func synchronizeSelectedSeason() {
+        if let selectedSeasonNumber, !seasonNumbers.contains(selectedSeasonNumber) {
+            self.selectedSeasonNumber = nil
+        }
+    }
+
+    private func enrichCurrentSeries() async {
+        do {
+            try await session.enrichDetails(for: currentSeries)
+            enrichmentError = nil
+            synchronizeSelectedSeason()
+        } catch is CancellationError {
+            return
+        } catch {
+            enrichmentError = error.localizedDescription
+        }
     }
 
     private func topControls(topInset: CGFloat) -> some View {
@@ -438,14 +676,106 @@ struct SeriesDetailScreen: View {
             Spacer()
 
             DetailCollapsedHeaderBar(
-                title: series.title,
-                artworkURL: series.coverURL,
+                title: currentSeries.title,
+                artworkURL: currentSeries.coverURL,
                 titleArtworkURL: nil,
                 progress: 1
             )
         }
         .padding(.top, topInset + 10)
         .padding(.horizontal, 16)
+    }
+}
+
+private struct SeriesEpisodeRow: View {
+    let episode: Media
+
+    var body: some View {
+        HStack(alignment: .top, spacing: DetailSpacing.md) {
+            AsyncImage(url: episode.coverURL) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .boundedFillArtwork()
+                case .failure, .empty:
+                    placeholderArtwork
+                @unknown default:
+                    placeholderArtwork
+                }
+            }
+            .frame(width: 128, height: 72)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+            VStack(alignment: .leading, spacing: DetailSpacing.xs) {
+                Text(episodeCode)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+
+                Text(episode.title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+
+                Text(episodeSynopsis)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+
+                HStack(spacing: DetailSpacing.sm) {
+                    if let releaseDate = episode.releaseDate {
+                        Label(releaseDate.formatted(date: .abbreviated, time: .omitted), systemImage: "calendar")
+                    }
+                    if let runtime = formattedRuntime {
+                        Label(runtime, systemImage: "clock")
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(DetailSpacing.sm)
+        .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
+        }
+    }
+
+    private var placeholderArtwork: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.18))
+            .overlay {
+                Image(systemName: "play.rectangle")
+                    .foregroundStyle(.secondary)
+            }
+    }
+
+    private var episodeSynopsis: String {
+        guard let synopsis = episode.synopsis?.trimmingCharacters(in: .whitespacesAndNewlines), !synopsis.isEmpty else {
+            return "No episode synopsis is available in the synced library record."
+        }
+        return synopsis
+    }
+
+    private var episodeCode: String {
+        switch (episode.seasonNumber, episode.episodeNumber) {
+        case let (season?, episode?):
+            return "S\(season) E\(episode)"
+        case let (season?, nil):
+            return "Season \(season)"
+        case let (nil, episode?):
+            return "Episode \(episode)"
+        default:
+            return "Episode"
+        }
+    }
+
+    private var formattedRuntime: String? {
+        guard let runtimeSeconds = episode.runtimeSeconds, runtimeSeconds > 0 else { return nil }
+        return "\(runtimeSeconds / 60)m"
     }
 }
 
