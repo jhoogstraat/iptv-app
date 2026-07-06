@@ -14,6 +14,7 @@ struct FavoritesScreen: View {
         case movies
         case series
         case episodes
+        case live
 
         var id: Self { self }
 
@@ -23,19 +24,22 @@ struct FavoritesScreen: View {
             case .movies: "Movies"
             case .series: "Series"
             case .episodes: "Episodes"
+            case .live: "Live"
             }
         }
 
         func includes(_ mediaType: MediaType) -> Bool {
             switch self {
             case .all:
-                mediaType == .movie || mediaType == .series || mediaType == .episode
+                mediaType == .movie || mediaType == .series || mediaType == .episode || mediaType == .live
             case .movies:
                 mediaType == .movie
             case .series:
                 mediaType == .series
             case .episodes:
                 mediaType == .episode
+            case .live:
+                mediaType == .live
             }
         }
     }
@@ -56,6 +60,7 @@ struct FavoritesScreen: View {
     }
 
     @Environment(Session.self) private var session
+    @Environment(Player.self) private var player
     @FetchAll private var favorites: [Favorite]
     @FetchAll private var media: [Media]
     @State private var scope: FavoriteScope = .all
@@ -109,7 +114,7 @@ struct FavoritesScreen: View {
             ContentUnavailableView {
                 Label("No favorites yet", systemImage: "heart")
             } description: {
-                Text("Add movies, series, or episodes from details or the player. Favorites are stored locally for the active provider.")
+                Text("Add movies, series, episodes, or live channels from details, Live, or the player. Favorites are stored locally for the active provider.")
             }
         } else if scopedFavorites.isEmpty {
             ContentUnavailableView {
@@ -134,16 +139,32 @@ struct FavoritesScreen: View {
     @ViewBuilder
     private func favoriteRow(for item: FavoriteItem) -> some View {
         if let media = item.media {
-            NavigationLink {
-                MediaDetailDestination(media: media, categoryTitle: item.categoryTitle)
-            } label: {
-                FavoriteRow(item: item)
-            }
-            .swipeActions {
-                Button(role: .destructive) {
-                    FavoriteStore.remove(item.favorite)
+            if media.type == .live {
+                Button {
+                    player.load(media, presentation: .fullWindow)
                 } label: {
-                    Label("Remove", systemImage: "heart.slash")
+                    FavoriteRow(item: item)
+                }
+                .buttonStyle(.plain)
+                .swipeActions {
+                    Button(role: .destructive) {
+                        FavoriteStore.remove(item.favorite)
+                    } label: {
+                        Label("Remove", systemImage: "heart.slash")
+                    }
+                }
+            } else {
+                NavigationLink {
+                    MediaDetailDestination(media: media, categoryTitle: item.categoryTitle)
+                } label: {
+                    FavoriteRow(item: item)
+                }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        FavoriteStore.remove(item.favorite)
+                    } label: {
+                        Label("Remove", systemImage: "heart.slash")
+                    }
                 }
             }
         } else {

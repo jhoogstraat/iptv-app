@@ -49,7 +49,7 @@ struct XtreamMediaPlaybackSourceResolver: MediaPlaybackSourceResolving {
         case .series:
             throw MediaPlaybackSourceResolutionError.unsupportedCollection(media.type)
         case .live:
-            throw MediaPlaybackSourceResolutionError.unsupportedCollection(media.type)
+            return playbackURL(for: media, provider: provider, contentType: .live)
         }
     }
 

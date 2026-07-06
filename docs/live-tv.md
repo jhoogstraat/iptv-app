@@ -7,8 +7,8 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 ## Status
 
 - Target state: Live is a first-class watch surface backed by local live category/channel data, with channel playback through the shared player and future EPG/catch-up support.
-- Implementation status (reviewed 2026-07-05): Planned-only. `LiveScreen` contains unused state and renders `Text("Not yet implemented")`; `ContentView` bypasses it with an inline “Live TV Is Out of Scope” placeholder. `SyncManager.liveSync` exists but live sync is commented out, `MediaType` has no live case, and no live/EPG schema or channel playback routing exists.
-- Existing planning: `docs/live-epg-catchup-spec.md` contains older roadmap details.
+- Implementation status (reviewed 2026-07-06): Basic channel-only Live is implemented. Initial sync stores live categories alongside movie/series categories, `LiveScreen` reads local live categories/channels from SQLiteData, opening a live category lazily hydrates channel rows, local title search/group/category/sort filters apply to persisted rows, and tapping a channel calls the shared `Player.load` path with an Xtream live URL. EPG, catch-up, zapping, DVR, guide caching, downloads, profiles, and global Live search remain deferred.
+- Existing planning: `docs/live-epg-catchup-spec.md` contains the deferred guide/catch-up roadmap.
 
 ## User Experience
 
@@ -20,10 +20,10 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 ## Data and State
 
-- Target local state: live categories, channels, stream identifiers, logos, group/prefix metadata, EPG programs, catch-up availability, and provider-scoped refresh timestamps.
-- Current `MediaType` includes `episode` but no dedicated live media case in the visible enum.
-- Current schema does not include EPG or live-channel-specific tables.
-- Player should consume resolved live stream URLs without special UI forks unless live-specific metadata is needed.
+- Target local state: live categories, channel rows in `media` with `MediaType.live`, stream identifiers, titles, logos, category/group metadata, available stream type/added-date metadata, and future provider-scoped EPG/catch-up refresh state.
+- Current `MediaType` includes `.live`; live channels reuse the existing `Media` table and `Category` table rather than a separate live-channel table.
+- Current schema does not include EPG program, catch-up window, guide cache, DVR, or zapping tables.
+- Player resolves `.live` rows through `XtreamMediaPlaybackSourceResolver` to the provider `/live/{username}/{password}/{sourceID}` path. Live mode hides seeking/timeline controls and shows copy that EPG, catch-up, zapping, DVR, and guide rows are unavailable.
 
 ## Key Files
 
@@ -45,11 +45,10 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 ## Current Gaps / Planned Work
 
-- `LiveScreen` renders `Text("Not yet implemented")`, and the active tab currently bypasses it with an inline out-of-scope placeholder.
-- Live sync is not active.
-- No live-specific local schema exists.
-- No channel playback URL resolution or live media routing is connected.
-- EPG and catch-up are planned but absent.
+- EPG/current-next program data is not implemented.
+- Catch-up playback and catch-up URL resolution are not implemented.
+- Channel zapping, DVR/recording, guide caching, downloads/offline, profiles, and global Live search are deferred.
+- Live channel rows are hydrated lazily by selected category; initial sync intentionally does not prefetch every channel.
 
 ## Notes for Agents
 

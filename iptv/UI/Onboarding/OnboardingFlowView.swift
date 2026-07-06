@@ -220,6 +220,7 @@ struct OnboardingFlowView: View {
             VStack(spacing: 12) {
                 syncRow(title: "Movies", status: providerManager.session?.movieSyncStatus ?? .idle)
                 syncRow(title: "Series", status: providerManager.session?.seriesSyncStatus ?? .idle)
+                syncRow(title: "Live", status: providerManager.session?.liveSyncStatus ?? .idle)
             }
         }
         .padding(28)
@@ -266,6 +267,8 @@ struct OnboardingFlowView: View {
                 "Syncing movie categories…"
             case .syncingSeries:
                 "Syncing series categories…"
+            case .syncingLive:
+                "Syncing live categories…"
             case .succeeded:
                 "Catalog synced."
             case .failed:

@@ -137,6 +137,31 @@ extension Media.Draft {
         self.country = nil
     }
 
+    nonisolated init(from stream: Xtream.LiveStream, categoryID: Category.ID? = nil) {
+        self.id = nil
+        self.sourceID = stream.id
+        self.type = .live
+        self.title = stream.name
+        self.categoryID = categoryID
+        self.tmdbID = nil
+        self.coverURL = XtreamMapper.url(stream.streamIcon)
+        self.rating = nil
+        self.parentSeriesID = nil
+        self.seasonNumber = nil
+        self.episodeNumber = nil
+        self.containerExtension = nil
+        self.synopsis = nil
+        self.releaseDate = nil
+        self.runtimeSeconds = nil
+        self.genre = XtreamMapper.text(stream.streamType)
+        self.cast = nil
+        self.director = nil
+        self.trailer = nil
+        self.addedAt = XtreamMapper.date(from: stream.added)
+        self.backdropURL = nil
+        self.country = nil
+    }
+
     nonisolated init?(from episode: Xtream.Episode, series: Media, categoryID: Category.ID? = nil) {
         guard let sourceID = Int(episode.id) ?? episode.info.id else { return nil }
 

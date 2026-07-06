@@ -61,6 +61,20 @@ struct MediaPlaybackSourceResolverTests {
         #expect(url.absoluteString == "https://stream.example.com/series/episode-user/episode-pass/9001.mp4")
     }
 
+    @Test func liveURLUsesXtreamLivePathWithoutContainerExtension() throws {
+        let resolver = XtreamMediaPlaybackSourceResolver()
+        let provider = makeProvider(
+            endpoint: try #require(URL(string: "https://stream.example.com/player_api.php")),
+            username: "live-user",
+            password: "live-pass"
+        )
+        let media = makeMedia(sourceID: 7001, type: .live)
+
+        let url = try resolver.playbackURL(for: media, provider: provider)
+
+        #expect(url.absoluteString == "https://stream.example.com/live/live-user/live-pass/7001")
+    }
+
     @Test func seriesCollectionRowsAreRejectedAsUnsupportedCollections() throws {
         let resolver = XtreamMediaPlaybackSourceResolver()
         let provider = makeProvider(endpoint: try #require(URL(string: "https://stream.example.com")))

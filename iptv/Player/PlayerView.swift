@@ -124,6 +124,10 @@ struct PlayerView: View {
         player.currentItem?.title ?? "No item loaded"
     }
 
+    private var isLiveStream: Bool {
+        player.currentItem?.type == .live
+    }
+
     private var controlsFadeAnimation: Animation {
         .easeInOut(duration: 0.28)
     }
@@ -288,17 +292,19 @@ struct PlayerView: View {
 
     private var transportControls: some View {
         HStack(spacing: 24) {
-            Button {
-                let newTime = max((scrubTime ?? player.currentTime) - 10, 0)
-                scrubTime = newTime
-                player.seek(to: newTime)
-            } label: {
-                Image(systemName: "10.arrow.trianglehead.counterclockwise")
+            if !isLiveStream {
+                Button {
+                    let newTime = max((scrubTime ?? player.currentTime) - 10, 0)
+                    scrubTime = newTime
+                    player.seek(to: newTime)
+                } label: {
+                    Image(systemName: "10.arrow.trianglehead.counterclockwise")
+                }
+                .accessibilityIdentifier("player.seekBack")
+                #if os(macOS)
+                .keyboardShortcut(.leftArrow, modifiers: [.command])
+                #endif
             }
-            .accessibilityIdentifier("player.seekBack")
-            #if os(macOS)
-            .keyboardShortcut(.leftArrow, modifiers: [.command])
-            #endif
 
             Button {
                 player.togglePlayback()
@@ -310,20 +316,22 @@ struct PlayerView: View {
             .keyboardShortcut(.space, modifiers: [])
             #endif
 
-            Button {
-                let current = scrubTime ?? player.currentTime
-                let fallbackUpper = current + 10
-                let limit = player.duration ?? fallbackUpper
-                let newTime = min(current + 10, limit)
-                scrubTime = newTime
-                player.seek(to: newTime)
-            } label: {
-                Image(systemName: "10.arrow.trianglehead.clockwise")
+            if !isLiveStream {
+                Button {
+                    let current = scrubTime ?? player.currentTime
+                    let fallbackUpper = current + 10
+                    let limit = player.duration ?? fallbackUpper
+                    let newTime = min(current + 10, limit)
+                    scrubTime = newTime
+                    player.seek(to: newTime)
+                } label: {
+                    Image(systemName: "10.arrow.trianglehead.clockwise")
+                }
+                .accessibilityIdentifier("player.seekForward")
+                #if os(macOS)
+                .keyboardShortcut(.rightArrow, modifiers: [.command])
+                #endif
             }
-            .accessibilityIdentifier("player.seekForward")
-            #if os(macOS)
-            .keyboardShortcut(.rightArrow, modifiers: [.command])
-            #endif
         }
         .font(.title2)
         #if os(macOS)
@@ -333,39 +341,53 @@ struct PlayerView: View {
 
     private var timelineControls: some View {
         VStack(spacing: 8) {
-            #if os(iOS)
-            iOSTimelineScrubber
-            #elseif os(tvOS)
-            ProgressView(value: player.progressFraction)
-                .progressViewStyle(.linear)
-                .accessibilityIdentifier("player.timeline")
-            #else
-            Slider(
-                value: sliderValue,
-                in: sliderRange,
-                onEditingChanged: { editing in
-                    if editing {
-                        hideControlsTask?.cancel()
-                    } else {
-                        let value = scrubTime ?? player.currentTime
-                        player.seek(to: value)
-                        scrubTime = nil
-                        scheduleAutoHideIfNeeded()
-                    }
+            if isLiveStream {
+                HStack(spacing: 10) {
+                    Label("Live", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.red)
+                    Spacer()
+                    Text("Timeline, seeking, catch-up, and DVR are unavailable for live channels.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.trailing)
                 }
-            )
-            .accessibilityIdentifier("player.timeline")
-            #endif
+                .accessibilityIdentifier("player.liveTimelineUnavailable")
+            } else {
+                #if os(iOS)
+                iOSTimelineScrubber
+                #elseif os(tvOS)
+                ProgressView(value: player.progressFraction)
+                    .progressViewStyle(.linear)
+                    .accessibilityIdentifier("player.timeline")
+                #else
+                Slider(
+                    value: sliderValue,
+                    in: sliderRange,
+                    onEditingChanged: { editing in
+                        if editing {
+                            hideControlsTask?.cancel()
+                        } else {
+                            let value = scrubTime ?? player.currentTime
+                            player.seek(to: value)
+                            scrubTime = nil
+                            scheduleAutoHideIfNeeded()
+                        }
+                    }
+                )
+                .accessibilityIdentifier("player.timeline")
+                #endif
 
-            HStack {
-                Text(player.formattedCurrentTime)
-                Spacer()
-                Text(player.formattedDuration)
-                Spacer()
-                Text(player.formattedRemainingTime)
+                HStack {
+                    Text(player.formattedCurrentTime)
+                    Spacer()
+                    Text(player.formattedDuration)
+                    Spacer()
+                    Text(player.formattedRemainingTime)
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
-            .font(.footnote)
-            .foregroundStyle(.secondary)
         }
     }
 
@@ -430,6 +452,12 @@ struct PlayerView: View {
 
             if let controlMessage = player.controlMessage {
                 Text(controlMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.yellow)
+            }
+
+            if isLiveStream {
+                Text("Live channel mode: EPG, catch-up, zapping, DVR, and seeking are unavailable in this release.")
                     .font(.subheadline)
                     .foregroundStyle(.yellow)
             }
@@ -813,9 +841,15 @@ struct PlayerView: View {
             NavigationStack {
                 List {
                     Section("Playback") {
-                        speedPicker
-                        aspectRatioPicker
-                        audioDelayStepper
+                        if isLiveStream {
+                            Text("Playback speed, seeking, catch-up, and DVR controls are unavailable for live channels.")
+                                .foregroundStyle(.secondary)
+                            aspectRatioPicker
+                        } else {
+                            speedPicker
+                            aspectRatioPicker
+                            audioDelayStepper
+                        }
                     }
 
                     Section("Output") {
@@ -854,9 +888,14 @@ struct PlayerView: View {
             }
         case .more:
             List {
-                speedPicker
-                aspectRatioPicker
-                audioDelayStepper
+                if isLiveStream {
+                    Text("Playback speed, seeking, catch-up, and DVR controls are unavailable for live channels.")
+                    aspectRatioPicker
+                } else {
+                    speedPicker
+                    aspectRatioPicker
+                    audioDelayStepper
+                }
                 volumeSlider
                 brightnessSlider
                 outputRouteRow
@@ -1243,8 +1282,12 @@ struct PlayerView: View {
                 }
             }
 
-            Menu("Speed") {
-                speedMenuContent
+            if isLiveStream {
+                Text("Speed, seeking, catch-up, and DVR unavailable for live channels")
+            } else {
+                Menu("Speed") {
+                    speedMenuContent
+                }
             }
 
             Menu("Aspect") {
