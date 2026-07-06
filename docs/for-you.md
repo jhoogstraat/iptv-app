@@ -6,9 +6,9 @@ For You is the landing and discovery experience. It should make the app feel lik
 
 ## Status
 
-- Target state: For You renders a personalized local discovery page using provider-scoped catalog data and watch activity.
-- Implementation status (reviewed 2026-07-06): Partial shell only. `ForYouScreen` is a placeholder and `ContentView` inlines the same placeholder for the Home tab. Reusable For You components exist, `ContinueWatchingCardView` can display remaining time when handed watch activity, and provider-scoped `WatchActivity` rows are now queryable for the next Continue Watching rail; no recommendation query backs the surface yet.
-- Current navigation: `Tabs.home` is the first tab, but `ContentView` currently does not present `ForYouScreen`.
+- Target state: For You renders a deterministic local discovery page using provider-scoped catalog data, favorites, and watch activity.
+- Implementation status (reviewed 2026-07-06): `ForYouScreen` is live in the Home tab. It renders local rails for Continue Watching, Favorites, Top Rated Movies, Top Rated Series, and Recently Updated from SQLiteData rows only. Continue Watching reads unfinished resume-eligible `watch_activity`; Favorites reads provider-scoped `favorites`; catalog rails use local `Media` ratings/update timestamps and respect category-prefix visibility. No remote recommendation call or recommendation index exists.
+- Current navigation: `Tabs.home` presents `ForYouScreen`, and rail items route through `MediaDetailDestination`.
 
 ## User Experience
 
@@ -21,10 +21,10 @@ For You is the landing and discovery experience. It should make the app feel lik
 
 ## Data and State
 
-- Target inputs: local Movies and Series catalog, provider-scoped watch progress, ratings, recency, categories/groups, favorites, and downloads where relevant.
-- Target outputs: hero item, continue watching rail, recommendation rails, badges, and routing metadata.
+- Current inputs: local Movies, Series, and Episode catalog rows; provider-scoped watch progress; provider-scoped favorites; ratings; update dates; categories/groups; and category-prefix visibility.
+- Current outputs: hero item, Continue Watching rail, Favorites rail, Top Rated Movies/Series rails, Recently Updated rail, explicit sparse-data states, and routing metadata.
 - `WatchActivity` persists provider-scoped movie/episode progress in SQLite with source ID, media type, title/artwork/category snapshots, current time, duration, completed flag, last watched, and updated timestamps.
-- Existing UI components include hero, rail, and continue-watching card views, but they are not connected to a recommendation or continue-watching data source.
+- `Favorite` persists provider-scoped media keys and display snapshots; For You joins favorites and watch activity back to live local `Media` rows before routing.
 
 ## Key Files
 
@@ -48,14 +48,13 @@ For You is the landing and discovery experience. It should make the app feel lik
 
 ## Current Gaps / Planned Work
 
-- Active screen is a placeholder.
-- `ContentView` does not currently use `ForYouScreen` for the home tab.
-- Continue Watching still needs a rail/query layer that reads unfinished, meaningful `WatchActivity` rows for the active provider.
-- Recommendation model/provider files referenced by older docs are not visible in the current file tree.
-- Prefix visibility is available for browse/search and must be applied to recommendation queries once For You is backed by local data.
+- Rails intentionally stay deterministic and local; remote recommendation calls, recommendation indexes, profiles, downloads, and Live TV are deferred.
+- The Favorites rail only routes rows that can be joined to current local `Media`; unavailable favorite snapshots remain visible in the Favorites tab.
+- Continue Watching currently routes to the same detail destination as catalog rows, where resume/play actions are available.
+- Sparse libraries can produce only a subset of rails; empty states explain whether the blocker is missing local catalog data, hidden category prefixes, or lack of user state.
 
 ## Notes for Agents
 
-- Before implementing, reconcile this target doc with `docs/for-you-legacy.md` and remove stale references to files that no longer exist or are not restored.
 - Keep recommendations local and provider-scoped.
-- If watch progress or favorites are added for For You, update `favorites.md`, `media-details.md`, `video-player.md`, and `library-sync-local-data.md`.
+- Preserve category-prefix visibility for any catalog-derived rail.
+- If profiles or downloads are added later, migrate favorite/watch keys deliberately instead of widening this screen ad hoc.

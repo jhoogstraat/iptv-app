@@ -7,8 +7,8 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, one-time VLC-to-AV fallback, and local watch-activity persistence exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie and persisted episode rows through `MediaPlaybackSourceResolver`, including container extensions when available, and movie/episode detail play actions can start real playback with eligible resume from the local database.
-- Current blocker: persisted favorites, offline playback, profile-scoped preferences, fully wired episode quick switching, and complete quality/chapter UI exposure remain incomplete.
+- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, one-time VLC-to-AV fallback, local watch-activity persistence, and provider-scoped favorite toggling exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie and persisted episode rows through `MediaPlaybackSourceResolver`, including container extensions when available, and movie/episode detail play actions can start real playback with eligible resume from the local database.
+- Current blocker: offline playback, profile-scoped preferences, fully wired episode quick switching, and complete quality/chapter UI exposure remain incomplete.
 
 ## User Experience
 
@@ -55,7 +55,7 @@ The video player provides stable playback controls and renderer switching across
 
 ## Current Gaps / Planned Work
 
-- Favorite toggle in `PlayerView` is an explicit unavailable control, not a persisted feature.
+- Favorite toggle in `PlayerView` reads and writes the provider-scoped local `FavoriteStore` for the current media item.
 - Some advanced preferences are learned or stored device-globally in `UserDefaults` rather than exposed through profile-scoped Settings persistence.
 - Episode quick switching is not active; persisted episode rows launch through the shared player path from series detail.
 - Offline playback integration is planned but not implemented.

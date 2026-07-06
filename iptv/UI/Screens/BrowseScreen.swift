@@ -187,6 +187,9 @@ struct CoverGridSection: View {
     let hydrationState: SyncManager.CategoryHydrationState
     let visibleHydrationStates: [SyncManager.CategoryHydrationState]
     let retryHydration: () -> Void
+    @Environment(Session.self) private var session
+    @FetchAll private var favorites: [Favorite]
+    @FetchAll private var watchActivities: [WatchActivity]
     @FetchAll private var media: [Media]
 
     init(
@@ -221,6 +224,22 @@ struct CoverGridSection: View {
             state: filterState,
             hiddenGroupKeys: hiddenGroupKeys,
             query: filter
+        )
+    }
+
+    private var favoriteContentKeys: Set<String> {
+        Set(
+            favorites
+                .filter { $0.providerID == session.providerID }
+                .map { FavoriteStore.contentKey(mediaType: $0.mediaType, sourceID: $0.sourceID) }
+        )
+    }
+
+    private var resumableContentKeys: Set<String> {
+        Set(
+            watchActivities
+                .filter { $0.providerID == session.providerID && $0.isResumeEligible }
+                .map { FavoriteStore.contentKey(mediaType: $0.mediaType, sourceID: $0.sourceID) }
         )
     }
 
@@ -271,7 +290,7 @@ struct CoverGridSection: View {
         } else {
             VStack(alignment: .leading, spacing: 12) {
                 coverageStatus
-                CoverGrid(media: filteredMedia, categories: categories)
+                CoverGrid(media: filteredMedia, categories: categories, favoriteContentKeys: favoriteContentKeys, resumableContentKeys: resumableContentKeys)
                     .id(filterState)
                     .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
@@ -357,6 +376,8 @@ private struct CoverGrid: View {
     
     let media: [Media]
     let categories: [Category]
+    let favoriteContentKeys: Set<String>
+    let resumableContentKeys: Set<String>
     var body: some View {
             ScrollView {
                 LazyVGrid(columns: gridColumns, alignment: .leading, spacing: 18) {
@@ -369,7 +390,7 @@ private struct CoverGrid: View {
                             NavigationLink {
                                 MediaDetailDestination(media: media, categoryTitle: categoryTitle(for: media))
                             } label: {
-                                BrowsePosterTile(media: media)
+                                BrowsePosterTile(media: media, isFavorite: isFavorite(media), isResumable: isResumable(media))
                             }
                             .buttonStyle(.plain)
                         }
@@ -397,10 +418,20 @@ private struct CoverGrid: View {
         guard let categoryID = media.categoryID else { return nil }
         return categories.first { $0.id == categoryID }?.title
     }
+
+    private func isFavorite(_ media: Media) -> Bool {
+        favoriteContentKeys.contains(FavoriteStore.contentKey(mediaType: media.type, sourceID: media.sourceID))
+    }
+
+    private func isResumable(_ media: Media) -> Bool {
+        resumableContentKeys.contains(FavoriteStore.contentKey(mediaType: media.type, sourceID: media.sourceID))
+    }
     
     
     private struct BrowsePosterTile: View {
         let media: Media
+        let isFavorite: Bool
+        let isResumable: Bool
         
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
@@ -456,6 +487,24 @@ private struct CoverGrid: View {
                     .padding(4)
                     .background(.thinMaterial)
                     .clipShape(.rect(cornerRadius: 8))
+                }
+
+                if isFavorite {
+                    Image(systemName: "heart.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.red)
+                        .padding(6)
+                        .background(.thinMaterial)
+                        .clipShape(.rect(cornerRadius: 8))
+                }
+
+                if isResumable {
+                    Image(systemName: "play.circle.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.blue)
+                        .padding(6)
+                        .background(.thinMaterial)
+                        .clipShape(.rect(cornerRadius: 8))
                 }
                Spacer()
             }

@@ -15,12 +15,17 @@ struct EpisodeDetailTile: View {
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
     @FetchAll private var watchActivities: [WatchActivity]
+    @FetchAll private var favorites: [Favorite]
     @State private var playError: String?
 
     init(series: Media?, episode: Media) {
         self.series = series
         self.episode = episode
         self._watchActivities = FetchAll(WatchActivity.where {
+            $0.mediaType.eq(episode.type)
+                .and($0.sourceID.eq(episode.sourceID))
+        })
+        self._favorites = FetchAll(Favorite.where {
             $0.mediaType.eq(episode.type)
                 .and($0.sourceID.eq(episode.sourceID))
         })
@@ -56,6 +61,15 @@ struct EpisodeDetailTile: View {
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(DetailActionStyle(variant: .primary))
+
+                        Button {
+                            FavoriteStore.toggle(episode, providerID: session.providerID, categoryTitle: series?.title)
+                        } label: {
+                            Label(currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites", systemImage: currentFavorite == nil ? "heart" : "heart.fill")
+                                .labelStyle(.iconOnly)
+                        }
+                        .buttonStyle(DetailActionStyle(variant: .icon))
+                        .accessibilityHint("Updates the persisted favorite state for this provider.")
 
                         DownloadStatusBadge()
                     }
@@ -112,6 +126,14 @@ struct EpisodeDetailTile: View {
 
     private var currentWatchActivity: WatchActivity? {
         watchActivities.first {
+            $0.providerID == session.providerID
+                && $0.mediaType == episode.type
+                && $0.sourceID == episode.sourceID
+        }
+    }
+
+    private var currentFavorite: Favorite? {
+        favorites.first {
             $0.providerID == session.providerID
                 && $0.mediaType == episode.type
                 && $0.sourceID == episode.sourceID

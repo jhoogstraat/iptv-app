@@ -21,10 +21,14 @@ struct ContentView: View {
     var body: some View {
             TabView(selection: $selectedTab) {
                 Tab(Tabs.home.name, systemImage: Tabs.home.symbol, value: .home) {
-                    ScopedPlaceholderView(
-                        title: "For You In Progress",
-                        message: "The personalized landing screen is being migrated to SQLiteData."
-                    )
+                    ForYouScreen()
+                        .requireSessionOrElse {
+                            ContentUnavailableView {
+                                Label("Quite empty in here", systemImage: "tray")
+                            } description: {
+                                Text("Add a provider to start syncing your library and build a local For You page.")
+                            }
+                        }
                 }
                 .customizationID(Tabs.home.customizationID)
 #if !os(macOS) && !os(tvOS)
@@ -79,10 +83,14 @@ struct ContentView: View {
                 
                 TabSection("Library") {
                     Tab(Tabs.favorites.name, systemImage: Tabs.favorites.symbol, value: Tabs.favorites) {
-                        ScopedPlaceholderView(
-                            title: "Favorites In Progress",
-                            message: "Favorites are being migrated to SQLiteData."
-                        )
+                        FavoritesScreen()
+                            .requireSessionOrElse {
+                                ContentUnavailableView {
+                                    Label("No provider configured", systemImage: "heart")
+                                } description: {
+                                    Text("Add a provider to save and browse local favorites.")
+                                }
+                            }
                     }
                     .customizationID(Tabs.favorites.customizationID)
                     

@@ -130,7 +130,7 @@ final class Player {
     private var preferredSubtitleLanguageCode: String?
     private var subtitleEnabledByDefault = false
     private var didApplyTrackPreferencesForCurrentItem = false
-    private var currentProviderID: Provider.ID?
+    private(set) var currentProviderID: Provider.ID?
     private var pendingResumeTime: Double?
     private var lastEpisodeSwitchAttemptID: Int?
 
@@ -285,6 +285,12 @@ final class Player {
     }
 
     func reportUnsupportedControl(_ message: String) {
+        controlMessage = message
+        canRetryEpisodeSwitch = false
+        lastEpisodeSwitchAttemptID = nil
+    }
+
+    func reportControlMessage(_ message: String) {
         controlMessage = message
         canRetryEpisodeSwitch = false
         lastEpisodeSwitchAttemptID = nil

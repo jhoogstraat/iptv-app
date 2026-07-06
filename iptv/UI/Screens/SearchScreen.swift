@@ -41,6 +41,8 @@ struct SearchScreen: View {
     @FetchOne(Provider.where(\.isActive)) private var provider: Provider?
     @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var categories: [Category]
     @FetchAll(Media.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var media: [Media]
+    @FetchAll private var favorites: [Favorite]
+    @FetchAll private var watchActivities: [WatchActivity]
 
     @State private var searchText = ""
     @State private var selectedCategoryID: Category.ID?
@@ -194,7 +196,7 @@ struct SearchScreen: View {
                 NavigationLink {
                     MediaDetailDestination(media: media, categoryTitle: category(for: media)?.title)
                 } label: {
-                    SearchResultRow(media: media, category: category(for: media))
+                    SearchResultRow(media: media, category: category(for: media), isFavorite: isFavorite(media), watchActivity: watchActivity(for: media))
                 }
             }
             .listStyle(.plain)
@@ -204,6 +206,23 @@ struct SearchScreen: View {
     private func category(for media: Media) -> Category? {
         guard let categoryID = media.categoryID else { return nil }
         return categories.first { $0.id == categoryID }
+    }
+
+    private func isFavorite(_ media: Media) -> Bool {
+        favorites.contains {
+            $0.providerID == session.providerID
+                && $0.mediaType == media.type
+                && $0.sourceID == media.sourceID
+        }
+    }
+
+    private func watchActivity(for media: Media) -> WatchActivity? {
+        watchActivities.first {
+            $0.providerID == session.providerID
+                && $0.mediaType == media.type
+                && $0.sourceID == media.sourceID
+                && $0.isResumeEligible
+        }
     }
 
     private func clearFilters() {
@@ -243,7 +262,8 @@ struct SearchScreen: View {
 private struct SearchResultRow: View {
     let media: Media
     let category: Category?
-
+    let isFavorite: Bool
+    let watchActivity: WatchActivity?
     var body: some View {
         HStack(spacing: 12) {
             AsyncImage(url: media.coverURL) { phase in
@@ -284,10 +304,33 @@ private struct SearchResultRow: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                 }
+
+                HStack(spacing: 8) {
+                    if isFavorite {
+                        Label("Favorite", systemImage: "heart.fill")
+                            .foregroundStyle(.red)
+                    }
+
+                    if let watchActivity {
+                        Label("\(formatDuration(watchActivity.currentTime)) watched", systemImage: "play.circle.fill")
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .font(.caption.weight(.semibold))
             }
         }
         .padding(.vertical, 4)
         .accessibilityElement(children: .combine)
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let totalSeconds = max(0, Int(seconds.rounded()))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m"
     }
 }
 

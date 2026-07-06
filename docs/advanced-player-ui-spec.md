@@ -4,7 +4,7 @@
 - Version: v1
 - Date: 2026-02-24
 - Priority: P0 (integral for product success)
-- Implementation status (reviewed 2026-07-06): Partial. `PlayerAdvancedModels`, the expanded `PlaybackBackend` contract, VLC/AV backend capability plumbing, sleep timer, quality-switch fallback, platform-specific `PlayerView` shells, and explicit unavailable-state copy for unsupported/future controls exist. Quality/chapter controls are modeled but not fully wired into every active menu/sheet, episode quick switching is deferred, favorites are unavailable rather than fake-local, preferences use global `UserDefaults` rather than profiles, and language preference auto-apply does not yet match tracks by language code.
+- Implementation status (reviewed 2026-07-06): Partial. `PlayerAdvancedModels`, the expanded `PlaybackBackend` contract, VLC/AV backend capability plumbing, sleep timer, quality-switch fallback, platform-specific `PlayerView` shells, persisted favorite toggling, and explicit unavailable-state copy for unsupported/future controls exist. Quality/chapter controls are modeled but not fully wired into every active menu/sheet, episode quick switching is deferred, preferences use global `UserDefaults` rather than profiles, and language preference auto-apply does not yet match tracks by language code.
 
 ## Objective
 Ship a modern, reliable player experience across tvOS, iOS/iPadOS, and macOS with platform-specific UIs and shared playback behavior.
