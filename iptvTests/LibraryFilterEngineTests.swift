@@ -1,9 +1,10 @@
 import Foundation
+import SQLiteData
 import Testing
 
 @testable import iptv
 
-@Suite("Library filter engine")
+@Suite("Library filter engine", .serialized)
 struct LibraryFilterEngineTests {
     @Test func groupSelectionUsesORWithinGroupsAndANDAcrossOtherFilters() {
         let categories = [
@@ -94,6 +95,84 @@ struct LibraryFilterEngineTests {
 
         #expect(LibraryFilterEngine.filteredMedia(media, categories: [], state: state).map(\.sourceID) == [100, 200, 300, 400])
     }
+
+    @MainActor
+    @Test func prefixVisibilityPersistsInDatabasePerProvider() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let firstProviderID = try insertProvider(name: "First", database: database)
+            let secondProviderID = try insertProvider(name: "Second", database: database)
+            let suiteName = "prefix-db-\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+
+            CategoryPrefixVisibilityStore.setHiddenGroupKeys(["NL"], for: firstProviderID, database: database, defaults: defaults)
+            CategoryPrefixVisibilityStore.setHiddenGroupKeys(["EN"], for: secondProviderID, database: database, defaults: defaults)
+
+            #expect(CategoryPrefixVisibilityStore.hiddenGroupKeys(for: firstProviderID, database: database, defaults: defaults) == ["NL"])
+            #expect(CategoryPrefixVisibilityStore.hiddenGroupKeys(for: secondProviderID, database: database, defaults: defaults) == ["EN"])
+        }
+    }
+
+    @MainActor
+    @Test func prefixVisibilityMigratesLegacyProviderDefaults() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Legacy", database: database)
+            let suiteName = "prefix-legacy-\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            defaults.set(["NL", "EN"], forKey: "library.categoryPrefixVisibility.provider.\(providerID).hiddenGroups")
+
+            let hiddenGroups = CategoryPrefixVisibilityStore.hiddenGroupKeys(for: providerID, database: database, defaults: defaults)
+            let databaseCount = try database.read {
+                try CategoryPrefixVisibility.where { $0.providerID.eq(providerID) }.fetchCount($0)
+            }
+
+            #expect(hiddenGroups == ["EN", "NL"])
+            #expect(databaseCount == 2)
+            #expect(defaults.stringArray(forKey: "library.categoryPrefixVisibility.provider.\(providerID).hiddenGroups") == nil)
+        }
+    }
+
+    @MainActor
+    private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
+        let database = try appDatabase()
+        return try operation(database)
+    }
+
+    private func resetDatabase(_ database: any DatabaseWriter) throws {
+        try database.write { db in
+            try CategoryPrefixVisibility.delete().execute(db)
+            try Provider.delete().execute(db)
+        }
+    }
+
+    @discardableResult
+    private func insertProvider(name: String, database: any DatabaseWriter) throws -> Provider.ID {
+        let endpoint = try #require(URL(string: "https://example.com"))
+        var providerID: Provider.ID?
+
+        try database.write { db in
+            let provider = try Provider.insert {
+                Provider.Draft(
+                    id: nil,
+                    kind: .xtream,
+                    name: name,
+                    username: "user",
+                    password: "pass",
+                    endpoint: endpoint,
+                    isActive: false
+                )
+            }
+            .returning(\.self)
+            .fetchOne(db)!
+            providerID = provider.id
+        }
+
+        return try #require(providerID)
+    }
+
 
     private func makeCategory(id: iptv.Category.ID, title: String) -> iptv.Category {
         iptv.Category(id: id, sourceID: "category-\(id)", type: .movie, title: title, updatedAt: nil)

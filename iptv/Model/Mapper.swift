@@ -107,7 +107,7 @@ extension MediaType {
         switch contentType {
             case .vod: .movie
             case .series: .series
-            case .live: .movie // FIXME: Fail
+            case .live: .live
         }
     }
 }

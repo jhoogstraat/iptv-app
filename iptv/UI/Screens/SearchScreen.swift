@@ -37,6 +37,7 @@ struct SearchScreen: View {
     }
 
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
+    @Environment(Session.self) private var session
     @FetchOne(Provider.where(\.isActive)) private var provider: Provider?
     @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var categories: [Category]
     @FetchAll(Media.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var media: [Media]
@@ -74,6 +75,25 @@ struct SearchScreen: View {
             minimumRating: minimumRating,
             sort: sort
         )
+    }
+
+    private var categoryHydrationStates: [SyncManager.CategoryHydrationState] {
+        categories.map { session.hydrationState(for: $0) }
+    }
+
+    private var hasUnhydratedCategories: Bool {
+        categoryHydrationStates.contains(.unhydrated)
+    }
+
+    private var hasLoadingCategories: Bool {
+        categoryHydrationStates.contains(.loading)
+    }
+
+    private var hasFailedCategories: Bool {
+        categoryHydrationStates.contains { state in
+            if case .failed = state { return true }
+            return false
+        }
     }
 
     private var searchIsActive: Bool {
@@ -156,6 +176,12 @@ struct SearchScreen: View {
                     CategoryPrefixVisibilityStore.setHiddenGroupKeys([], for: provider?.id)
                 }
             }
+        } else if media.isEmpty {
+            ContentUnavailableView {
+                Label(emptyHydrationTitle, systemImage: emptyHydrationSystemImage)
+            } description: {
+                Text(emptyHydrationDescription)
+            }
         } else if !searchIsActive {
             ContentUnavailableView {
                 Label("Search your library", systemImage: "magnifyingglass")
@@ -185,6 +211,33 @@ struct SearchScreen: View {
         selectedCategoryID = nil
         selectedGroupKeys.removeAll()
         minimumRating = nil
+    }
+
+    private var emptyHydrationTitle: String {
+        if hasLoadingCategories { return "Loading category streams" }
+        if hasFailedCategories { return "Some categories failed to load" }
+        if hasUnhydratedCategories { return "No hydrated categories" }
+        return "No searchable streams"
+    }
+
+    private var emptyHydrationSystemImage: String {
+        if hasLoadingCategories { return "clock.arrow.circlepath" }
+        if hasFailedCategories { return "exclamationmark.triangle" }
+        if hasUnhydratedCategories { return "folder.badge.questionmark" }
+        return "tray"
+    }
+
+    private var emptyHydrationDescription: String {
+        if hasLoadingCategories {
+            return "Search results will appear after the selected category finishes loading."
+        }
+        if hasFailedCategories {
+            return "Retry the failed category from Browse, then search the local library again."
+        }
+        if hasUnhydratedCategories {
+            return "Initial sync stores categories only. Open a category in Browse to lazily load its streams into the local library."
+        }
+        return "The hydrated categories did not contain any Movies or Series streams."
     }
 }
 

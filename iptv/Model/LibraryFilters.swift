@@ -1,4 +1,6 @@
+import Dependencies
 import Foundation
+import SQLiteData
 
 /// Deterministic sort options supported by local catalog browse and search surfaces.
 enum BrowseSort: String, CaseIterable, Identifiable, Sendable {
@@ -183,28 +185,111 @@ enum LibraryFilterEngine: Sendable {
 
 /// Provider-scoped persistence for hidden category prefix/group keys.
 ///
-/// The active schema stores a single local library at a time, so prefix preferences are persisted
-/// outside the library rows and keyed by provider identifier. This keeps preferences from leaking
-/// when users switch configured providers.
+/// The active catalog is a singleton local library, but organization preferences are
+/// provider-owned settings. Persisting hidden groups in SQLite keeps browse/search
+/// visibility from leaking across providers and allows provider deletion to cascade.
 enum CategoryPrefixVisibilityStore: Sendable {
     static let revisionKey = "library.categoryPrefixVisibility.revision"
 
-    static func hiddenGroupKeys(for providerID: Provider.ID?, defaults: UserDefaults = .standard) -> Set<String> {
-        guard let key = storageKey(for: providerID) else { return [] }
-        return Set(defaults.stringArray(forKey: key) ?? [])
+    static func hiddenGroupKeys(
+        for providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) -> Set<String> {
+        guard let providerID else { return [] }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            try migrateLegacyDefaultsIfNeeded(for: providerID, database: database, defaults: defaults)
+            return try database.read { db in
+                Set(
+                    try CategoryPrefixVisibility
+                        .select(\.groupKey)
+                        .where { $0.providerID.eq(providerID).and($0.isHidden.eq(true)) }
+                        .fetchAll(db)
+                )
+            }
+        } catch {
+            assertionFailure("Failed to load category prefix visibility: \(error.localizedDescription)")
+            return []
+        }
     }
 
     static func setHiddenGroupKeys(
         _ groupKeys: Set<String>,
         for providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
         defaults: UserDefaults = .standard
     ) {
-        guard let key = storageKey(for: providerID) else { return }
-        defaults.set(groupKeys.sorted(), forKey: key)
+        guard let providerID else { return }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            try database.write { db in
+                try CategoryPrefixVisibility
+                    .where { $0.providerID.eq(providerID) }
+                    .delete()
+                    .execute(db)
+
+                for groupKey in groupKeys.sorted() {
+                    try CategoryPrefixVisibility.insert {
+                        CategoryPrefixVisibility.Draft(
+                            id: nil,
+                            providerID: providerID,
+                            groupKey: groupKey,
+                            isHidden: true
+                        )
+                    }.execute(db)
+                }
+            }
+
+            if let key = legacyStorageKey(for: providerID) {
+                defaults.removeObject(forKey: key)
+            }
+            defaults.set(defaults.integer(forKey: revisionKey) + 1, forKey: revisionKey)
+        } catch {
+            assertionFailure("Failed to save category prefix visibility: \(error.localizedDescription)")
+        }
+    }
+
+    private static func migrateLegacyDefaultsIfNeeded(
+        for providerID: Provider.ID,
+        database: any DatabaseWriter,
+        defaults: UserDefaults
+    ) throws {
+        guard let key = legacyStorageKey(for: providerID),
+              let legacyHiddenGroups = defaults.stringArray(forKey: key),
+              !legacyHiddenGroups.isEmpty
+        else { return }
+
+        let existingCount = try database.read { db in
+            try CategoryPrefixVisibility
+                .where { $0.providerID.eq(providerID) }
+                .fetchCount(db)
+        }
+
+        guard existingCount == 0 else { return }
+
+        try database.write { db in
+            for groupKey in Set(legacyHiddenGroups).sorted() {
+                try CategoryPrefixVisibility.insert {
+                    CategoryPrefixVisibility.Draft(
+                        id: nil,
+                        providerID: providerID,
+                        groupKey: groupKey,
+                        isHidden: true
+                    )
+                }.execute(db)
+            }
+        }
+
+        defaults.removeObject(forKey: key)
         defaults.set(defaults.integer(forKey: revisionKey) + 1, forKey: revisionKey)
     }
 
-    private static func storageKey(for providerID: Provider.ID?) -> String? {
+    private static func legacyStorageKey(for providerID: Provider.ID?) -> String? {
         guard let providerID else { return nil }
         return "library.categoryPrefixVisibility.provider.\(providerID).hiddenGroups"
     }

@@ -45,6 +45,7 @@ final class SyncManager {
     var liveSync = SyncStatus.idle
     private(set) var initialSyncPhase: InitialSyncPhase = .idle
     private(set) var lastErrorMessage: String?
+    private(set) var categoryHydrationStates: [Category.ID: CategoryHydrationState] = [:]
     
     
     init(service: XtreamService, database: (any DatabaseWriter)? = nil) {
@@ -59,12 +60,10 @@ final class SyncManager {
         movieSync = .idle
         seriesSync = .idle
         liveSync = .idle
+        categoryHydrationStates.removeAll()
 
         do {
-            try await database.write { db in
-                try Media.delete().execute(db)
-                try Category.delete().execute(db)
-            }
+            try await clearCatalog()
         } catch {
             movieSync = .failure
             initialSyncPhase = .failed
@@ -117,7 +116,13 @@ final class SyncManager {
         let categories = try await service.getCategories(of: type)
         try await database.write { db in
             for category in categories {
-                try Category.insert { Category.Draft(from: category, type: type) }.execute(db)
+                try Category.insert {
+                    Category.Draft(from: category, type: type)
+                } onConflict: {
+                    ($0.sourceID, $0.type)
+                } doUpdate: {
+                    $0.title = category.name
+                }.execute(db)
             }
             
             // Does a lot of type checks (ca. 11s)
@@ -149,73 +154,122 @@ final class SyncManager {
     }
     
     func updateMovies(in category: Category.ID) async throws {
-        let sourceID = try await database.read { db in
-            try Category.select(\.sourceID).where { $0.id.eq(category) }.fetchOne(db)
-        }
-        
-        guard let sourceID else {
-            throw SyncError.noSourceIDFound(category)
-        }
-        
-        let streams = try await service.getVodStreams(in: sourceID)
-        
-        try await database.write { db in
-            for stream in streams {
-                try Media.insert {
-                    Media.Draft(from: stream, categoryID: category)
-                } onConflict: {
-                    $0.sourceID
-                } doUpdate: {
-                    let category: Category.ID? = if let id = stream.categoryId { try? Category.select(\.id).where { $0.sourceID.eq(id) }.fetchOne(db) } else { nil }
-                    
-                    $0.title = stream.name
-                    $0.tmdbID = stream.tmdbId
-                    $0.coverURL = URL(string: stream.streamIcon)
-                    $0.rating = stream.rating
-                    $0.categoryID = #bind(category)
-                }.execute(db)
+        categoryHydrationStates[category] = .loading
+
+        do {
+            let sourceID = try await database.read { db in
+                try Category.select(\.sourceID)
+                    .where { $0.id.eq(category).and($0.type.eq(MediaType.movie)) }
+                    .fetchOne(db)
             }
-            
-            try Category.find(category).update { $0.updatedAt = #sql("datetime()") }.execute(db)
+
+            guard let sourceID else {
+                throw SyncError.noSourceIDFound(category)
+            }
+
+            let streams = try await service.getVodStreams(in: sourceID)
+
+            let count = try await database.write { db in
+                for stream in streams {
+                    let resolvedCategoryID: Category.ID? = if let id = stream.categoryId {
+                        try? Category.select(\.id)
+                            .where { $0.sourceID.eq(id).and($0.type.eq(MediaType.movie)) }
+                            .fetchOne(db)
+                    } else {
+                        nil
+                    }
+
+                    try Media.insert {
+                        Media.Draft(from: stream, categoryID: resolvedCategoryID ?? category)
+                    } onConflict: {
+                        ($0.sourceID, $0.type)
+                    } doUpdate: {
+                        $0.title = stream.name
+                        $0.tmdbID = stream.tmdbId
+                        $0.coverURL = URL(string: stream.streamIcon)
+                        $0.rating = stream.rating
+                        $0.categoryID = #bind(resolvedCategoryID ?? category)
+                    }.execute(db)
+                }
+
+                try Category.find(category).update { $0.updatedAt = #sql("datetime()") }.execute(db)
+                return try Media.where { $0.categoryID.eq(category) }.fetchCount(db)
+            }
+
+            categoryHydrationStates[category] = count == 0 ? .empty : .populated(count)
+        } catch {
+            categoryHydrationStates[category] = .failed(error.localizedDescription)
+            throw error
         }
     }
     
     func updateSeries(in category: Category.ID) async throws {
-        let sourceID = try await database.read { db in
-            try Category.select(\.sourceID).where { $0.id.eq(category) }.fetchOne(db)
-        }
-        
-        guard let sourceID else {
-            throw SyncError.noSourceIDFound(category)
-        }
-        
-        let streams = try await service.getSeriesStreams(in: sourceID)
-        
-        try await database.write { db in
-            for stream in streams {
-                try Media.insert {
-                    Media.Draft(from: stream, categoryID: category)
-                } onConflict: {
-                    $0.sourceID
-                } doUpdate: {
-                    let category: Category.ID? = if let id = stream.categoryId { try? Category.select(\.id).where { $0.sourceID.eq(id) }.fetchOne(db) } else { nil }
-                    
-                    $0.title = stream.name
-                    $0.tmdbID = stream.tmdb
-                    $0.coverURL = stream.cover.flatMap(URL.init)
-                    $0.rating = stream.rating
-                    $0.categoryID = #bind(category)
-                }.execute(db)
+        categoryHydrationStates[category] = .loading
+
+        do {
+            let sourceID = try await database.read { db in
+                try Category.select(\.sourceID)
+                    .where { $0.id.eq(category).and($0.type.eq(MediaType.series)) }
+                    .fetchOne(db)
             }
-            
-            try Category.find(category).update { $0.updatedAt = #sql("datetime()") }.execute(db)
+
+            guard let sourceID else {
+                throw SyncError.noSourceIDFound(category)
+            }
+
+            let streams = try await service.getSeriesStreams(in: sourceID)
+
+            let count = try await database.write { db in
+                for stream in streams {
+                    let resolvedCategoryID: Category.ID? = if let id = stream.categoryId {
+                        try? Category.select(\.id)
+                            .where { $0.sourceID.eq(id).and($0.type.eq(MediaType.series)) }
+                            .fetchOne(db)
+                    } else {
+                        nil
+                    }
+
+                    try Media.insert {
+                        Media.Draft(from: stream, categoryID: resolvedCategoryID ?? category)
+                    } onConflict: {
+                        ($0.sourceID, $0.type)
+                    } doUpdate: {
+                        $0.title = stream.name
+                        $0.tmdbID = stream.tmdb
+                        $0.coverURL = stream.cover.flatMap(URL.init)
+                        $0.rating = stream.rating
+                        $0.categoryID = #bind(resolvedCategoryID ?? category)
+                    }.execute(db)
+                }
+
+                try Category.find(category).update { $0.updatedAt = #sql("datetime()") }.execute(db)
+                return try Media.where { $0.categoryID.eq(category) }.fetchCount(db)
+            }
+
+            categoryHydrationStates[category] = count == 0 ? .empty : .populated(count)
+        } catch {
+            categoryHydrationStates[category] = .failed(error.localizedDescription)
+            throw error
+        }
+    }
+    private func clearCatalog() async throws {
+        try await database.write { db in
+            try Media.delete().execute(db)
+            try Category.delete().execute(db)
         }
     }
 }
-
 extension SyncManager {
     enum SyncStatus: Equatable {
         case idle, active, success, failure
+    }
+
+    enum CategoryHydrationState: Equatable, Sendable {
+        case unhydrated
+        case loading
+        case empty
+        case populated(Int)
+        case failed(String)
     }
     
     enum InitialSyncPhase: Equatable {

@@ -67,6 +67,8 @@ struct PlayerView: View {
             return "Series"
         case .episode:
             return "Episode"
+        case .live:
+            return "Live"
         }
     }
 

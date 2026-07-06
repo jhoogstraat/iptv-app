@@ -50,6 +50,8 @@ final class ProviderManager {
             if let id = session?.providerID {
                 try Provider.find(id).update { $0.isActive = false }.execute(db)
             }
+            try Media.delete().execute(db)
+            try Category.delete().execute(db)
             return try Provider.insert { draft }.returning(\.id).fetchOne(db)!
         }
 
@@ -57,19 +59,37 @@ final class ProviderManager {
     }
     
     func change(to id: Provider.ID) throws {
+        let previousProviderID = session?.providerID
+
         try database.write { db in
-            if let active = session?.providerID {
+            if let active = previousProviderID {
                 try Provider.find(active).update { $0.isActive = false }.execute(db)
             }
+
+            if previousProviderID != id {
+                try Media.delete().execute(db)
+                try Category.delete().execute(db)
+            }
+
             try Provider.find(id).update { $0.isActive = true }.execute(db)
+            if previousProviderID != id {
+                try Provider.find(id).update { $0.isInitialized = false }.execute(db)
+            }
         }
 
         setState(id)
     }
     
     func update(provider: Provider.Draft) throws {
+        let previousProviderID = session?.providerID
+
         let id = try database.write { db in
             let id = try Provider.upsert { provider }.returning(\.id).fetchOne(db)!
+            if let active = previousProviderID, active != id {
+                try Provider.find(active).update { $0.isActive = false }.execute(db)
+            }
+            try Media.delete().execute(db)
+            try Category.delete().execute(db)
             try Provider.find(id).update {
                 $0.isInitialized = false
                 $0.isActive = true
@@ -103,13 +123,13 @@ final class ProviderManager {
     }
 
     func delete(provider id: Provider.ID) throws {
-        clearState()
-        
         try database.write { db in
+            try Media.delete().execute(db)
+            try Category.delete().execute(db)
             try Provider.find(id).delete().execute(db)
         }
-        
-        try clearLibrary(of: id)
+
+        clearState()
     }
    
     // MARK: - Private
@@ -141,12 +161,6 @@ final class ProviderManager {
         activeProviderIsInitialized = false
     }
 
-    private func clearLibrary(of id: Provider.ID) throws {
-        try database.write { db in
-            try Media.delete().execute(db)
-            try Category.delete().execute(db)
-        }
-    }
 }
 
 private let logger = Logger(subsystem: "IPTV", category: "SessionManager")
