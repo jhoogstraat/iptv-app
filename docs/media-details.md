@@ -6,9 +6,9 @@ Media Details provides the focused destination for a selected movie or series it
 
 ## Status
 
-- Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume for playable rows, and bridges to the shared player; favorite/download controls stay explicit unsupported states until their feature stores exist.
-- Implementation status (reviewed 2026-07-06): `MediaDetailDestination` routes movies, series, episodes, and live unsupported states explicitly. Browse grids, search results, and reusable media rows open details instead of generic placeholders. `MovieDetailScreen` uses a hero-first streaming layout, refreshes Xtream VOD detail metadata through `Session`/`SyncManager`, persists the result locally, shows provider-scoped resume state from `WatchActivity`, and starts playback through `Player.load`, which resolves movie URLs through the active Xtream provider and synced source ID/container extension.
-- Series detail has its own hero-first route with Episodes/Details tabs, a season selector, local episode rows, and explicit unavailable copy when no episode rows are persisted. `SyncManager.enrichDetails` uses the Xtream series detail endpoint to persist series metadata, seasons, and episode `Media` rows linked to their parent series; episode detail rows show resume progress from the same provider-scoped watch-activity table.
+- Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume for playable rows, and bridges to the shared player; favorite controls persist through the shared provider-scoped favorites store while downloads remain explicit unsupported states.
+- Implementation status (reviewed 2026-07-06): `MediaDetailDestination` routes movies, series, episodes, and live unsupported states explicitly. Browse grids, search results, Favorites, and For You rails open details. `MovieDetailScreen` uses a hero-first streaming layout, refreshes Xtream VOD detail metadata through `Session`/`SyncManager`, persists the result locally, shows provider-scoped resume state from `WatchActivity`, shows provider-scoped favorite state from `Favorite`, and starts playback through `Player.load`, which resolves movie URLs through the active Xtream provider and synced source ID/container extension.
+- Series detail has its own hero-first route with Episodes/Details tabs, a season selector, local episode rows, persisted favorite control, and explicit unavailable copy when no episode rows are persisted. `SyncManager.enrichDetails` uses the Xtream series detail endpoint to persist series metadata, seasons, and episode `Media` rows linked to their parent series; episode detail rows show resume progress and favorite state from the same active provider.
 
 ## User Experience
 
@@ -35,7 +35,7 @@ Media Details provides the focused destination for a selected movie or series it
 - Current persisted fields: title, cover/backdrop URL, rating, source ID, media type, category ID, TMDB ID, synopsis/plot, release date/year, runtime, genre, cast, director, trailer, added date, country when exposed by Xtream DTOs, parent-series/season/episode linkage, and movie/episode container extension.
 - Series seasons are stored in `SeriesSeason`; playable episodes are stored as `Media(type: .episode)` rows linked by `parentSeriesID`.
 - Player action calls `Player.load` after resolving a playable URL/source. Series collection rows remain explicitly non-playable.
-- Movie and episode detail screens query provider-scoped `WatchActivity` rows by active provider ID, media type, and source ID to label Play vs Resume and show progress/remaining time.
+- Movie and episode detail screens query provider-scoped `WatchActivity` rows by active provider ID, media type, and source ID to label Play vs Resume and show progress/remaining time; movie, series, and episode details query provider-scoped `Favorite` rows by the same content key for shared favorite controls.
 
 ## Key Files
 
@@ -55,15 +55,15 @@ Media Details provides the focused destination for a selected movie or series it
 - Movie and series detail paths do not share incorrect assumptions about episodes or playback URLs.
 - Play action resolves a playable source and launches the shared player.
 - Playable movie and episode details show Resume/progress only for unfinished meaningful watch activity; completed or too-short progress starts from zero.
-- Favorite and download actions update their persisted feature state when those features are implemented.
+- Favorite actions update provider-scoped persisted state; download actions remain explicit unavailable affordances until downloads are implemented.
 - Missing metadata produces clear fallback UI instead of placeholder copy in completed paths.
 - The detail UI uses a hero-first streaming layout: large backdrop/photo at the top, controls and core metadata layered over it, and additional information revealed through scrollable sections below.
 - Series detail screens expose episode tabs, season selection, and episode rows below the hero.
 
 ## Current Gaps / Planned Work
 
-- Recommendation and favorites surfaces are still placeholders, so their detail routing will become active when those surfaces render local `Media` rows.
-- Favorite and download actions are visible as explicit unavailable/disabled affordances until their persisted feature state is implemented.
+- Recommendation and favorites surfaces now route local `Media` rows into the same detail destination; unavailable favorite snapshots stay in the Favorites tab until the catalog row exists again.
+- Download actions are still explicit unavailable/disabled affordances until their persisted feature state is implemented.
 - Audio language, subtitle language, and profile/preference metadata are not exposed because current Xtream catalog/detail DTOs do not provide reliable local fields for those filters.
 - Missing provider metadata renders as explicit unavailable copy in the synopsis, metadata grid, and episode rows instead of fake placeholder values.
 

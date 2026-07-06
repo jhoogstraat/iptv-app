@@ -12,26 +12,52 @@ enum ForYouBadge {
 }
 
 struct ForYouRailView<Destination: View>: View {
-//    let section: ForYouSection
+    let title: String
+    let subtitle: String?
+    let items: [Media]
+    let badge: (Media) -> ForYouBadge?
     let destination: (Media) -> Destination
+
+    init(
+        title: String,
+        subtitle: String? = nil,
+        items: [Media],
+        badge: @escaping (Media) -> ForYouBadge? = { _ in nil },
+        @ViewBuilder destination: @escaping (Media) -> Destination
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.items = items
+        self.badge = badge
+        self.destination = destination
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("TODO")
-                .font(.headline)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.headline)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
 
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 14) {
-//                    ForEach([]) { item in
-//                        NavigationLink {
-//                            destination(item)
-//                        } label: {
-//                            ForYouPosterCard(item: item)
-//                                .frame(width: 170, height: 255)
-//                        }
-//                        .buttonStyle(.plain)
-//                    }
+                    ForEach(items) { item in
+                        NavigationLink {
+                            destination(item)
+                        } label: {
+                            ForYouPosterCard(item: item, badge: badge(item))
+                                .frame(width: 170, height: 255)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
+                .padding(.horizontal, 1)
             }
             .scrollIndicators(.never)
         }
@@ -40,6 +66,7 @@ struct ForYouRailView<Destination: View>: View {
 
 private struct ForYouPosterCard: View {
     let item: Media
+    let badge: ForYouBadge?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -57,6 +84,11 @@ private struct ForYouPosterCard: View {
                 @unknown default:
                     fallback
                 }
+            }
+
+            if let badge {
+                badgeView(badge)
+                    .padding(8)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

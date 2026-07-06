@@ -6,8 +6,8 @@ Favorites lets users mark movies, series, channels, and playable items they care
 
 ## Status
 
-- Target state: favorite state is provider-scoped, persisted locally, visible across relevant surfaces, and synchronized with search/recommendation indexes.
-- Implementation status (reviewed 2026-07-05): Partial placeholder only. `FavoritesScreen` exists but the active Favorites tab inlines the same placeholder instead of using it. `PlayerView` and `MovieDetailScreen` have favorite controls that toggle local `@State` only, series favorite affordances are disabled, and no favorite table/store exists in the current schema.
+- Target state: favorite state is provider-scoped, persisted locally, visible across relevant surfaces, and available to local discovery/search surfaces.
+- Implementation status (reviewed 2026-07-06): Provider-scoped `favorites` rows are persisted in SQLiteData with media type/source ID, title/artwork/category snapshots, and created/updated timestamps. `FavoriteStore` supports add/remove/toggle/isFavorite and returns favorites joined to live local `Media` rows where possible. `FavoritesScreen` is live in the Favorites tab, and movie, series, episode, player, browse, search, and For You surfaces observe the same persisted state.
 
 ## User Experience
 
@@ -19,19 +19,21 @@ Favorites lets users mark movies, series, channels, and playable items they care
 
 ## Data and State
 
-- Target state should store provider ID/fingerprint, media identity, media type, created timestamp, and optional display snapshot fields.
-- Favorite records should reference local media where possible and survive app relaunch.
-- Search and recommendations should observe favorite changes or update their indexes.
-- Current state is only transient UI state in player/movie detail; no persisted favorite state is consumed by Search or For You.
+- `Favorite` stores provider ID, media type, source ID, title snapshot, artwork URL, category ID/title snapshot, created timestamp, and updated timestamp.
+- Favorite records reference local `Media` by the stable provider-local content key (`mediaType` + `sourceID`) when the row is still present; unavailable favorites keep their snapshot for explicit UI states.
+- Favorite writes bump `FavoriteStore.revisionKey` for surfaces that read synchronously, while SQLiteData queries keep loaded detail/search/browse/favorites screens fresh.
+- Search, Browse, For You, detail screens, and player controls consume the persisted store; no remote favorite or recommendation sync exists.
 
 ## Key Files
 
+- `iptv/Model/Database/Schema.swift`
 - `iptv/UI/Screens/FavoritesScreen.swift`
-- `iptv/Player/PlayerView.swift`
+- `iptv/UI/ContentView.swift`
 - `iptv/UI/Screens/MovieDetailScreen.swift`
+- `iptv/UI/Views/EpisodeDetailTile.swift`
+- `iptv/Player/PlayerView.swift`
 - `iptv/UI/Screens/SearchScreen.swift`
 - `iptv/UI/Screens/ForYouScreen.swift`
-- `iptv/Model/Database/Schema.swift`
 
 ## Target Acceptance Criteria
 
@@ -44,11 +46,9 @@ Favorites lets users mark movies, series, channels, and playable items they care
 
 ## Current Gaps / Planned Work
 
-- No persisted favorite model/table exists in the current schema.
-- `FavoritesScreen` is a placeholder, and `ContentView` currently bypasses it with an inline placeholder.
-- Player and movie-detail favorite toggles are local-only.
-- Series/detail favorite controls are disabled or unavailable.
-- Search and For You do not consume favorite state.
+- Live-channel favorites remain out of scope until Live TV is implemented.
+- Full-text favorite indexing and remote/provider sync are not implemented; current search reflects favorites as local badges on catalog results.
+- Downloads and profiles are deferred, so favorite keys are provider-scoped but not profile-scoped.
 
 ## Notes for Agents
 

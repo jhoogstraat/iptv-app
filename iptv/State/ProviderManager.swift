@@ -54,6 +54,7 @@ final class ProviderManager {
             try Category.delete().execute(db)
             if let id = session?.providerID {
                 try WatchActivityStore.deleteActivity(for: id, in: db)
+                try FavoriteStore.deleteFavorites(for: id, in: db)
             }
             return try Provider.insert { draft }.returning(\.id).fetchOne(db)!
         }
@@ -92,6 +93,7 @@ final class ProviderManager {
                 try Provider.find(active).update { $0.isActive = false }.execute(db)
             }
             try WatchActivityStore.deleteActivity(for: id, in: db)
+            try FavoriteStore.deleteFavorites(for: id, in: db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
             try Provider.find(id).update {
@@ -129,6 +131,7 @@ final class ProviderManager {
     func delete(provider id: Provider.ID) throws {
         try database.write { db in
             try WatchActivityStore.deleteActivity(for: id, in: db)
+            try FavoriteStore.deleteFavorites(for: id, in: db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
             try Provider.find(id).delete().execute(db)

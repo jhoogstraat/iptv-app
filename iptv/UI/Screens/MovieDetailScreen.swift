@@ -43,6 +43,7 @@ struct MovieDetailScreen: View {
     @Environment(\.dismiss) private var dismiss
     @FetchOne private var persistedMovie: Media?
     @FetchAll private var watchActivities: [WatchActivity]
+    @FetchAll private var favorites: [Favorite]
     @State private var playError: String?
     @State private var enrichmentError: String?
 
@@ -54,12 +55,24 @@ struct MovieDetailScreen: View {
             $0.mediaType.eq(movie.type)
                 .and($0.sourceID.eq(movie.sourceID))
         })
+        self._favorites = FetchAll(Favorite.where {
+            $0.mediaType.eq(movie.type)
+                .and($0.sourceID.eq(movie.sourceID))
+        })
     }
 
     private var currentMovie: Media { persistedMovie ?? movie }
 
     private var currentWatchActivity: WatchActivity? {
         watchActivities.first {
+            $0.providerID == session.providerID
+                && $0.mediaType == currentMovie.type
+                && $0.sourceID == currentMovie.sourceID
+        }
+    }
+
+    private var currentFavorite: Favorite? {
+        favorites.first {
             $0.providerID == session.providerID
                 && $0.mediaType == currentMovie.type
                 && $0.sourceID == currentMovie.sourceID
@@ -190,13 +203,14 @@ struct MovieDetailScreen: View {
                 }
                 .buttonStyle(DetailActionStyle(variant: .primary))
 
-                Button {} label: {
-                    Label("Favorite unavailable", systemImage: "heart")
+                Button {
+                    FavoriteStore.toggle(currentMovie, providerID: session.providerID, categoryTitle: categoryTitle)
+                } label: {
+                    Label(currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites", systemImage: currentFavorite == nil ? "heart" : "heart.fill")
                         .labelStyle(.iconOnly)
                 }
                 .buttonStyle(DetailActionStyle(variant: .icon))
-                .disabled(true)
-                .accessibilityHint("Persistent favorites are outside the active Library UX workstream.")
+                .accessibilityHint("Updates the persisted favorite state for this provider.")
 
                 Button {} label: {
                     Label("Download unavailable", systemImage: "arrow.down.circle")
@@ -248,7 +262,7 @@ struct MovieDetailScreen: View {
     private var availabilitySection: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             DetailSectionHeader(title: "Source and Downloads")
-            Text("Playback resolves from the active Xtream provider using the synced source identifier. Favorites and downloads are not persisted in this workstream.")
+            Text("Playback resolves from the active Xtream provider using the synced source identifier. Favorite state is persisted locally per provider; downloads are not persisted in this workstream.")
                 .font(.body)
                 .lineSpacing(5)
                 .foregroundStyle(.secondary)
@@ -394,6 +408,7 @@ struct SeriesDetailScreen: View {
     @FetchOne private var persistedSeries: Media?
     @FetchAll private var seasons: [SeriesSeason]
     @FetchAll private var episodes: [Media]
+    @FetchAll private var favorites: [Favorite]
     @State private var selectedTab: DetailTab = .episodes
     @State private var selectedSeasonNumber: Int?
     @State private var enrichmentError: String?
@@ -407,9 +422,21 @@ struct SeriesDetailScreen: View {
             $0.type.eq(MediaType.episode)
                 .and($0.parentSeriesID.eq(series.id))
         })
+        self._favorites = FetchAll(Favorite.where {
+            $0.mediaType.eq(series.type)
+                .and($0.sourceID.eq(series.sourceID))
+        })
     }
 
     private var currentSeries: Media { persistedSeries ?? series }
+
+    private var currentFavorite: Favorite? {
+        favorites.first {
+            $0.providerID == session.providerID
+                && $0.mediaType == currentSeries.type
+                && $0.sourceID == currentSeries.sourceID
+        }
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -513,13 +540,14 @@ struct SeriesDetailScreen: View {
                     .buttonStyle(DetailActionStyle(variant: .primary))
                     .disabled(episodes.isEmpty)
 
-                    Button {} label: {
-                        Label("Favorite unavailable", systemImage: "heart")
+                    Button {
+                        FavoriteStore.toggle(currentSeries, providerID: session.providerID, categoryTitle: categoryTitle)
+                    } label: {
+                        Label(currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites", systemImage: currentFavorite == nil ? "heart" : "heart.fill")
                             .labelStyle(.iconOnly)
                     }
                     .buttonStyle(DetailActionStyle(variant: .icon))
-                    .disabled(true)
-
+                    .accessibilityHint("Updates the persisted favorite state for this provider.")
                     Button {} label: {
                         Label("Download unavailable", systemImage: "arrow.down.circle")
                             .labelStyle(.iconOnly)

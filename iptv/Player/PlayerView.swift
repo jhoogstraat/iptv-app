@@ -18,6 +18,7 @@ struct PlayerView: View {
     static let identifier = "PlayerView"
 
     @Environment(Player.self) private var player
+    @AppStorage(FavoriteStore.revisionKey) private var favoritesRevision = 0
 
     @State private var isShowingControls = true
     @State private var scrubTime: Double?
@@ -581,11 +582,16 @@ struct PlayerView: View {
     }
 
     private var favoriteControlButton: some View {
-        Button {
-            player.reportUnsupportedControl("Favorites are not available yet. Use media details for playback; persistent favorites are implemented in a later workstream.")
+        let isFavorite = currentItemIsFavorite
+
+        return Button {
+            guard let item = player.currentItem, let providerID = player.currentProviderID else { return }
+            let nextState = FavoriteStore.toggle(item, providerID: providerID)
+            player.reportControlMessage(nextState ? "Added to Favorites." : "Removed from Favorites.")
         } label: {
-            Image(systemName: "heart.slash")
+            Image(systemName: isFavorite ? "heart.fill" : "heart")
                 .font(.headline.weight(.semibold))
+                .foregroundStyle(isFavorite ? .red : .white)
                 .frame(width: 42, height: 42)
                 .background(.white.opacity(0.12))
                 .clipShape(Circle())
@@ -593,10 +599,16 @@ struct PlayerView: View {
         #if os(macOS)
         .buttonStyle(.plain)
         #endif
-        .disabled(player.currentItem == nil)
-        .accessibilityLabel("Favorites unavailable")
-        .accessibilityHint("Persistent favorites are outside the active playback workstream.")
-        .accessibilityIdentifier("player.favoriteUnavailable")
+        .disabled(player.currentItem == nil || player.currentProviderID == nil)
+        .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
+        .accessibilityHint("Updates the persisted favorite state for the current provider.")
+        .accessibilityIdentifier(isFavorite ? "player.favoriteSelected" : "player.favorite")
+    }
+
+    private var currentItemIsFavorite: Bool {
+        _ = favoritesRevision
+        guard let item = player.currentItem else { return false }
+        return FavoriteStore.isFavorite(item, providerID: player.currentProviderID)
     }
 
     #if os(iOS)

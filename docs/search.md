@@ -6,8 +6,8 @@ Search helps users find local library items quickly across synced Movies and Ser
 
 ## Status
 
-- Target state: scoped search works inside Movies and Series; global Search queries Movies and Series together; filters and sorting are available from the global surface; results are provider-scoped and backed by local data/indexes when direct local queries no longer meet measured needs.
-- Implementation status (reviewed 2026-07-06): Global `SearchScreen` is live in the Search tab, queries local Movies and Series from SQLiteData, supports text search, scope selection, shared category/group/minimum-rating filters, prefix visibility, deterministic title/newest/rating sorts, explicit partial-local-coverage states, and navigation to `MediaDetailDestination`. Scoped Browse search and global Search both use `LibraryQueryNormalizer` plus `LibraryFilterEngine`.
+- Target state: scoped search works inside Movies and Series; global Search queries Movies and Series together; filters and sorting are available from the global surface; results are provider-scoped and backed by local data/indexes when direct local queries no longer meet measured needs; shared user-state badges make favorites and resumable progress visible without introducing a search index.
+- Implementation status (reviewed 2026-07-06): Global `SearchScreen` is live in the Search tab, queries local Movies and Series from SQLiteData, supports text search, scope selection, shared category/group/minimum-rating filters, prefix visibility, deterministic title/newest/rating sorts, explicit partial-local-coverage states, and navigation to `MediaDetailDestination`. Scoped Browse search and global Search both use `LibraryQueryNormalizer` plus `LibraryFilterEngine`; global rows now reflect provider-scoped favorite and resume-eligible watch activity badges from local state.
 - Existing planning docs: `docs/search-implementation-spec.md` and `docs/library-search-spec.md` describe older planned indexed-search architecture; the current Library UX plan keeps direct local queries as the active implementation until measured need proves otherwise.
 
 ## User Experience
@@ -21,8 +21,8 @@ Search helps users find local library items quickly across synced Movies and Ser
 
 ## Data and State
 
-- Current global query source: local `Media` rows for Movies and Series, filtered by normalized title text, scope, category/group visibility, minimum rating, and sort.
-- Current scoped query source: `BrowseScreen` fetches local `Media` by media type, then applies the same normalized title query and shared filter state.
+- Current global query source: local `Media` rows for Movies and Series, filtered by normalized title text, scope, category/group visibility, minimum rating, and sort; row badges are derived from provider-scoped `Favorite` and `WatchActivity` rows.
+- Current scoped query source: `BrowseScreen` fetches local `Media` by media type, then applies the same normalized title query and shared filter state; browse tiles also reflect favorite and resumable progress badges.
 - Target result fields: media identity, scope, title, artwork, rating, category/group, matched title, and deterministic sort keys.
 - Target filters: scope, group/prefix, rating range/min rating, plus genre, country/language, added recency, audio language, and subtitle language only when those fields are populated locally and exposed honestly.
 - Target sorting: relevance when a future index exists, plus newest, rating, title, and deterministic tie-breakers.
@@ -52,9 +52,9 @@ Search helps users find local library items quickly across synced Movies and Ser
 
 - No dedicated full-text search index or relevance scoring exists; current global search filters local `Media.title` with shared normalization.
 - Query failures/retry affordances are not represented because the current implementation reads directly from local tables.
-- Search is single-active-library scoped rather than row-level provider scoped because `media`/`categories` lack provider columns.
+- Search is single-active-library scoped for catalog rows because `media`/`categories` lack provider columns; favorite/progress badges are provider-scoped and filtered by the active session.
 - Rich metadata is now persisted for detail paths when Xtream list/detail DTOs expose it, but Search does not expose genre/language/recency filters until the local population contract and UI are complete.
-- Favorites and continue watching are not currently searchable local entities.
+- Favorites and continue watching are visible as local badges; they are not standalone searchable entity types.
 
 ## Notes for Agents
 

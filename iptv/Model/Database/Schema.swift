@@ -253,6 +253,31 @@ func appDatabase() throws -> any DatabaseWriter {
         ON "watch_activity" ("providerID", "completed", "lastWatchedAt" DESC)
         """).execute(db)
     }
+
+    migrator.registerMigration("Create provider scoped favorites") { db in
+        try #sql("""
+        CREATE TABLE "favorites" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "providerID" INTEGER NOT NULL,
+            "mediaType" INTEGER NOT NULL,
+            "sourceID" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "artworkURL" TEXT,
+            "categoryID" INTEGER,
+            "categoryTitle" TEXT,
+            "createdAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("providerID", "mediaType", "sourceID"),
+            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE,
+            FOREIGN KEY ("categoryID") REFERENCES "categories"("id") ON DELETE SET NULL
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "favorites_provider_updated_idx"
+        ON "favorites" ("providerID", "updatedAt" DESC)
+        """).execute(db)
+    }
     
     
     try migrator.migrate(database)
@@ -370,6 +395,33 @@ nonisolated struct WatchActivity: Hashable, Identifiable, Sendable {
             completed: completed
         )
     }
+}
+
+@Table("favorites")
+nonisolated struct Favorite: Hashable, Identifiable, Sendable {
+    let id: Int
+    let providerID: Provider.ID
+    let mediaType: MediaType
+    let sourceID: Int
+    var title: String
+    var artworkURL: URL?
+    var categoryID: Category.ID?
+    var categoryTitle: String?
+    var createdAt: Date = .now
+    var updatedAt: Date = .now
+}
+
+struct FavoriteItem: Hashable, Identifiable, Sendable {
+    let favorite: Favorite
+    let media: Media?
+
+    var id: Favorite.ID { favorite.id }
+    var mediaType: MediaType { media?.type ?? favorite.mediaType }
+    var sourceID: Int { media?.sourceID ?? favorite.sourceID }
+    var title: String { media?.title ?? favorite.title }
+    var artworkURL: URL? { media?.coverURL ?? media?.backdropURL ?? favorite.artworkURL }
+    var categoryTitle: String? { favorite.categoryTitle }
+    var isAvailableLocally: Bool { media != nil }
 }
 
 enum WatchActivityStore: Sendable {
@@ -559,6 +611,224 @@ enum WatchActivityStore: Sendable {
     }
 }
 
+
+enum FavoriteStore: Sendable {
+    nonisolated static let revisionKey = "library.favorites.revision"
+
+    static func isFavorite(
+        _ media: Media,
+        providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> Bool {
+        favorite(for: media, providerID: providerID, database: suppliedDatabase) != nil
+    }
+
+    static func favorite(
+        for media: Media,
+        providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> Favorite? {
+        guard let providerID else { return nil }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            return try database.read { db in
+                try Favorite
+                    .where {
+                        $0.providerID.eq(providerID)
+                            .and($0.mediaType.eq(media.type))
+                            .and($0.sourceID.eq(media.sourceID))
+                    }
+                    .fetchOne(db)
+            }
+        } catch {
+            logger.warning("Failed to read favorite: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
+    static func favorites(
+        for providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> [FavoriteItem] {
+        guard let providerID else { return [] }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            return try database.read { db in
+                let favorites = try Favorite
+                    .where { $0.providerID.eq(providerID) }
+                    .fetchAll(db)
+                    .sorted(by: favoriteOrdering)
+
+                let mediaRows = try Media.fetchAll(db)
+                let mediaByKey = Dictionary(
+                    mediaRows.map { (contentKey(mediaType: $0.type, sourceID: $0.sourceID), $0) },
+                    uniquingKeysWith: { first, _ in first }
+                )
+
+                return favorites.map { favorite in
+                    FavoriteItem(
+                        favorite: favorite,
+                        media: mediaByKey[contentKey(mediaType: favorite.mediaType, sourceID: favorite.sourceID)]
+                    )
+                }
+            }
+        } catch {
+            logger.warning("Failed to read favorites: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
+
+    @discardableResult
+    static func toggle(
+        _ media: Media,
+        providerID: Provider.ID?,
+        categoryTitle suppliedCategoryTitle: String? = nil,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) -> Bool {
+        if isFavorite(media, providerID: providerID, database: suppliedDatabase) {
+            remove(media, providerID: providerID, database: suppliedDatabase, defaults: defaults)
+            return false
+        }
+
+        add(media, providerID: providerID, categoryTitle: suppliedCategoryTitle, database: suppliedDatabase, defaults: defaults)
+        return true
+    }
+
+    static func add(
+        _ media: Media,
+        providerID: Provider.ID?,
+        categoryTitle suppliedCategoryTitle: String? = nil,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        guard let providerID else { return }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+        let now = Date()
+
+        do {
+            try database.write { db in
+                let categoryTitle = suppliedCategoryTitle ?? categoryTitle(for: media, in: db)
+                let artworkURL = media.coverURL ?? media.backdropURL
+
+                try Favorite.insert {
+                    Favorite.Draft(
+                        id: nil,
+                        providerID: providerID,
+                        mediaType: media.type,
+                        sourceID: media.sourceID,
+                        title: media.title,
+                        artworkURL: artworkURL,
+                        categoryID: media.categoryID,
+                        categoryTitle: categoryTitle,
+                        createdAt: now,
+                        updatedAt: now
+                    )
+                } onConflict: {
+                    ($0.providerID, $0.mediaType, $0.sourceID)
+                } doUpdate: {
+                    $0.title = media.title
+                    $0.artworkURL = #bind(artworkURL)
+                    $0.categoryID = #bind(media.categoryID)
+                    $0.categoryTitle = #bind(categoryTitle)
+                    $0.updatedAt = now
+                }.execute(db)
+            }
+
+            bumpRevision(defaults: defaults)
+        } catch {
+            logger.warning("Failed to save favorite: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func remove(
+        _ media: Media,
+        providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        guard let providerID else { return }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            try database.write { db in
+                try Favorite
+                    .where {
+                        $0.providerID.eq(providerID)
+                            .and($0.mediaType.eq(media.type))
+                            .and($0.sourceID.eq(media.sourceID))
+                    }
+                    .delete()
+                    .execute(db)
+            }
+
+            bumpRevision(defaults: defaults)
+        } catch {
+            logger.warning("Failed to remove favorite: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func remove(
+        _ favorite: Favorite,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) {
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            try database.write { db in
+                try Favorite.find(favorite.id).delete().execute(db)
+            }
+
+            bumpRevision(defaults: defaults)
+        } catch {
+            logger.warning("Failed to remove favorite row: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    nonisolated static func deleteFavorites(for providerID: Provider.ID, in db: Database) throws {
+        try Favorite
+            .where { $0.providerID.eq(providerID) }
+            .delete()
+            .execute(db)
+    }
+
+    nonisolated static func contentKey(mediaType: MediaType, sourceID: Int) -> String {
+        "\(mediaType.rawValue):\(sourceID)"
+    }
+
+    nonisolated static func favoriteOrdering(_ lhs: Favorite, _ rhs: Favorite) -> Bool {
+        if lhs.updatedAt != rhs.updatedAt {
+            return lhs.updatedAt > rhs.updatedAt
+        }
+        if lhs.title.localizedStandardCompare(rhs.title) != .orderedSame {
+            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        }
+        if lhs.mediaType != rhs.mediaType {
+            return lhs.mediaType.rawValue < rhs.mediaType.rawValue
+        }
+        return lhs.sourceID < rhs.sourceID
+    }
+
+    nonisolated private static func bumpRevision(defaults: UserDefaults) {
+        defaults.set(defaults.integer(forKey: revisionKey) + 1, forKey: revisionKey)
+    }
+
+    nonisolated private static func categoryTitle(for media: Media, in db: Database) -> String? {
+        guard let categoryID = media.categoryID else { return nil }
+        return try? Category
+            .select(\.title)
+            .where { $0.id.eq(categoryID) }
+            .fetchOne(db)
+    }
+}
 enum MediaType: Int, QueryBindable {
    case movie = 0, series = 1, episode = 2, live = 3
 }
