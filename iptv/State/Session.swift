@@ -36,9 +36,9 @@ final class Session {
     }
     
     var sync: SyncManager.SyncStatus {
-        if syncManager.movieSync == .active || syncManager.seriesSync == .active { return .active }
-        if syncManager.movieSync == .success && syncManager.seriesSync == .success { return .success }
-        if syncManager.movieSync == .failure || syncManager.seriesSync == .failure { return .failure }
+        if syncManager.movieSync == .active || syncManager.seriesSync == .active || syncManager.liveSync == .active { return .active }
+        if syncManager.movieSync == .success && syncManager.seriesSync == .success && syncManager.liveSync == .success { return .success }
+        if syncManager.movieSync == .failure || syncManager.seriesSync == .failure || syncManager.liveSync == .failure { return .failure }
         return .idle
     }
     
@@ -46,6 +46,7 @@ final class Session {
     var syncErrorMessage: String? { syncManager.lastErrorMessage }
     var movieSyncStatus: SyncManager.SyncStatus { syncManager.movieSync }
     var seriesSyncStatus: SyncManager.SyncStatus { syncManager.seriesSync }
+    var liveSyncStatus: SyncManager.SyncStatus { syncManager.liveSync }
     func hydrationState(for category: Category) -> SyncManager.CategoryHydrationState {
         if let state = syncManager.categoryHydrationStates[category.id] {
             return state
@@ -76,7 +77,10 @@ final class Session {
                 try await self.syncManager.updateMovies(in: category)
             case .series:
                 try await self.syncManager.updateSeries(in: category)
-            case .episode, .live: break
+            case .live:
+                try await self.syncManager.updateLiveChannels(in: category)
+            case .episode:
+                break
         }
     }
 

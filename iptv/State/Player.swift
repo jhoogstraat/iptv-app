@@ -770,6 +770,10 @@ final class Player {
     private var currentStreamDescriptor: String {
         guard let currentItem else { return "the current stream" }
 
+        if currentItem.type == .live {
+            return "this live channel"
+        }
+
         if let ext = currentItem.containerExtension?.trimmingCharacters(in: .whitespacesAndNewlines),
            !ext.isEmpty {
             return "a fixed \(ext.uppercased()) stream"

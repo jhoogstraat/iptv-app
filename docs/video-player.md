@@ -7,8 +7,8 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, one-time VLC-to-AV fallback, local watch-activity persistence, and provider-scoped favorite toggling exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie and persisted episode rows through `MediaPlaybackSourceResolver`, including container extensions when available, and movie/episode detail play actions can start real playback with eligible resume from the local database.
-- Current blocker: offline playback, profile-scoped preferences, fully wired episode quick switching, and complete quality/chapter UI exposure remain incomplete.
+- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, one-time VLC-to-AV fallback, local watch-activity persistence, and provider-scoped favorite toggling exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie, persisted episode, and live channel rows through `MediaPlaybackSourceResolver`, including container extensions when available for movies/episodes. Movie/episode detail actions and Live channel rows can start real playback through the shared player path; live playback does not create resume/watch-progress rows.
+- Current blocker: offline playback, profile-scoped preferences, fully wired episode quick switching, complete quality/chapter UI exposure, and richer live EPG/catch-up player controls remain incomplete.
 
 ## User Experience
 
@@ -17,6 +17,7 @@ The video player provides stable playback controls and renderer switching across
 - Player shows backend, quality, buffering, error, and control status where applicable.
 - Advanced controls include audio tracks, subtitles, quality, chapters, output route, speed, aspect ratio, audio delay, volume, brightness where supported, and sleep timer.
 - Unsupported controls remain visible or explained rather than failing silently.
+- Live channel playback hides fixed-duration timeline/seek controls and shows explicit copy that EPG, catch-up, zapping, DVR, and seeking are unavailable for basic live streams.
 - Runtime VLC failure should attempt AV fallback once for the same item.
 
 ## Data and State
@@ -27,6 +28,7 @@ The video player provides stable playback controls and renderer switching across
 - `PlayerRendererContainer` switches renderer by `activeBackendID` and `rendererRevision`.
 - `PlayerAdvancedModels` defines tracks, quality variants, chapters, output routes, capabilities, aspect ratios, and sleep timer options.
 - `WatchActivity` stores provider-scoped movie/episode progress in SQLite, keyed by active provider ID, media type, and remote source ID. Player progress and ended events write rows asynchronously and throttle routine progress updates.
+- Live `.media` rows resolve to Xtream `/live/{username}/{password}/{sourceID}` URLs. Live playback intentionally skips watch-progress persistence until catch-up/program time windows exist.
 
 ## Key Files
 
@@ -51,13 +53,14 @@ The video player provides stable playback controls and renderer switching across
 - Renderer swaps do not reset the shared controls shell.
 - Progress events update timeline UI and persisted watch progress policy.
 - Advanced controls reflect backend capabilities and recover gracefully from unsupported operations.
-- Playback can be launched from movie detail and persisted episode detail rows after URL resolution; series collection rows are intentionally rejected as non-playable.
+- Playback can be launched from movie detail, persisted episode detail rows, and Live channel rows after URL resolution; series collection rows are intentionally rejected as non-playable.
 
 ## Current Gaps / Planned Work
 
 - Favorite toggle in `PlayerView` reads and writes the provider-scoped local `FavoriteStore` for the current media item.
 - Some advanced preferences are learned or stored device-globally in `UserDefaults` rather than exposed through profile-scoped Settings persistence.
 - Episode quick switching is not active; persisted episode rows launch through the shared player path from series detail.
+- Live playback is channel-only: EPG/catch-up timelines, zapping controls, and DVR behavior are planned but not implemented.
 - Offline playback integration is planned but not implemented.
 
 ## Notes for Agents

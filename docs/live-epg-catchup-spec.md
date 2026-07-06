@@ -3,14 +3,14 @@
 ## Status
 - Version: v1
 - Date: 2026-02-24
-- Priority: Deferred (after downloads/offline in current roadmap)
-- Implementation status (reviewed 2026-07-05): Planned-only. No live channel, EPG program, guide cache, catch-up resolver, zapping state, live-mode player UI, or channel/program schema exists. Live sync is commented out and the active Live tab is still placeholder/out-of-scope UI.
+- Priority: Deferred after basic channel-only Live TV.
+- Implementation status (reviewed 2026-07-06): Basic live category/channel sync, local channel browsing, and live channel playback are implemented in `docs/live-tv.md`. EPG program cache, guide timeline, catch-up resolver, zapping state, DVR, and program schema remain planned-only.
 
 ## Objective
 Deliver the complete IPTV live experience with channel navigation, guide context, and catch-up where provider support exists.
 
 ## In Scope
-- Live TV channel listing and grouping.
+- Existing prerequisite: channel-only Live TV listing and playback is handled by `docs/live-tv.md`.
 - EPG timeline view:
   - current program
   - upcoming programs
@@ -35,19 +35,18 @@ Deliver the complete IPTV live experience with channel navigation, guide context
 
 ## Service Requirements
 - Add provider service methods for:
-  - live categories/channels
   - EPG by channel and time window
   - catch-up URL resolution for program/time range.
+- Keep live category/channel sync in the channel-only Live TV feature; this spec starts at guide/catch-up data.
 - Cache EPG windows with TTL and background refresh.
 
 ## UX Requirements
-- Replace Live tab placeholder with:
-  - channel rail/list
-  - guide timeline.
+- Keep the existing channel-only Live tab as the fallback surface.
+- Add a real guide timeline only after provider-scoped program windows exist; do not show fake guide rows.
 - Program details sheet should include:
   - watch live
   - watch from start (if catch-up available).
-- Player should show current channel/program metadata and allow quick channel up/down.
+- Player should show current channel/program metadata and allow quick channel up/down only after EPG/zapping state exists.
 
 ## Player Integration
 - Live player mode should include:
@@ -57,8 +56,8 @@ Deliver the complete IPTV live experience with channel navigation, guide context
 
 ## Failure Handling
 - Missing EPG data:
-  - still allow live playback.
-  - show "No guide data" placeholder in timeline region.
+  - still allow live playback through the existing channel list.
+  - show honest missing-guide copy only in real guide surfaces; do not add empty guide shells to channel-only Live.
 - Catch-up resolution failure:
   - keep live playback available and show retry action.
 
@@ -70,7 +69,7 @@ Deliver the complete IPTV live experience with channel navigation, guide context
 - Channel zapping state transitions.
 
 ## Integration
-- Channel selection starts live playback.
+- Channel selection starts live playback through the channel-only Live feature.
 - Program selection starts catch-up playback when available.
 - Fallback from missing EPG to channel-only live view.
 
@@ -80,7 +79,9 @@ Deliver the complete IPTV live experience with channel navigation, guide context
 - Channel up/down controls in player.
 
 ## Acceptance Criteria
-- User can browse channels, view guide data, and start live playback.
+
+- User can browse channels and start live playback before guide data exists.
+- User can view guide data once EPG sync/cache exists.
 - Catch-up works for eligible programs and degrades gracefully when unavailable.
-- Live tab is no longer placeholder and supports day-to-day IPTV usage.
+- Live tab supports day-to-day IPTV usage without fake EPG rows.
 

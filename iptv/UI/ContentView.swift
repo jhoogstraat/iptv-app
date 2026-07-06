@@ -73,10 +73,14 @@ struct ContentView: View {
                     .customizationID(Tabs.series.customizationID)
                     
                     Tab(Tabs.live.name, systemImage: Tabs.live.symbol, value: Tabs.live) {
-                        ScopedPlaceholderView(
-                            title: "Live TV Is Out of Scope",
-                            message: "Live channels are not included in the current MVP release."
-                        )
+                        LiveScreen()
+                            .requireSessionOrElse {
+                                ContentUnavailableView {
+                                    Label("No provider configured", systemImage: "dot.radiowaves.left.and.right")
+                                } description: {
+                                    Text("Add a provider to sync live categories and play channels.")
+                                }
+                            }
                     }
                     .customizationID(Tabs.live.customizationID)
                 }

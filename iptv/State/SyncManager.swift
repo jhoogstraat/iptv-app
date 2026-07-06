@@ -90,9 +90,6 @@ final class SyncManager {
             seriesSync = .active
             try await syncCategories(.series)
             seriesSync = .success
-            initialSyncPhase = .succeeded
-            lastErrorMessage = nil
-            return .success
         } catch {
             seriesSync = .failure
             initialSyncPhase = .failed
@@ -100,15 +97,23 @@ final class SyncManager {
             logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
             return .failure
         }
+
+        do {
+            initialSyncPhase = .syncingLive
+            liveSync = .active
+            try await syncCategories(.live)
+            liveSync = .success
+            initialSyncPhase = .succeeded
+            lastErrorMessage = nil
+            return .success
+        } catch {
+            liveSync = .failure
+            initialSyncPhase = .failed
+            lastErrorMessage = error.localizedDescription
+            logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
+            return .failure
+        }
         
-//            do {
-//                self.liveSync = .active
-//                try await syncLive()
-//                self.liveSync = .success
-//            } catch {
-//                self.liveSync = .failure(error)
-//                logger.warning("Error syncing: \(error.localizedDescription, privacy: .public)")
-//            }
         
     }
 
@@ -250,6 +255,56 @@ final class SyncManager {
                         $0.trailer = XtreamMapper.text(stream.youtubeTrailer)
                         $0.addedAt = XtreamMapper.date(from: stream.lastModified)
                         $0.backdropURL = XtreamMapper.firstURL(stream.backdropPath)
+                    }.execute(db)
+                }
+
+                try Category.find(category).update { $0.updatedAt = #sql("datetime()") }.execute(db)
+                return try Media.where { $0.categoryID.eq(category) }.fetchCount(db)
+            }
+
+            categoryHydrationStates[category] = count == 0 ? .empty : .populated(count)
+        } catch {
+            categoryHydrationStates[category] = .failed(error.localizedDescription)
+            throw error
+        }
+    }
+
+    func updateLiveChannels(in category: Category.ID) async throws {
+        categoryHydrationStates[category] = .loading
+
+        do {
+            let sourceID = try await database.read { db in
+                try Category.select(\.sourceID)
+                    .where { $0.id.eq(category).and($0.type.eq(MediaType.live)) }
+                    .fetchOne(db)
+            }
+
+            guard let sourceID else {
+                throw SyncError.noSourceIDFound(category)
+            }
+
+            let streams = try await service.getLiveStreams(in: sourceID)
+
+            let count = try await database.write { db in
+                for stream in streams {
+                    let resolvedCategoryID: Category.ID? = if let id = stream.categoryId {
+                        try? Category.select(\.id)
+                            .where { $0.sourceID.eq(id).and($0.type.eq(MediaType.live)) }
+                            .fetchOne(db)
+                    } else {
+                        nil
+                    }
+
+                    try Media.insert {
+                        Media.Draft(from: stream, categoryID: resolvedCategoryID ?? category)
+                    } onConflict: {
+                        ($0.sourceID, $0.type)
+                    } doUpdate: {
+                        $0.title = stream.name
+                        $0.categoryID = #bind(resolvedCategoryID ?? category)
+                        $0.coverURL = XtreamMapper.url(stream.streamIcon)
+                        $0.genre = XtreamMapper.text(stream.streamType)
+                        $0.addedAt = XtreamMapper.date(from: stream.added)
                     }.execute(db)
                 }
 
@@ -409,6 +464,7 @@ extension SyncManager {
         case clearingLibrary
         case syncingMovies
         case syncingSeries
+        case syncingLive
         case succeeded
         case failed
     }

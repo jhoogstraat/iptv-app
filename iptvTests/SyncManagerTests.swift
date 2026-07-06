@@ -9,7 +9,7 @@ import xtream_swift
 @MainActor
 @Suite(.serialized)
 struct SyncManagerTests {
-    @Test func syncPersistsMovieAndSeriesCategories() async throws {
+    @Test func syncPersistsMovieSeriesAndLiveCategories() async throws {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let syncManager = try makeSyncManager(database: database)
@@ -17,6 +17,7 @@ struct SyncManagerTests {
             #expect(syncManager.initialSyncPhase == .idle)
             #expect(syncManager.movieSync == .idle)
             #expect(syncManager.seriesSync == .idle)
+            #expect(syncManager.liveSync == .idle)
 
             let result = await syncManager.sync(provider: Provider.ID())
             
@@ -24,13 +25,20 @@ struct SyncManagerTests {
             #expect(syncManager.initialSyncPhase == .succeeded)
             #expect(syncManager.movieSync == .success)
             #expect(syncManager.seriesSync == .success)
+            #expect(syncManager.liveSync == .success)
 
-            let count = try await database.read {
-                (try Category.fetchCount($0), try Media.fetchCount($0))
+            let (categories, mediaCount) = try await database.read {
+                (try Category.fetchAll($0), try Media.fetchCount($0))
             }
+            let movieCategories = categories.filter { $0.type == .movie }.sorted { $0.sourceID < $1.sourceID }
+            let seriesCategories = categories.filter { $0.type == .series }.sorted { $0.sourceID < $1.sourceID }
+            let liveCategories = categories.filter { $0.type == .live }.sorted { $0.sourceID < $1.sourceID }
             
-            #expect(count.0 == 3)
-            #expect(count.1 == 0)
+            #expect(movieCategories.map(\.sourceID) == ["100", "200"])
+            #expect(seriesCategories.map(\.sourceID) == ["100"])
+            #expect(liveCategories.map(\.sourceID) == ["300", "400"])
+            #expect(liveCategories.map(\.title) == ["Live News", "Sports Live"])
+            #expect(mediaCount == 0)
         }
     }
 
@@ -66,6 +74,43 @@ struct SyncManagerTests {
                 Issue.record("Missing category did not record a failed hydration state")
                 return
             }
+        }
+    }
+
+    @Test func liveCategoryHydrationPersistsChannelsWithLocalMetadata() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(database: database)
+            let result = await syncManager.sync(provider: Provider.ID())
+            #expect(result == .success)
+
+            let liveCategory = try await database.read { db in
+                let category = try Category.where { $0.sourceID.eq("300").and($0.type.eq(MediaType.live)) }.fetchOne(db)
+                return try #require(category)
+            }
+            let session = Session(syncManager: syncManager, providerID: Provider.ID(), database: database)
+
+            #expect(session.hydrationState(for: liveCategory) == .unhydrated)
+
+            try await syncManager.updateLiveChannels(in: liveCategory.id)
+
+            #expect(session.hydrationState(for: liveCategory) == .populated(1))
+
+            let channels = try await database.read { db in
+                try Media.where { $0.type.eq(MediaType.live) }.fetchAll(db)
+            }
+            #expect(channels.count == 1)
+            let channel = try #require(channels.first)
+
+            #expect(channel.sourceID == 7001)
+            #expect(channel.title == "News 24")
+            #expect(channel.categoryID == liveCategory.id)
+            #expect(channel.coverURL == URL(string: "https://example.com/news-24.png"))
+            #expect(channel.addedAt == Date(timeIntervalSince1970: 1_710_000_000))
+            #expect(channel.genre == "live")
+            #expect(channel.containerExtension == nil)
+            #expect(channel.synopsis == nil)
+            #expect(channel.runtimeSeconds == nil)
         }
     }
 
@@ -285,6 +330,32 @@ private final class StubXtreamURLProtocol: URLProtocol {
                         "rating": 8.1,
                         "tmdb": "111",
                         "container_extension": "ts",
+                        "is_adult": 0,
+                    ],
+                ]
+            } else {
+                payload = []
+            }
+        case "get_live_categories":
+            payload = [
+                ["category_id": "300", "category_name": "Live News"],
+                ["category_id": "400", "category_name": "Sports Live"],
+            ]
+        case "get_live_streams":
+            let categoryID = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?
+                .first(where: { $0.name == "category_id" })?
+                .value
+            if categoryID == "300" {
+                payload = [
+                    [
+                        "stream_id": 7001,
+                        "num": 1,
+                        "name": "News 24",
+                        "category_id": "300",
+                        "stream_icon": "https://example.com/news-24.png",
+                        "added": "1710000000",
+                        "stream_type": "live",
                         "is_adult": 0,
                     ],
                 ]
