@@ -49,6 +49,10 @@ struct BrowseScreen: View {
         Set(visibleCategories.map { CategoryGrouping.key(for: $0.title) })
     }
 
+    private var visibleHydrationStates: [SyncManager.CategoryHydrationState] {
+        visibleCategories.map { session.hydrationState(for: $0) }
+    }
+
     private var fallbackScreenTitle: String {
         if let category {
             return category.title
@@ -140,6 +144,7 @@ struct BrowseScreen: View {
                 hiddenGroupKeys: hiddenGroupKeys,
                 selectedCategory: category,
                 hydrationState: categoryHydrationState,
+                visibleHydrationStates: visibleHydrationStates,
                 retryHydration: {
                     Task { await hydrateSelectedCategory(force: true) }
                 }
@@ -180,6 +185,7 @@ struct CoverGridSection: View {
     let hiddenGroupKeys: Set<String>
     let selectedCategory: Category?
     let hydrationState: SyncManager.CategoryHydrationState
+    let visibleHydrationStates: [SyncManager.CategoryHydrationState]
     let retryHydration: () -> Void
     @FetchAll private var media: [Media]
 
@@ -191,6 +197,7 @@ struct CoverGridSection: View {
         hiddenGroupKeys: Set<String>,
         selectedCategory: Category?,
         hydrationState: SyncManager.CategoryHydrationState,
+        visibleHydrationStates: [SyncManager.CategoryHydrationState],
         retryHydration: @escaping () -> Void
     ) {
         self.type = type
@@ -200,10 +207,10 @@ struct CoverGridSection: View {
         self.hiddenGroupKeys = hiddenGroupKeys
         self.selectedCategory = selectedCategory
         self.hydrationState = hydrationState
+        self.visibleHydrationStates = visibleHydrationStates
         self.retryHydration = retryHydration
         _media = FetchAll(Media.where {
             $0.type.eq(type)
-                .and($0.title.contains(filter))
         })
     }
 
@@ -212,7 +219,8 @@ struct CoverGridSection: View {
             media,
             categories: categories,
             state: filterState,
-            hiddenGroupKeys: hiddenGroupKeys
+            hiddenGroupKeys: hiddenGroupKeys,
+            query: filter
         )
     }
 
@@ -220,14 +228,20 @@ struct CoverGridSection: View {
     var body: some View {
         if selectedCategory == nil, media.isEmpty {
             ContentUnavailableView {
-                Label("Choose a category", systemImage: "folder")
+                Label("No local streams loaded", systemImage: "folder.badge.questionmark")
             } description: {
-                Text("Categories sync first. Open a category to lazily load its local streams.")
+                Text("Categories sync first. Open a category to lazily load its streams into the local library. Search and filters only use rows already stored locally.")
             }
         } else if let selectedCategory {
             switch hydrationState {
-            case .unhydrated, .loading:
-                CoverGrid(media: [], categories: categories)
+            case .unhydrated:
+                ContentUnavailableView {
+                    Label("Loading \(selectedCategory.title)", systemImage: "clock.arrow.circlepath")
+                } description: {
+                    Text("This category is being hydrated from the provider into the local database.")
+                }
+            case .loading:
+                BrowseLoadingGrid()
             case .empty:
                 ContentUnavailableView {
                     Label("No \(selectedCategory.title) items", systemImage: "tray")
@@ -255,10 +269,82 @@ struct CoverGridSection: View {
         if filteredMedia.isEmpty {
             ContentUnavailableView.search(text: filter)
         } else {
-            CoverGrid(media: filteredMedia, categories: categories)
-                .id(filterState)
-                .transition(.scale(scale: 0.9).combined(with: .opacity))
+            VStack(alignment: .leading, spacing: 12) {
+                coverageStatus
+                CoverGrid(media: filteredMedia, categories: categories)
+                    .id(filterState)
+                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+            }
         }
+    }
+
+    @ViewBuilder
+    private var coverageStatus: some View {
+        if selectedCategory == nil, let message = partialCoverageMessage {
+            Label(message, systemImage: "externaldrive.badge.questionmark")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.top, 8)
+        }
+    }
+
+    private var partialCoverageMessage: String? {
+        let loadingCount = visibleHydrationStates.filter { $0 == .loading }.count
+        let unhydratedCount = visibleHydrationStates.filter { $0 == .unhydrated }.count
+        let failedCount = visibleHydrationStates.filter { state in
+            if case .failed = state { return true }
+            return false
+        }.count
+
+        if loadingCount > 0 {
+            return "\(loadingCount) category \(loadingCount == 1 ? "is" : "are") still loading; results are local and may be partial."
+        }
+
+        if unhydratedCount > 0 {
+            return "\(unhydratedCount) category \(unhydratedCount == 1 ? "has" : "have") not been opened yet; results only include hydrated local rows."
+        }
+
+        if failedCount > 0 {
+            return "\(failedCount) category \(failedCount == 1 ? "failed" : "failed") to load; retry from its category view for complete local coverage."
+        }
+
+        return nil
+    }
+}
+
+private struct BrowseLoadingGrid: View {
+    private let columns = [
+        GridItem(.adaptive(minimum: 150, maximum: 170), spacing: 16, alignment: .top)
+    ]
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 18) {
+                ForEach(0..<12, id: \.self) { _ in
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.secondary.opacity(0.12))
+                        .overlay {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Spacer()
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(Color.white.opacity(0.35))
+                                    .frame(height: 12)
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(Color.white.opacity(0.24))
+                                    .frame(width: 72, height: 10)
+                            }
+                            .padding(12)
+                        }
+                        .aspectRatio(2 / 3, contentMode: .fit)
+                        .redacted(reason: .placeholder)
+                        .accessibilityHidden(true)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 20)
+        }
+        .accessibilityLabel("Loading streams")
     }
 }
 

@@ -6,9 +6,9 @@ Media Details provides the focused destination for a selected movie or series it
 
 ## Status
 
-- Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/favorite/download actions, and bridges to the shared player.
-- Implementation status (reviewed 2026-07-05): Partial. `MediaDetailDestination` routes movies, series, and episodes to explicit detail paths. Browse grids, search results, and reusable media rows open details instead of placeholders. `MovieDetailScreen` uses a hero-first streaming layout and starts playback through `Player.load`, which resolves movie URLs through the active Xtream provider and synced source ID.
-- Series detail has its own hero-first route with Episodes/Details tabs and a season selector shell, but local schema/sync do not yet persist seasons or playable episode rows for a selected series.
+- Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play for playable rows, and bridges to the shared player; favorite/download controls stay explicit unsupported states until their feature stores exist.
+- Implementation status (reviewed 2026-07-06): `MediaDetailDestination` routes movies, series, episodes, and live unsupported states explicitly. Browse grids, search results, and reusable media rows open details instead of generic placeholders. `MovieDetailScreen` uses a hero-first streaming layout, refreshes Xtream VOD detail metadata through `Session`/`SyncManager`, persists the result locally, and starts playback through `Player.load`, which resolves movie URLs through the active Xtream provider and synced source ID/container extension.
+- Series detail has its own hero-first route with Episodes/Details tabs, a season selector, local episode rows, and explicit unavailable copy when no episode rows are persisted. `SyncManager.enrichDetails` uses the Xtream series detail endpoint to persist series metadata, seasons, and episode `Media` rows linked to their parent series; routine rendering reads those local rows.
 
 ## User Experience
 
@@ -31,10 +31,10 @@ Media Details provides the focused destination for a selected movie or series it
 
 ## Data and State
 
-- Current detail input: local `Media` row.
-- Current available fields: title, cover URL, rating, source ID, media type, category ID, TMDB ID.
-- Target fields: description, year, duration, cast/crew where available, genres, language, added date, trailer, episodes/seasons, favorite state, download state, watch progress, and playback URL resolution metadata.
-- Player action should call `Player.load` after resolving a playable URL/source.
+- Current detail input: local `Media` row, refreshed from SQLiteData while the detail screen is open.
+- Current persisted fields: title, cover/backdrop URL, rating, source ID, media type, category ID, TMDB ID, synopsis/plot, release date/year, runtime, genre, cast, director, trailer, added date, country when exposed by Xtream DTOs, parent-series/season/episode linkage, and movie/episode container extension.
+- Series seasons are stored in `SeriesSeason`; playable episodes are stored as `Media(type: .episode)` rows linked by `parentSeriesID`.
+- Player action calls `Player.load` after resolving a playable URL/source. Series collection rows remain explicitly non-playable.
 
 ## Key Files
 
@@ -61,10 +61,9 @@ Media Details provides the focused destination for a selected movie or series it
 ## Current Gaps / Planned Work
 
 - Recommendation and favorites surfaces are still placeholders, so their detail routing will become active when those surfaces render local `Media` rows.
-- Series episode sync is incomplete; the series detail screen exposes the target Episodes/Details structure with a clear unavailable state instead of playable episode rows.
-- Current schema lacks rich detail metadata, watch/favorite/download state, and movie container extensions for fully qualified playback URLs.
-- Favorite and download actions are visible as detail affordances but are not persisted until their feature stores are migrated.
-- Placeholder about text has been replaced by explicit unavailable metadata copy, but provider synopsis/year/runtime/cast fields are still not available locally.
+- Favorite and download actions are visible as explicit unavailable/disabled affordances until their persisted feature state is implemented.
+- Audio language, subtitle language, and profile/preference metadata are not exposed because current Xtream catalog/detail DTOs do not provide reliable local fields for those filters.
+- Missing provider metadata renders as explicit unavailable copy in the synopsis, metadata grid, and episode rows instead of fake placeholder values.
 
 ## Notes for Agents
 

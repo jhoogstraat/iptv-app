@@ -30,6 +30,27 @@ struct LibraryFilterEngineTests {
         #expect(LibraryFilterEngine.filteredMedia(media, categories: categories, state: categoryAndRating).map(\.sourceID) == [100])
     }
 
+    @Test func titleQueriesUseSharedTrimCaseDiacriticAndWhitespaceNormalization() {
+        let media = [
+            makeMedia(id: 1, sourceID: 100, title: "Café   del\tMar"),
+            makeMedia(id: 2, sourceID: 101, title: "Cafe Racer"),
+            makeMedia(id: 3, sourceID: 102, title: "Del Mar Archive"),
+        ]
+        let state = LibraryFilterState()
+        let normalizedReference = LibraryQueryNormalizer.normalized(" cafe del mar ")
+
+        #expect(LibraryQueryNormalizer.normalized("CAFÉ\t\tDEL   MAR") == normalizedReference)
+
+        for query in [" cafe del mar ", "CAFÉ DEL MAR", "cafe\u{301}    del\nmar"] {
+            #expect(
+                LibraryFilterEngine
+                    .filteredMedia(media, categories: [], state: state, query: query)
+                    .map(\.sourceID) == [100],
+                "Query \(query) should match the same local title row after shared normalization."
+            )
+        }
+    }
+
     @Test func minimumRatingExcludesMissingRatings() {
         let categories = [makeCategory(id: 1, title: "|EN| Action")]
         let media = [

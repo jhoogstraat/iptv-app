@@ -7,7 +7,7 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-05): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, and one-time VLC-to-AV fallback exist. `Player.playbackURL(for:)` now resolves active-provider Xtream movie/episode URLs through `MediaPlaybackSourceResolver`, and movie detail play actions can start real playback.
+- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, and one-time VLC-to-AV fallback exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie and persisted episode rows through `MediaPlaybackSourceResolver`, including container extensions when available, and movie/episode detail play actions can start real playback.
 - Current blocker: persisted watch progress, persisted favorites, offline playback, profile-scoped preferences, fully wired episode quick switching, and complete quality/chapter UI exposure remain incomplete.
 
 ## User Experience
@@ -38,6 +38,7 @@ The video player provides stable playback controls and renderer switching across
 - `iptv/Player/VLCKitContentView.swift`
 - `iptv/Player/AVKitContentView.swift`
 - `iptv/Player/VLCCompatibility.swift`
+- `iptv/Player/MediaPlaybackSourceResolver.swift`
 - `iptv/UI/Views/ViewModifiers.swift`
 - `iptv/PlayerWindow.swift`
 
@@ -49,14 +50,14 @@ The video player provides stable playback controls and renderer switching across
 - Renderer swaps do not reset the shared controls shell.
 - Progress events update timeline UI and persisted watch progress policy.
 - Advanced controls reflect backend capabilities and recover gracefully from unsupported operations.
-- Playback can be launched from movie detail after URL resolution; series collections are intentionally rejected until episode rows are available.
+- Playback can be launched from movie detail and persisted episode detail rows after URL resolution; series collection rows are intentionally rejected as non-playable.
 
 ## Current Gaps / Planned Work
 
 - Persisted watch progress is not implemented; `persistProgressIfNeeded()` and `markCurrentItemCompleted()` are currently no-op/commented.
 - Favorite toggle in `PlayerView` is local UI state only, not persisted.
 - Some advanced preferences are learned or in-memory rather than exposed through Settings persistence.
-- Episode quick switching appears planned/commented and is not fully active.
+- Episode quick switching appears planned/commented and is not fully active, but persisted episode rows can launch through the shared player path from series detail.
 - Offline playback integration is planned but not implemented.
 
 ## Notes for Agents

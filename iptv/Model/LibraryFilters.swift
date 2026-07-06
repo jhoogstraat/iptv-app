@@ -63,6 +63,31 @@ enum CategoryGrouping: Sendable {
     }
 }
 
+/// Shared query normalization for local browse, search, and filter matching.
+///
+/// Normalization intentionally stays simple and deterministic: trim, lowercase, fold
+/// diacritics/case/width, and collapse repeated whitespace.
+enum LibraryQueryNormalizer: Sendable {
+    static func normalized(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
+    }
+
+    static func isEmpty(_ value: String) -> Bool {
+        normalized(value).isEmpty
+    }
+
+    static func matches(_ candidate: String, query: String) -> Bool {
+        let normalizedQuery = normalized(query)
+        guard !normalizedQuery.isEmpty else { return true }
+        return normalized(candidate).contains(normalizedQuery)
+    }
+}
+
 /// Local, composable filters shared by browse and search surfaces.
 ///
 /// Semantics are AND across filter groups and OR within multi-select groups.
@@ -109,12 +134,13 @@ enum LibraryFilterEngine: Sendable {
         _ media: [Media],
         categories: [Category],
         state: LibraryFilterState,
-        hiddenGroupKeys: Set<String> = []
+        hiddenGroupKeys: Set<String> = [],
+        query: String = ""
     ) -> [Media] {
         let categoryByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
 
         return media
-            .filter { matches($0, categoryByID: categoryByID, state: state, hiddenGroupKeys: hiddenGroupKeys) }
+            .filter { matches($0, categoryByID: categoryByID, state: state, hiddenGroupKeys: hiddenGroupKeys, query: query) }
             .sorted { ordered($0, before: $1, by: state.sort) }
     }
 
@@ -123,7 +149,8 @@ enum LibraryFilterEngine: Sendable {
         _ media: Media,
         categoryByID: [Category.ID: Category],
         state: LibraryFilterState,
-        hiddenGroupKeys: Set<String> = []
+        hiddenGroupKeys: Set<String> = [],
+        query: String = ""
     ) -> Bool {
         let category = media.categoryID.flatMap { categoryByID[$0] }
         let groupKey = category.map { CategoryGrouping.key(for: $0.title) } ?? CategoryGrouping.ungroupedKey
@@ -144,6 +171,10 @@ enum LibraryFilterEngine: Sendable {
             guard let rating = media.rating, rating >= minimumRating else {
                 return false
             }
+        }
+
+        if !LibraryQueryNormalizer.matches(media.title, query: query) {
+            return false
         }
 
         return true

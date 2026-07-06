@@ -6,9 +6,9 @@ Movies and Series browse gives users fast local category navigation and poster-g
 
 ## Status
 
-- Target state: Movies and Series share one robust browse implementation with local category selection, local search/filter/sort, adaptive poster grids, skeleton loading, detail navigation, and lazy category hydration.
-- Implementation status (reviewed 2026-07-05): Partial. `BrowseScreen(type:)` backs both Movies and Series, fetches local categories by `MediaType`, exposes shared filters/search/sorts, lazily hydrates selected unhydrated categories, and renders local `Media` in an adaptive poster grid. Grid items now navigate to `MediaDetailDestination`.
-- Current gap: initial browse has no selected category by default and therefore spans all visible categories; empty `media` still renders skeleton tiles, which can conflate loading and truly empty categories.
+- Target state: Movies and Series share one robust browse implementation with local category selection, local search/filter/sort, adaptive poster grids, skeleton loading only during real loading, detail navigation, and lazy category hydration.
+- Implementation status (reviewed 2026-07-06): Implemented for the active P1 Library UX path. `BrowseScreen(type:)` backs both Movies and Series, fetches local categories by `MediaType`, exposes shared filters/search/sorts, lazily hydrates selected unhydrated categories, shows explicit unhydrated/loading/empty/failed states, and renders local `Media` in an adaptive poster grid. Grid items navigate to `MediaDetailDestination`.
+- Current gap: initial browse can span all visible categories; when only part of the catalog is hydrated, Browse shows a partial-local-coverage notice instead of pretending results are complete.
 
 ## User Experience
 
@@ -24,9 +24,9 @@ Movies and Series browse gives users fast local category navigation and poster-g
 - `BrowseScreen.type` controls whether categories are movie or series categories.
 - `@FetchAll(Category.where { $0.type.eq(type) })` supplies categories.
 - `selectedCategoryID` is optional; when unset, the grid spans all visible categories for the current media type.
-- `searchText` filters local media titles for the current media type before filter-state narrowing.
+- `searchText` is normalized through `LibraryQueryNormalizer` before in-memory matching, so scoped browse and global search share trim/lowercase/diacritic-fold/whitespace-collapse semantics.
 - `BrowseSort.title`, `.newest`, and `.rating` are applied by `LibraryFilterEngine`.
-- `CoverGridSection` fetches local `Media` rows for the current type and title filter, then applies category/group/rating/sort filters.
+- `CoverGridSection` fetches local `Media` rows for the current type, then applies the shared query, category/group/rating/sort filters in memory.
 - `Category.updatedAt == nil` triggers `session.update(type, in: category.id)`.
 
 ## Key Files
@@ -52,12 +52,10 @@ Movies and Series browse gives users fast local category navigation and poster-g
 
 ## Current Gaps / Planned Work
 
-- Empty `media` currently renders skeleton tiles, which may conflate loading and truly empty categories.
 - Current search is title-only and does not use a full-text index or relevance scoring.
-- The schema lacks metadata needed for richer browse filters such as year, genre, language, audio language, subtitle language, and added date.
-- Series detail routing exists, but episode sync/persistence is incomplete.
+- Metadata-backed filters such as genre, release period, country, and added date are not exposed until the UI can prove those fields are populated enough for honest filtering.
 - Favorite and download affordances on detail surfaces are not persisted yet.
-- There is no row-level provider isolation for catalog tables.
+- There is no row-level provider isolation for catalog tables beyond the single active-provider reset model.
 
 ## Notes for Agents
 

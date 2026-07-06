@@ -97,21 +97,20 @@ struct SearchScreen: View {
     }
 
     private var searchIsActive: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || filterState.hasActiveFilters
+        !LibraryQueryNormalizer.isEmpty(searchText) || filterState.hasActiveFilters
     }
 
     private var results: [Media] {
         let scopedMedia = media.filter { item in
-            guard scope.includes(item.type) else { return false }
-            guard !searchText.isEmpty else { return true }
-            return item.title.localizedStandardContains(searchText)
+            scope.includes(item.type)
         }
 
         return LibraryFilterEngine.filteredMedia(
             scopedMedia,
             categories: visibleCategories,
             state: filterState,
-            hiddenGroupKeys: hiddenGroupKeys
+            hiddenGroupKeys: hiddenGroupKeys,
+            query: searchText
         )
     }
 

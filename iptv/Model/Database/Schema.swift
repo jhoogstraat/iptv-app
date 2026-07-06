@@ -166,6 +166,67 @@ func appDatabase() throws -> any DatabaseWriter {
         ) STRICT
         """).execute(db)
     }
+
+    migrator.registerMigration("Persist media metadata and series episodes") { db in
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "parentSeriesID" INTEGER
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "seasonNumber" INTEGER
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "episodeNumber" INTEGER
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "containerExtension" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "synopsis" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "releaseDate" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "runtimeSeconds" INTEGER
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "genre" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "cast" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "director" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "trailer" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "addedAt" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "backdropURL" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "media" ADD COLUMN "country" TEXT
+        """).execute(db)
+
+        try #sql("""
+        CREATE TABLE "series_seasons" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "seriesID" INTEGER NOT NULL,
+            "seasonNumber" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "overview" TEXT,
+            "episodeCount" INTEGER,
+            "coverURL" TEXT,
+            "releaseDate" TEXT,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("seriesID", "seasonNumber"),
+            FOREIGN KEY ("seriesID") REFERENCES "media"("id") ON DELETE CASCADE
+        ) STRICT
+        """).execute(db)
+    }
     
     try migrator.migrate(database)
     
@@ -202,6 +263,33 @@ struct Media: Hashable, Identifiable, Sendable {
     let tmdbID: String?
     let coverURL: URL?
     let rating: Double?
+    var parentSeriesID: Int? = nil
+    var seasonNumber: Int? = nil
+    var episodeNumber: Int? = nil
+    var containerExtension: String? = nil
+    var synopsis: String? = nil
+    var releaseDate: Date? = nil
+    var runtimeSeconds: Int? = nil
+    var genre: String? = nil
+    var cast: String? = nil
+    var director: String? = nil
+    var trailer: String? = nil
+    var addedAt: Date? = nil
+    var backdropURL: URL? = nil
+    var country: String? = nil
+    var updatedAt: Date = .now
+}
+
+@Table("series_seasons")
+struct SeriesSeason: Hashable, Identifiable, Sendable {
+    let id: Int
+    let seriesID: Media.ID
+    let seasonNumber: Int
+    let title: String
+    let overview: String?
+    let episodeCount: Int?
+    let coverURL: URL?
+    let releaseDate: Date?
     var updatedAt: Date = .now
 }
 

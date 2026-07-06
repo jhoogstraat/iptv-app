@@ -7,7 +7,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 ## Status
 
 - Target state: one root gate decides onboarding versus main shell; one canonical tab model defines app surfaces; feature screens own their internal stacks and detail routing.
-- Implementation status (reviewed 2026-07-05): Partial. `Tabs` is the canonical tab identity model, `ContentView` renders a `sidebarAdaptable` tab shell, Search uses SwiftUI's search role, Movies/Series are session-guarded `NavigationStack`s, browse/search rows route to `MediaDetailDestination`, and root player presentation is wired through `IPTVApp`, `.withVideoPlayer()`, and macOS `PlayerWindow`.
+- Implementation status (reviewed 2026-07-06): Partial. `Tabs` is the canonical tab identity model, `ContentView` renders a `sidebarAdaptable` tab shell, Search uses SwiftUI's search role, Movies/Series are session-guarded `NavigationStack`s, browse/search rows route to `MediaDetailDestination`, series detail episode rows route to `EpisodeDetailTile`, and root player presentation is wired through `IPTVApp`, `.withVideoPlayer()`, and macOS `PlayerWindow`.
 - Current gaps: For You, Live, and Favorites are inline placeholders; Downloads delegates to a placeholder `DownloadsScreen`; there is still no central route enum or shared `NavigationPath` for media details.
 
 ## User Experience

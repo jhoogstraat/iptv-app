@@ -189,6 +189,9 @@ final class SyncManager {
                         $0.coverURL = URL(string: stream.streamIcon)
                         $0.rating = stream.rating
                         $0.categoryID = #bind(resolvedCategoryID ?? category)
+                        $0.containerExtension = XtreamMapper.text(stream.containerExtension)
+                        $0.trailer = XtreamMapper.text(stream.trailer)
+                        $0.addedAt = XtreamMapper.date(from: stream.added)
                     }.execute(db)
                 }
 
@@ -235,10 +238,18 @@ final class SyncManager {
                         ($0.sourceID, $0.type)
                     } doUpdate: {
                         $0.title = stream.name
-                        $0.tmdbID = stream.tmdb
-                        $0.coverURL = stream.cover.flatMap(URL.init)
+                        $0.tmdbID = XtreamMapper.text(stream.tmdb)
+                        $0.coverURL = XtreamMapper.url(stream.cover)
                         $0.rating = stream.rating
                         $0.categoryID = #bind(resolvedCategoryID ?? category)
+                        $0.synopsis = XtreamMapper.text(stream.plot)
+                        $0.releaseDate = stream.releaseDate
+                        $0.runtimeSeconds = XtreamMapper.runtimeSeconds(fromRuntime: stream.episodeRuntime)
+                        $0.cast = XtreamMapper.text(stream.cast)
+                        $0.director = XtreamMapper.text(stream.director)
+                        $0.trailer = XtreamMapper.text(stream.youtubeTrailer)
+                        $0.addedAt = XtreamMapper.date(from: stream.lastModified)
+                        $0.backdropURL = XtreamMapper.firstURL(stream.backdropPath)
                     }.execute(db)
                 }
 
@@ -252,8 +263,129 @@ final class SyncManager {
             throw error
         }
     }
+
+    func enrichDetails(for mediaID: Media.ID) async throws {
+        let media = try await database.read { db in
+            try Media.find(db, key: mediaID)
+        }
+
+        switch media.type {
+        case .movie:
+            try await enrichMovieDetails(media)
+        case .series:
+            try await enrichSeriesDetails(media)
+        case .episode, .live:
+            return
+        }
+    }
+
+    private func enrichMovieDetails(_ movie: Media) async throws {
+        let details = try await service.getVodInfo(of: movie.sourceID)
+
+        try await database.write { db in
+            let categoryID: Category.ID? = try? Category.select(\.id)
+                .where { $0.sourceID.eq(details.data.categoryId).and($0.type.eq(MediaType.movie)) }
+                .fetchOne(db)
+
+            try Media.find(movie.id).update {
+                $0.title = XtreamMapper.text(details.info.name) ?? movie.title
+                $0.categoryID = #bind(categoryID ?? movie.categoryID)
+                $0.tmdbID = XtreamMapper.text(details.info.tmdbId) ?? movie.tmdbID
+                $0.coverURL = XtreamMapper.url(details.info.movieImage) ?? XtreamMapper.url(details.info.coverBig) ?? movie.coverURL
+                $0.rating = details.info.rating ?? movie.rating
+                $0.containerExtension = XtreamMapper.text(details.data.containerExtension) ?? movie.containerExtension
+                $0.synopsis = XtreamMapper.text(details.info.plot) ?? XtreamMapper.text(details.info.description)
+                $0.releaseDate = #bind(details.info.releaseDate)
+                $0.runtimeSeconds = XtreamMapper.runtimeSeconds(
+                    from: details.info.durationSecs,
+                    minutes: details.info.runtime,
+                    duration: details.info.duration
+                )
+                $0.genre = XtreamMapper.text(details.info.genre)
+                $0.cast = XtreamMapper.text(details.info.cast) ?? XtreamMapper.text(details.info.actors)
+                $0.director = XtreamMapper.text(details.info.director)
+                $0.trailer = XtreamMapper.text(details.info.youtubeTrailer) ?? movie.trailer
+                $0.addedAt = XtreamMapper.date(from: details.data.added) ?? movie.addedAt
+                $0.backdropURL = details.info.backdropPath.lazy.compactMap(URL.init).first ?? movie.backdropURL
+                $0.country = XtreamMapper.text(details.info.country)
+            }.execute(db)
+        }
+    }
+
+    private func enrichSeriesDetails(_ series: Media) async throws {
+        let details = try await service.getSeriesInfo(of: String(series.sourceID))
+
+        try await database.write { db in
+            let categoryID: Category.ID? = try? Category.select(\.id)
+                .where { $0.sourceID.eq(details.info.categoryId).and($0.type.eq(MediaType.series)) }
+                .fetchOne(db)
+
+            try Media.find(series.id).update {
+                $0.title = XtreamMapper.text(details.info.name) ?? series.title
+                $0.categoryID = #bind(categoryID ?? series.categoryID)
+                $0.tmdbID = XtreamMapper.text(details.info.tmdb) ?? series.tmdbID
+                $0.coverURL = XtreamMapper.url(details.info.cover) ?? series.coverURL
+                $0.rating = Double(details.info.rating) ?? series.rating
+                $0.synopsis = XtreamMapper.text(details.info.plot)
+                $0.releaseDate = #bind(details.info.releaseDate)
+                $0.runtimeSeconds = XtreamMapper.runtimeSeconds(fromRuntime: details.info.episodeRuntime)
+                $0.genre = XtreamMapper.text(details.info.genre)
+                $0.cast = XtreamMapper.text(details.info.cast)
+                $0.director = XtreamMapper.text(details.info.director)
+                $0.trailer = XtreamMapper.text(details.info.youtubeTrailer)
+                $0.addedAt = XtreamMapper.date(from: details.info.lastModified) ?? series.addedAt
+                $0.backdropURL = details.info.backdropPath.lazy.compactMap(URL.init).first ?? series.backdropURL
+            }.execute(db)
+
+            for season in details.seasons {
+                try SeriesSeason.insert {
+                    SeriesSeason.Draft(from: season, seriesID: series.id)
+                } onConflict: {
+                    ($0.seriesID, $0.seasonNumber)
+                } doUpdate: {
+                    $0.title = season.name
+                    $0.overview = XtreamMapper.text(season.overview)
+                    $0.episodeCount = #bind(season.episodeCount)
+                    $0.coverURL = XtreamMapper.url(season.coverBig) ?? XtreamMapper.url(season.cover)
+                    $0.releaseDate = XtreamMapper.date(from: season.releaseDate) ?? XtreamMapper.date(from: season.airDate)
+                }.execute(db)
+            }
+
+            for episodes in details.episodes.values {
+                for episode in episodes {
+                    guard let draft = Media.Draft(from: episode, series: series, categoryID: categoryID ?? series.categoryID) else {
+                        logger.warning("Skipping series episode with non-numeric source id: \(episode.id, privacy: .public)")
+                        continue
+                    }
+
+                    try Media.insert {
+                        draft
+                    } onConflict: {
+                        ($0.sourceID, $0.type)
+                    } doUpdate: {
+                        $0.title = episode.title
+                        $0.categoryID = #bind(categoryID ?? series.categoryID)
+                        $0.tmdbID = XtreamMapper.text(episode.info.tmdbId)
+                        $0.coverURL = XtreamMapper.url(episode.info.movieImage)
+                        $0.rating = episode.info.rating
+                        $0.parentSeriesID = #bind(series.id)
+                        $0.seasonNumber = #bind(episode.season)
+                        $0.episodeNumber = #bind(episode.episodeNum)
+                        $0.containerExtension = XtreamMapper.text(episode.containerExtension)
+                        $0.synopsis = XtreamMapper.text(episode.info.overview)
+                        $0.releaseDate = XtreamMapper.date(from: episode.info.releaseDate) ?? XtreamMapper.date(from: episode.info.airDate)
+                        $0.runtimeSeconds = XtreamMapper.runtimeSeconds(from: episode.info.durationSecs, duration: episode.info.duration)
+                        $0.cast = XtreamMapper.text(episode.info.crew)
+                        $0.addedAt = XtreamMapper.date(from: episode.added)
+                        $0.backdropURL = XtreamMapper.firstURL(episode.info.backdropPath)
+                    }.execute(db)
+                }
+            }
+        }
+    }
     private func clearCatalog() async throws {
         try await database.write { db in
+            try SeriesSeason.delete().execute(db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
         }
@@ -287,4 +419,4 @@ extension SyncManager {
     }
 }
 
-private let logger = Logger(subsystem: "IPTV", category: "SyncManager")
+private nonisolated let logger = Logger(subsystem: "IPTV", category: "SyncManager")
