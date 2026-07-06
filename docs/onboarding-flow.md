@@ -9,6 +9,7 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 - Target state: first launch presents onboarding, captures a provider, runs initial sync, marks the provider initialized only after successful sync, and then routes into the main app shell.
 - Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. `OnboardingFlowView` supports source selection, credentials, syncing, and failed states. Xtream API is supported; M3U8 playlist is shown disabled as coming soon.
 - Current sync scope: initial sync clears local `Media`/`Category` rows and syncs movie and series categories. Live is not part of the active initial sync.
+- Implementation status (reviewed 2026-07-05): Partial / Xtream core implemented. Source selection, credential validation, initial movie/series category sync, failed-state retry, and uninitialized-provider auto-sync are implemented. M3U8 and live sync remain planned, and launch recovery still uses `try!`.
 
 ## User Experience
 

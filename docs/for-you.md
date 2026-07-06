@@ -7,8 +7,8 @@ For You is the landing and discovery experience. It should make the app feel lik
 ## Status
 
 - Target state: For You renders a personalized local discovery page using provider-scoped catalog data and watch activity.
-- Current implementation: the active `ForYouScreen` is a placeholder saying the personalized landing screen is being migrated to SQLiteData. Reusable For You view components exist under `iptv/UI/Views/ForYou/`. Browse/search prefix visibility is implemented, but no recommendation query consumes it yet. An older detailed document exists at `docs/for-you-legacy.md` and should be reconciled before implementation resumes.
-- Current navigation: `ContentView` currently inlines a For You placeholder instead of presenting `ForYouScreen`.
+- Implementation status (reviewed 2026-07-05): Partial shell only. `ForYouScreen` is a placeholder and `ContentView` inlines the same placeholder for the Home tab. Reusable For You components exist, but `ForYouRailView` is still TODO/commented, `ContinueWatchingCardView` has watch-time logic commented, and no recommendation or watch-activity query backs the surface.
+- Current navigation: `Tabs.home` is the first tab, but `ContentView` currently does not present `ForYouScreen`.
 
 ## User Experience
 
@@ -23,8 +23,8 @@ For You is the landing and discovery experience. It should make the app feel lik
 
 - Target inputs: local Movies and Series catalog, provider-scoped watch progress, ratings, recency, categories/groups, favorites, and downloads where relevant.
 - Target outputs: hero item, continue watching rail, recommendation rails, badges, and routing metadata.
-- Current active schema does not expose watch progress, favorites, or recommendation persistence.
-- Existing UI components include hero, rail, and continue-watching card views.
+- Current active schema does not expose watch progress, favorites, downloads, recommendation persistence, or provider foreign keys on catalog rows.
+- Existing UI components include hero, rail, and continue-watching card views, but they are skeletal and not connected to a recommendation data source.
 
 ## Key Files
 

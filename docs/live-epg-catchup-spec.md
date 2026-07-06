@@ -4,6 +4,7 @@
 - Version: v1
 - Date: 2026-02-24
 - Priority: Deferred (after downloads/offline in current roadmap)
+- Implementation status (reviewed 2026-07-05): Planned-only. No live channel, EPG program, guide cache, catch-up resolver, zapping state, live-mode player UI, or channel/program schema exists. Live sync is commented out and the active Live tab is still placeholder/out-of-scope UI.
 
 ## Objective
 Deliver the complete IPTV live experience with channel navigation, guide context, and catch-up where provider support exists.

@@ -4,6 +4,7 @@
 - Version: v1
 - Date: 2026-02-24
 - Priority: P1 (ships with Library and Search)
+- Implementation status (reviewed 2026-07-05): Not implemented. There is no `UserProfile`, `ProfileStore`, profile picker, profile management UI, migration, or profile-scoped persistence. `Player.loadSavedPreferencesForCurrentProfile()` currently reads and writes global `UserDefaults` keys, and favorites/downloads/watch activity persistence required for profile isolation is absent or commented out.
 
 ## Objective
 Add basic household profiles with isolated user state so each user has independent favorites, watch history, and playback preferences.

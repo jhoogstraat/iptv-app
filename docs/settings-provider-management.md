@@ -7,7 +7,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Status
 
 - Target state: Settings is the durable management surface for provider configuration, library organization, playback defaults, and app information.
-- Current implementation: `SettingsScreen` has destinations for Provider, Library, Playback, and About. Provider overview and configuration are active. Library and playback sections contain planned disabled/TODO controls.
+- Implementation status (reviewed 2026-07-05): Partial. `SettingsScreen` has Provider, Library, Playback, and About destinations; provider save/delete flows are active; macOS uses the same `ProviderManager`; and Library prefix visibility is partly active through `CategoryPrefixVisibilitySelector` plus provider-keyed `UserDefaults`. Playback defaults and About help/legal remain placeholders.
 - Current provider behavior: editing provider credentials marks the provider uninitialized and active; root routing then returns to onboarding to run initial sync.
 
 ## User Experience
@@ -15,7 +15,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 - Settings overview lists Provider, Library, Playback, and About destinations.
 - Provider page shows category stats and setup status.
 - Provider editor lets users save or clear provider configuration using the shared `ProviderEditorSection`.
-- Library page communicates planned category prefix visibility and organization controls.
+- Library page exposes detected prefix visibility controls when categories exist; language-source/grouping controls remain disabled.
 - Playback page communicates planned player defaults.
 - About page shows support/legal placeholders and app version.
 
@@ -24,9 +24,9 @@ Settings gives users a place to inspect provider status, edit provider credentia
 - `SettingsDestination` controls subpage routing.
 - `ProviderFields` holds editable name, endpoint, username, and password.
 - `@FetchOne(Provider.where(\.isActive))` supplies the active provider row.
-- `@Fetch(MediaCount(provider: nil))` supplies category counts for stats.
+- `@Fetch(MediaCount(provider: nil))` supplies movie/series media counts, although the current stats UI labels them as categories.
 - `ProviderManager` applies save/clear behavior and session state changes.
-- Planned state includes prefix visibility preferences, library language source, preferred player, default subtitle behavior, and preferred audio language.
+- Planned state includes database-backed prefix visibility preferences, library language source, preferred player, default subtitle behavior, and preferred audio language.
 
 ## Key Files
 
@@ -48,9 +48,9 @@ Settings gives users a place to inspect provider status, edit provider credentia
 
 ## Current Gaps / Planned Work
 
-- `Excluded Prefixes`, `Choose Visible Prefixes`, `Group categories by language`, `Category Prefix`, and `Language Source` are TODO/disabled.
+- `Excluded Prefixes` and `Choose Visible Prefixes` are active when an active provider and detected groups exist, but the prefix preferences are stored in provider-keyed `UserDefaults`, not database rows.
+- `Group categories by prefix` and `Language Source` are disabled.
 - `Preferred Player`, `Enable subtitles by default`, and `Preferred Audio Language` are disabled.
-- Provider save from Settings does not run sync inline.
 - About page help/licenses/terms are placeholders.
 - Provider credentials are stored in the current providers table; product-level secret storage expectations should be revisited before claiming Keychain behavior.
 

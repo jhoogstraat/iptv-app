@@ -7,8 +7,8 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Status
 
 - Target state: detected category prefixes are first-class local organization metadata that can group category pickers, hide/show category groups, and feed search/recommendation filters consistently.
-- Current implementation: `CategoryGrouping` extracts pipe-delimited prefixes from `Category.title`; browse/search filter bars expose category group selection; Settings can hide visible prefixes per provider through `UserDefaults`.
-- Current limitation: grouping depends entirely on the raw `Category.title` string supplied by the provider, and normalized category metadata is not yet stored in schema tables.
+- Implementation status (reviewed 2026-07-05): Partial. `CategoryGrouping` extracts pipe-delimited prefixes from raw `Category.title`, browse/search filter bars expose category-group selection, `SettingsScreen` can hide detected groups per provider through `CategoryPrefixVisibilityStore`, and `LibraryFilterEngine` applies hidden/selected groups to local results.
+- Current limitation: grouping depends entirely on the raw provider category title; normalized category metadata, language source configuration, database-backed visibility rows, and recommendation consumption are not implemented.
 
 ## User Experience
 

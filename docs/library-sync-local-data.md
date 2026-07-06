@@ -7,8 +7,8 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Status
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
-- Current implementation: `SyncManager.sync(provider:)` clears local `Media` and `Category`, fetches VOD and series categories, and stores category rows. `BrowseScreen` lazily hydrates media for a selected category through `Session.update(_:in:)`.
-- Current schema: provider, category, and media tables exist; user state and richer metadata tables are not yet visible in the current schema.
+- Implementation status (reviewed 2026-07-05): Partial. `SyncManager.sync(provider:)` clears all local `Media` and `Category`, fetches VOD and series categories, and stores category rows. `BrowseScreen` lazily hydrates unhydrated movie/series categories through `Session.update(_:in:)`, which upserts `Media` rows and stamps `Category.updatedAt`.
+- Current schema: provider, category, and media tables exist; user state, live channels, provider-isolated catalog rows, and richer metadata tables are not yet visible in the current schema.
 
 ## User Experience
 
@@ -53,6 +53,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 - Background incremental sync is not implemented.
 - Provider-isolated user state tables for favorites, watch progress, downloads, and recommendations are not yet present in the current schema.
 - Media records do not include playable URL fields, added date, genre, language, audio tracks, subtitle tracks, or year.
+- Provider isolation is operational rather than schema-backed: `categories` and `media` have no provider column, provider sync/delete paths clear the singleton local library, and `ProviderManager.change(to:)` switches sessions without row-level catalog isolation.
 
 ## Notes for Agents
 

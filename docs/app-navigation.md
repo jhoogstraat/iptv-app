@@ -7,8 +7,8 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 ## Status
 
 - Target state: one root gate decides onboarding versus main shell; one canonical tab model defines app surfaces; feature screens own their internal stacks and detail routing.
-- Current implementation: `Tabs` defines the tab identities, names, symbols, and customization IDs. `ContentView` renders a `sidebarAdaptable` `TabView` with sections for Watch, Library, and Settings.
-- Current gaps: several tabs are placeholders; browse item detail routing is still a placeholder; player presentation routing is not fully connected at the app root.
+- Implementation status (reviewed 2026-07-05): Partial. `Tabs` is the canonical tab identity model, `ContentView` renders a `sidebarAdaptable` tab shell, Search uses SwiftUI's search role, Movies/Series are session-guarded `NavigationStack`s, browse/search rows route to `MediaDetailDestination`, and root player presentation is wired through `IPTVApp`, `.withVideoPlayer()`, and macOS `PlayerWindow`.
+- Current gaps: For You, Live, and Favorites are inline placeholders; Downloads delegates to a placeholder `DownloadsScreen`; there is still no central route enum or shared `NavigationPath` for media details.
 
 ## User Experience
 
@@ -26,7 +26,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 - `SessionGuard` injects `Session` into guarded feature content when an active session exists.
 - Movies and Series each use their own `NavigationStack` around `BrowseScreen`.
 - Settings uses a `NavigationStack` with `SettingsDestination` values for subpages.
-- Player presentation is modeled by `Player.presentation`, but the main app root is not yet wired to inject and present `Player` globally.
+- Player presentation is modeled by `Player.presentation` and is wired at the app root through `IPTVApp`, `withVideoPlayer()`, and macOS `PlayerWindow`.
 
 ## Key Files
 
@@ -53,10 +53,10 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 ## Current Gaps / Planned Work
 
 - `ContentView` currently inlines the For You placeholder instead of using `ForYouScreen`.
-- Browse grid items link to `ContentUnavailableView("Not yet implemented")` instead of `MovieDetailScreen` or series detail.
+- Live and Favorites currently use inline placeholders instead of their screen structs.
+- `DownloadsScreen` is mounted from the Downloads tab but still shows a not-implemented state.
 - There is no central route enum or `NavigationPath` for media details.
-- `PlayerWindow()` is commented out on macOS, and root `Player` environment injection is not present in `IPTVApp`.
-- Live, Favorites, Downloads, Search, and For You are not complete navigable experiences yet.
+- Several top-level surfaces are not complete navigable experiences yet: For You, Live, Favorites, and Downloads.
 
 ## Notes for Agents
 

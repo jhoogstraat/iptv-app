@@ -4,6 +4,7 @@
 - Version: v1
 - Date: 2026-02-23
 - Scope locked for implementation
+- Implementation status (reviewed 2026-07-05): Partial / stale planning spec. The active app now has `SearchScreen` wired into `ContentView`, local Movies/Series results, scope selection, shared category/group/rating/sort filters, scoped browse search, and detail navigation. The required `Model/Search` domain types, index store, orchestrator, progress stream, catalog hooks, provider fingerprint index scoping, advanced metadata filters, and relevance ranking are not implemented; several “Current Code Context” paths below are obsolete.
 
 ## Objective
 Implement search in two surfaces:
@@ -17,13 +18,11 @@ Implement search in two surfaces:
 The implementation must be provider-isolated and progressively improve result coverage via background indexing.
 
 ## Current Code Context
-- Search tab is a placeholder in `iptv/ContentView.swift`.
-- Movies/Series screens exist in `iptv/UI/Screens/MoviesScreen.swift`.
-- Category row loading is in `iptv/UI/Views/VideoTileRow.swift`.
-- Provider isolation key exists via `ProviderCacheFingerprint` in `iptv/Model/Caching/StreamListCache.swift`.
-- Catalog stream loading exists in `iptv/Model/Catalog.swift`:
-- `getVodStreams(in:force:)`
-- `getSeriesStreams(in:force:)`
+- Search tab is active in `iptv/UI/ContentView.swift` and presents `iptv/UI/Screens/SearchScreen.swift`.
+- Movies/Series browse screens are unified through `iptv/UI/Screens/BrowseScreen.swift`; scoped search is `BrowseScreen.searchable`.
+- Local catalog rows are `Category` and `Media` in `iptv/Model/Database/Schema.swift`; `SearchScreen` and `BrowseScreen` query them with SQLiteData and apply `LibraryFilterEngine`.
+- There is no `ProviderCacheFingerprint`, `Model/Caching/StreamListCache.swift`, `Model/Catalog.swift`, or `Model/Search/` implementation in the current file tree.
+- Current provider isolation is a single active local library that is cleared by sync/delete paths, not provider-keyed search index rows.
 
 ## In Scope (v1)
 - Movies + Series search only.
@@ -125,7 +124,7 @@ The implementation must be provider-isolated and progressively improve result co
 
 ## Catalog Integration
 
-## Required changes in `iptv/Model/Catalog.swift`
+## Original planned changes in `iptv/Model/Catalog.swift` (not implemented in the current SQLiteData stack)
 - Add dependencies:
   - `searchIndexStore: SearchIndexStore`
   - `searchOrchestrator: SearchOrchestrator`
@@ -144,7 +143,7 @@ The implementation must be provider-isolated and progressively improve result co
 ## UI Requirements
 
 ### 1) Scoped Search in Movies/Series
-- File: `iptv/UI/Screens/MoviesScreen.swift`
+- Current file: `iptv/UI/Screens/BrowseScreen.swift` handles both Movies and Series; the old `iptv/UI/Screens/MoviesScreen.swift` path below is obsolete.
 - Add:
   - `@State private var queryText: String = ""`
   - `@State private var scopedResults: [SearchResultItem] = []`
@@ -160,8 +159,8 @@ The implementation must be provider-isolated and progressively improve result co
   - Series screen -> `SearchMediaScope.series`
 
 ### 2) Global Search Screen
-- Add `iptv/UI/Screens/SearchScreen.swift`.
-- Replace placeholder tab in `iptv/ContentView.swift` with `SearchScreen()`.
+- Current file: `iptv/UI/Screens/SearchScreen.swift`.
+- `ContentView` already presents `SearchScreen()` in the Search tab.
 - Screen content:
   - searchable text field
   - scope segmented control (`All`, `Movies`, `Series`)
