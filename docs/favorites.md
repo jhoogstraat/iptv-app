@@ -7,7 +7,7 @@ Favorites lets users mark movies, series, channels, and playable items they care
 ## Status
 
 - Target state: favorite state is provider-scoped, persisted locally, visible across relevant surfaces, and synchronized with search/recommendation indexes.
-- Current implementation: `FavoritesScreen` is a placeholder. `PlayerView` has a favorite control that toggles local `@State` only and does not persist. No favorite table is present in the current schema.
+- Implementation status (reviewed 2026-07-05): Partial placeholder only. `FavoritesScreen` exists but the active Favorites tab inlines the same placeholder instead of using it. `PlayerView` and `MovieDetailScreen` have favorite controls that toggle local `@State` only, series favorite affordances are disabled, and no favorite table/store exists in the current schema.
 
 ## User Experience
 
@@ -22,7 +22,7 @@ Favorites lets users mark movies, series, channels, and playable items they care
 - Target state should store provider ID/fingerprint, media identity, media type, created timestamp, and optional display snapshot fields.
 - Favorite records should reference local media where possible and survive app relaunch.
 - Search and recommendations should observe favorite changes or update their indexes.
-- Current state is only transient player UI state.
+- Current state is only transient UI state in player/movie detail; no persisted favorite state is consumed by Search or For You.
 
 ## Key Files
 
@@ -45,9 +45,9 @@ Favorites lets users mark movies, series, channels, and playable items they care
 ## Current Gaps / Planned Work
 
 - No persisted favorite model/table exists in the current schema.
-- `FavoritesScreen` is a placeholder.
-- Player favorite toggle is local-only.
-- Browse and detail favorite controls are not active.
+- `FavoritesScreen` is a placeholder, and `ContentView` currently bypasses it with an inline placeholder.
+- Player and movie-detail favorite toggles are local-only.
+- Series/detail favorite controls are disabled or unavailable.
 - Search and For You do not consume favorite state.
 
 ## Notes for Agents

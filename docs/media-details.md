@@ -7,8 +7,8 @@ Media Details provides the focused destination for a selected movie or series it
 ## Status
 
 - Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/favorite/download actions, and bridges to the shared player.
-- Current implementation: `MediaDetailDestination` routes local movie and series rows to explicit detail paths. Browse grids, search results, and reusable media rails open details instead of placeholders. `MovieDetailScreen` uses a hero-first streaming layout and resolves movie playback through the shared `Player` using the active Xtream provider and the synced source ID.
-- Series detail now has its own hero-first route with Episodes/Details tabs and a season selector shell, but the local schema does not yet persist seasons or episode rows for a selected series.
+- Implementation status (reviewed 2026-07-05): Partial. `MediaDetailDestination` routes movies, series, and episodes to explicit detail paths. Browse grids, search results, and reusable media rows open details instead of placeholders. `MovieDetailScreen` uses a hero-first streaming layout and starts playback through `Player.load`, which resolves movie URLs through the active Xtream provider and synced source ID.
+- Series detail has its own hero-first route with Episodes/Details tabs and a season selector shell, but local schema/sync do not yet persist seasons or playable episode rows for a selected series.
 
 ## User Experience
 

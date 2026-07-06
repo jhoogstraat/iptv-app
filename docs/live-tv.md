@@ -7,7 +7,7 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 ## Status
 
 - Target state: Live is a first-class watch surface backed by local live category/channel data, with channel playback through the shared player and future EPG/catch-up support.
-- Current implementation: `LiveScreen` is a placeholder with unused state for selected category, query text, and settings presentation. `SyncManager` has `liveSync` state, but live sync work is commented out.
+- Implementation status (reviewed 2026-07-05): Planned-only. `LiveScreen` contains unused state and renders `Text("Not yet implemented")`; `ContentView` bypasses it with an inline “Live TV Is Out of Scope” placeholder. `SyncManager.liveSync` exists but live sync is commented out, `MediaType` has no live case, and no live/EPG schema or channel playback routing exists.
 - Existing planning: `docs/live-epg-catchup-spec.md` contains older roadmap details.
 
 ## User Experience
@@ -45,10 +45,10 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 ## Current Gaps / Planned Work
 
-- `LiveScreen` renders `Text("Not yet implemented")`.
+- `LiveScreen` renders `Text("Not yet implemented")`, and the active tab currently bypasses it with an inline out-of-scope placeholder.
 - Live sync is not active.
 - No live-specific local schema exists.
-- No channel playback URL resolution is connected.
+- No channel playback URL resolution or live media routing is connected.
 - EPG and catch-up are planned but absent.
 
 ## Notes for Agents

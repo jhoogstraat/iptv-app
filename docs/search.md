@@ -7,8 +7,8 @@ Search helps users find local library items quickly across synced Movies and Ser
 ## Status
 
 - Target state: scoped search works inside Movies and Series; global Search queries Movies and Series together; filters and sorting are available from the global surface; results are provider-scoped and backed by local data/indexes.
-- Current implementation: global `SearchScreen` queries local Movies and Series from SQLiteData, supports text search, scope selection, shared category/group/rating filters, prefix visibility, and deterministic title/newest/rating sorts. Detail routing is still placeholder-only.
-- Existing planning docs: `docs/search-implementation-spec.md` and `docs/library-search-spec.md` describe prior planned search architecture; this feature doc is the canonical cross-run target summary.
+- Implementation status (reviewed 2026-07-05): Partial. Global `SearchScreen` is live in the Search tab, queries local Movies and Series from SQLiteData, supports text search, scope selection, shared category/group/minimum-rating filters, prefix visibility, deterministic title/newest/rating sorts, and navigation to `MediaDetailDestination`. Scoped search exists through `BrowseScreen.searchable` for Movies and Series.
+- Existing planning docs: `docs/search-implementation-spec.md` and `docs/library-search-spec.md` describe older planned indexed-search architecture; this feature doc is the canonical cross-run target summary.
 
 ## User Experience
 
@@ -21,8 +21,8 @@ Search helps users find local library items quickly across synced Movies and Ser
 
 ## Data and State
 
-- Current query source: local `Media.title.contains(filter)` in selected category.
-- Target query source: provider-scoped local search index or local database query over Movies and Series.
+- Current global query source: local `Media` rows for Movies and Series, filtered by title text, scope, category/group visibility, minimum rating, and sort.
+- Current scoped query source: `BrowseScreen` fetches local `Media` by media type and title text, then applies the shared filter state.
 - Target result fields: media identity, scope, title, artwork, rating, category/group, matched fields, and deterministic score/sort keys.
 - Target filters: scope, group/prefix, rating range/min rating, genre, language, added recency, audio language, subtitle language when metadata exists.
 - Target sorting: relevance, newest, rating, title, and deterministic tie-breakers.
@@ -51,8 +51,8 @@ Search helps users find local library items quickly across synced Movies and Ser
 ## Current Gaps / Planned Work
 
 - No dedicated full-text search index or relevance scoring exists; current global search filters local `Media.title`.
-- Result navigation still opens placeholder details rather than the final movie/series detail surfaces.
 - Query failures/retry affordances and indexing progress are not represented because the current implementation reads directly from local tables.
+- Search is single-active-library scoped rather than row-level provider scoped because `media`/`categories` lack provider columns.
 - Current schema lacks many fields needed for advanced search filters such as genre, language, added recency, audio language, and subtitle language.
 - Favorites and continue watching are not currently searchable local entities.
 

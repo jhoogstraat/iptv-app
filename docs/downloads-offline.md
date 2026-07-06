@@ -7,8 +7,8 @@ Downloads and Offline lets users queue supported VOD or series content for local
 ## Status
 
 - Target state: downloads are queueable, resumable, persisted, storage-aware, provider/profile scoped, and integrated with playback fallback.
-- Current implementation: `DownloadsScreen` currently shows a not-implemented state, with substantial commented-out row/control ideas. Older planning exists in `docs/downloads-offline-spec.md`.
-- Current player integration: offline playback source selection is not implemented.
+- Implementation status (reviewed 2026-07-05): Planned-only. `DownloadsScreen` renders `ContentUnavailableView { Text("Not yet implemented") }`; most queue/list/action code is commented out. `DownloadStatusBadge` is active but displays only `Text("TODO")` and has no state-machine integration. No download manager, queue, manifest, schema rows, or offline playback selection exists.
+- Current player integration: `Player.playbackURL(for:)` resolves provider network URLs only; offline/local asset selection remains commented or absent.
 
 ## User Experience
 
@@ -45,8 +45,8 @@ Downloads and Offline lets users queue supported VOD or series content for local
 
 ## Current Gaps / Planned Work
 
-- `DownloadsScreen` is not implemented.
-- `DownloadStatusBadge` contains commented planned behavior but no active integration.
+- `DownloadsScreen` is not implemented beyond a placeholder.
+- `DownloadStatusBadge` currently renders `TODO`; its planned behavior is commented and has no active integration.
 - No download manager, queue, manifest, or persisted model exists in the current schema.
 - Playback URL/source selection does not support local downloaded assets.
 - Storage management UI is absent.

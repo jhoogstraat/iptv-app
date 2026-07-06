@@ -4,6 +4,7 @@
 - Version: v1
 - Date: 2026-02-24
 - Priority: P2 (after player + library/search + profiles)
+- Implementation status (reviewed 2026-07-05): Planned-only. The Downloads tab exists, but the screen is still a not-implemented placeholder. No `DownloadManager`, `DownloadItem`, `DownloadStatus`, queue operations, manifest/storage layout, free-space checks, per-profile download library, or offline playback fallback exists in active code.
 
 ## Objective
 Enable offline access for supported content with reliable queueing, storage management, and playback fallback when network is unavailable.

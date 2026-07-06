@@ -7,8 +7,8 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 ## Status
 
 - Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating, genre, language, recency, audio language, and subtitle language remain metadata-backed expansion points.
-- Current implementation: `BrowseScreen` and `SearchScreen` share a local filter bar with category, category-group/prefix, minimum rating, and deterministic sort controls. `BrowseSort` is applied through `LibraryFilterEngine`; prefix visibility is stored per provider in `UserDefaults` and affects browse/search local results.
-- Current schema limitation: `Media` has title, rating, category, cover URL, TMDB ID, and timestamps, but no genre, year, catalog language, original added date, audio track, or subtitle track fields.
+- Implementation status (reviewed 2026-07-05): Partial. `BrowseScreen` and `SearchScreen` share `LibraryFilterBar` with category, category-group/prefix, minimum rating, and deterministic title/newest/rating sort controls. `LibraryFilterEngine` enforces hidden groups, category filters, OR-within selected groups, AND-across filter groups, rating exclusion for missing ratings, and sort tie-breakers; tests cover the core filter semantics.
+- Current schema limitation: `Media` has title, rating, category, cover URL, TMDB ID, and timestamps, but no genre, year, catalog language, original added date, audio track, or subtitle track fields. Persisted prefix visibility is provider-keyed `UserDefaults`, while library rows themselves are a single active-provider catalog.
 
 ## User Experience
 

@@ -7,8 +7,8 @@ The app should behave like a local media library backed by a remote Xtream provi
 ## Status
 
 - Target state: provider configuration creates an active session, sync replicates provider catalog data into local persistence, screens render from local models, and playback operates through a stable player state model with swappable renderers.
-- Current implementation: `IPTVApp` prepares dependencies and loads the active provider; `ProviderManager` builds `Session` and `SyncManager`; local persistence is implemented with `SQLiteData`/GRDB migrations in `Schema.swift`; Movies and Series browse from local `Category` and `Media` rows.
-- Important mismatch to preserve in docs: product intent still describes SwiftData as the persistence direction, while current code uses `SQLiteData`/GRDB tables.
+- Implementation status (reviewed 2026-07-05): Partial. `IPTVApp` prepares SQLiteData/GRDB dependencies, loads the active provider, injects `ProviderManager` and `Player`, applies `.withVideoPlayer()`, and installs `PlayerWindow` on macOS. `ProviderManager` builds `Session`/`SyncManager`; Movies, Series, Search, and Details read local `Category`/`Media` rows.
+- Important mismatch to preserve in docs: product intent still describes SwiftData as the persistence direction, while current code uses `SQLiteData`/GRDB tables and a single active local library.
 
 ## User Experience
 
@@ -55,9 +55,8 @@ The app should behave like a local media library backed by a remote Xtream provi
 - `IPTVApp.init()` currently uses `try! providerManager.loadActive()` and should eventually provide graceful launch recovery.
 - Current initial sync persists categories but not all stream/media rows; streams are hydrated lazily when categories are opened.
 - Live sync is represented by state but not included in initial sync.
-- Watch progress, favorites, downloads, and richer metadata are not yet persisted in the visible schema.
-- Player environment injection and root presentation routing are not fully wired in `IPTVApp`.
-- Search, For You, Favorites, Live, and Downloads are placeholder or partially planned features.
+- Watch progress, favorites, downloads, live channels, recommendations, profile state, and richer metadata are not yet persisted in the visible schema.
+- For You, Favorites, Live, and Downloads are placeholder or planned-only surfaces; Search and media details are partially implemented from local rows.
 
 ## Notes for Agents
 

@@ -4,6 +4,7 @@
 - Version: v1
 - Date: 2026-02-24
 - Priority: P1 (next milestone after advanced player)
+- Implementation status (reviewed 2026-07-05): Partial. The Search placeholder has been replaced by a local `SearchScreen`, and scoped Movies/Series search is available through `BrowseScreen.searchable`. The specified search-index architecture (`SearchIndexStore`, `SearchOrchestrator`, `SearchScreenViewModel`, indexing progress, provider fingerprint scoping, relevance ranking, favorites/continue-watching search, and genre/language/recency filters) is not implemented.
 
 ## Objective
 Deliver a usable library and discovery experience with scoped and global search across VOD and series.
