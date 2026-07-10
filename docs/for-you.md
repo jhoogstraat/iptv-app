@@ -7,7 +7,7 @@ For You is the landing and discovery experience. It should make the app feel lik
 ## Status
 
 - Target state: For You renders a deterministic local discovery page using provider-scoped catalog data, favorites, and watch activity.
-- Implementation status (reviewed 2026-07-06): `ForYouScreen` is live in the Home tab. It renders local rails for Continue Watching, Favorites, Top Rated Movies, Top Rated Series, and Recently Updated from SQLiteData rows only. Continue Watching reads unfinished resume-eligible `watch_activity`; Favorites reads provider-scoped `favorites`; catalog rails use local `Media` ratings/update timestamps and respect category-prefix visibility. No remote recommendation call or recommendation index exists.
+- Implementation status (reviewed 2026-07-10): `ForYouScreen` is live in the Home tab and derives one deterministic snapshot from local catalog, provider-scoped favorites/watch activity, category relationships, and hidden-prefix visibility. Its adaptive hero exposes truthful movie play/resume or series-detail actions, cards keep stable visible/accessibility identity when artwork loads, and sparse states distinguish loading, failed hydration, hidden content, and genuinely empty local data.
 - Current navigation: `Tabs.home` presents `ForYouScreen`, and rail items route through `MediaDetailDestination`.
 
 ## User Experience

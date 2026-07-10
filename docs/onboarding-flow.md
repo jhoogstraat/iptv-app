@@ -7,9 +7,9 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 ## Status
 
 - Target state: first launch presents onboarding, captures a provider, runs initial sync, marks the provider initialized only after successful sync, and then routes into the main app shell.
-- Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. `OnboardingFlowView` supports source selection, credentials, syncing, and failed states. Xtream API is supported; M3U8 playlist is shown disabled as coming soon.
-- Current sync scope: initial sync clears local `Media`/`Category` rows and syncs movie and series categories. Live is not part of the active initial sync.
-- Implementation status (reviewed 2026-07-05): Partial / Xtream core implemented. Source selection, credential validation, initial movie/series category sync, failed-state retry, and uninitialized-provider auto-sync are implemented. M3U8 and live sync remain planned, and launch recovery still uses `try!`.
+- Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. Source selection, credentials, syncing, failure/retry, field-level validation, compact-height scrolling, and cancellation-safe back navigation are implemented. Xtream API is supported; M3U8 remains a disabled planned source.
+- Current sync scope: initial sync fetches movie, series, and live categories, then atomically replaces the local catalog only after all required category families succeed. Streams/media are hydrated lazily per category.
+- Implementation status (reviewed 2026-07-10): Xtream onboarding and retryable launch recovery are implemented. Successful sync alone marks the provider initialized. M3U8 remains planned.
 
 ## User Experience
 
@@ -54,11 +54,9 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 
 ## Current Gaps / Planned Work
 
-- `IPTVApp` still crashes on `loadActive()` failure because it uses `try!`; onboarding docs should not claim graceful database recovery yet.
-- M3U8 playlist source is only a disabled planned option.
-- Live TV is not included in the initial sync flow.
-- Initial sync currently persists categories, while streams/media are hydrated lazily per selected category.
-- Settings provider edits reset initialization, then root routing returns to onboarding for sync; Settings does not run sync inline today.
+- M3U8 playlist source remains a disabled planned option.
+- Initial sync persists movie, series, and live categories; streams/media remain lazily hydrated per selected category.
+- Settings connection edits reset initialization, then root routing returns to onboarding for sync. Name-only or unchanged saves preserve the current catalog and user state.
 
 ## Notes for Agents
 

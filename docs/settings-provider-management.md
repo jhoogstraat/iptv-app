@@ -7,26 +7,26 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Status
 
 - Target state: Settings is the durable management surface for provider configuration, library organization, playback defaults, and app information.
-- Implementation status (reviewed 2026-07-05): Partial. `SettingsScreen` has Provider, Library, Playback, and About destinations; provider save/delete flows are active; macOS uses the same `ProviderManager`; and Library prefix visibility is partly active through `CategoryPrefixVisibilitySelector` plus provider-keyed `UserDefaults`. Playback defaults and About help/legal remain placeholders.
-- Current provider behavior: editing provider credentials marks the provider uninitialized and active; root routing then returns to onboarding to run initial sync.
+- Implementation status (reviewed 2026-07-10): `SettingsScreen` has Provider, Library, Playback, and About destinations. Provider removal is explicitly named and confirmed; resync preserves provider configuration, favorites, and watch history; unchanged and name-only saves preserve initialization/catalog state; connection changes require onboarding sync. Prefix visibility is database-backed per provider. Playback and About help/legal remain explicit placeholders.
+- Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, password, or insecure-transport changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation.
 
 ## User Experience
 
 - Settings overview lists Provider, Library, Playback, and About destinations.
-- Provider page shows category stats and setup status.
-- Provider editor lets users save or clear provider configuration using the shared `ProviderEditorSection`.
-- Library page exposes detected prefix visibility controls when categories exist; language-source/grouping controls remain disabled.
-- Playback page communicates planned player defaults.
-- About page shows support/legal placeholders and app version.
+- Provider page shows honest category/media counts and setup/sync status.
+- Provider editor saves provider changes, resyncs catalog data, or removes the provider through separate consequence-specific actions.
+- Library page exposes detected prefix visibility controls backed by provider-scoped database rows; language-source/grouping controls remain disabled.
+- Playback page explains current player-default limitations; controls remain disabled until Settings owns their persisted contract.
+- About page shows app version while support/legal destinations remain placeholders.
 
 ## Data and State
 
 - `SettingsDestination` controls subpage routing.
-- `ProviderFields` holds editable name, endpoint, username, and password.
-- `@FetchOne(Provider.where(\.isActive))` supplies the active provider row.
-- `@Fetch(MediaCount(provider: nil))` supplies movie/series media counts, although the current stats UI labels them as categories.
-- `ProviderManager` applies save/clear behavior and session state changes.
-- Planned state includes database-backed prefix visibility preferences, library language source, preferred player, default subtitle behavior, and preferred audio language.
+- `ProviderFields` holds editable name, endpoint, username, password, and explicit insecure-HTTP approval.
+- `@FetchOne(Provider.where(\.isActive))` supplies the active provider row; password material is resolved through `ProviderCredentialStoring`, not SQLite.
+- Local category/media queries supply provider status counts with truthful labels.
+- `ProviderManager` classifies unchanged, name-only, connection-changing, resync, and removal operations so destructive effects are explicit.
+- `CategoryPrefixVisibility` and provider credentials persist through database rows and Keychain respectively. Player preferences currently use device `UserDefaults` from the player runtime rather than active Settings controls.
 
 ## Key Files
 
@@ -40,19 +40,18 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Target Acceptance Criteria
 
 - Settings reads and writes active provider state through `ProviderManager`.
-- Saving valid provider edits resets initialization so sync is required before normal browsing.
-- Clearing provider state removes active provider state and local library rows as intended.
-- Library organization settings are disabled or hidden until they are backed by persisted provider-scoped preferences.
-- Playback defaults are disabled or hidden until they are backed by player preference persistence.
+- Unchanged and name-only provider saves preserve initialization, catalog, favorites, and watch history.
+- Connection-changing saves reset initialization and require successful onboarding sync before browsing.
+- Explicit resync preserves provider configuration and user state while replacing catalog rows.
+- Provider removal requires confirmation and removes provider credentials plus provider-owned local state.
 - macOS Settings scene uses the same `ProviderManager` instance as the main app.
 
 ## Current Gaps / Planned Work
 
-- `Excluded Prefixes` and `Choose Visible Prefixes` are active when an active provider and detected groups exist, but the prefix preferences are stored in provider-keyed `UserDefaults`, not database rows.
-- `Group categories by prefix` and `Language Source` are disabled.
-- `Preferred Player`, `Enable subtitles by default`, and `Preferred Audio Language` are disabled.
-- About page help/licenses/terms are placeholders.
-- Provider credentials are stored in the current providers table; product-level secret storage expectations should be revisited before claiming Keychain behavior.
+- `Group categories by prefix` and `Language Source` remain disabled until their data contracts exist.
+- Playback defaults remain disabled; wiring them requires one explicit device- or profile-scoped persistence contract.
+- About help/licenses/terms remain placeholders.
+- Provider passwords are stored in Keychain, with SQLite containing only credential references and migration/compensation behavior for failures.
 
 ## Notes for Agents
 

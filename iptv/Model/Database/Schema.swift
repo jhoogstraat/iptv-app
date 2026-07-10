@@ -10,7 +10,10 @@ import Foundation
 import SQLiteData
 import xtream_swift
 
-func appDatabase() throws -> any DatabaseWriter {
+func appDatabase(
+    path: String? = nil,
+    credentialStore: any ProviderCredentialStoring = KeychainProviderCredentialStore()
+) throws -> any DatabaseWriter {
     @Dependency(\.context) var context
     
     var configuration = Configuration()
@@ -27,7 +30,7 @@ func appDatabase() throws -> any DatabaseWriter {
     }
 #endif
     
-    let database = try defaultDatabase(configuration: configuration)
+    let database = try defaultDatabase(path: path, configuration: configuration)
     logger.info("open '\(database.path)'")
     
     var migrator = DatabaseMigrator()
@@ -42,8 +45,9 @@ func appDatabase() throws -> any DatabaseWriter {
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             "name" TEXT NOT NULL,
             "username" TEXT NOT NULL,
-            "password" TEXT NOT NULL,
+            "credentialReference" TEXT NOT NULL,
             "endpoint" TEXT NOT NULL,
+            "allowsInsecureHTTP" INTEGER NOT NULL DEFAULT 0,
             "kind" TEXT NOT NULL DEFAULT 'xtream',
             "isInitialized" INTEGER NOT NULL DEFAULT 0,
             "isActive" INTEGER NOT NULL DEFAULT 0,
@@ -278,11 +282,79 @@ func appDatabase() throws -> any DatabaseWriter {
         ON "favorites" ("providerID", "updatedAt" DESC)
         """).execute(db)
     }
+
+    migrator.registerMigration("Move provider credentials to Keychain") { db in
+        try migrateProviderCredentials(in: db, credentialStore: credentialStore)
+    }
+
+    migrator.registerMigration("Order watch activity writes") { db in
+        try #sql("""
+        ALTER TABLE "watch_activity"
+        ADD COLUMN "writeSessionStartedAt" TEXT
+        """).execute(db)
+        try #sql("""
+        ALTER TABLE "watch_activity"
+        ADD COLUMN "writeGeneration" INTEGER NOT NULL DEFAULT 0
+        """).execute(db)
+    }
     
     
     try migrator.migrate(database)
     
     return database
+}
+
+nonisolated func migrateProviderCredentials(
+    in db: Database,
+    credentialStore: any ProviderCredentialStoring
+) throws {
+    let columnNames = Set(try db.columns(in: "providers").map(\.name))
+    guard columnNames.contains("password") else { return }
+
+    let legacyCredentials = try LegacyProviderCredential.fetchAll(db)
+    for credential in legacyCredentials where !credential.password.isEmpty {
+        try credentialStore.setPassword(
+            credential.password,
+            for: ProviderCredentialReference.migrated(providerID: credential.id)
+        )
+    }
+
+    if !columnNames.contains("credentialReference") {
+        try #sql("""
+        ALTER TABLE "providers"
+        ADD COLUMN "credentialReference" TEXT NOT NULL DEFAULT ''
+        """).execute(db)
+    }
+
+    for credential in legacyCredentials {
+        let reference = ProviderCredentialReference.migrated(providerID: credential.id)
+        try #sql("""
+        UPDATE "providers"
+        SET "credentialReference" = \(reference)
+        WHERE "id" = \(credential.id)
+        """).execute(db)
+    }
+
+    if !columnNames.contains("allowsInsecureHTTP") {
+        try #sql("""
+        ALTER TABLE "providers"
+        ADD COLUMN "allowsInsecureHTTP" INTEGER NOT NULL DEFAULT 0
+        """).execute(db)
+    }
+
+    try #sql("""
+    UPDATE "providers" SET "password" = ''
+    """).execute(db)
+
+    try #sql("""
+    ALTER TABLE "providers" DROP COLUMN "password"
+    """).execute(db)
+}
+
+@Table("providers")
+private nonisolated struct LegacyProviderCredential: Sendable {
+    let id: Provider.ID
+    let password: String
 }
 
 enum ProviderSourceKind: String, CaseIterable, Identifiable, Sendable, QueryBindable {
@@ -299,8 +371,10 @@ nonisolated struct Provider: Hashable, Identifiable, Sendable {
     var kind: ProviderSourceKind = .xtream
     var name: String
     var username: String
-    var password: String
+    @Ephemeral var password = ""
+    var credentialReference = ""
     var endpoint: URL
+    var allowsInsecureHTTP = false
     var isInitialized: Bool = false
     var isActive: Bool = false
 }
@@ -377,6 +451,8 @@ nonisolated struct WatchActivity: Hashable, Identifiable, Sendable {
     var completed: Bool = false
     var lastWatchedAt: Date = .now
     var updatedAt: Date = .now
+    var writeSessionStartedAt: Date?
+    var writeGeneration: Int64 = 0
 
     var progressFraction: Double {
         guard let duration, duration > 0 else { return 0 }
@@ -414,17 +490,34 @@ nonisolated struct Favorite: Hashable, Identifiable, Sendable {
 struct FavoriteItem: Hashable, Identifiable, Sendable {
     let favorite: Favorite
     let media: Media?
+    let category: Category?
+
+    init(favorite: Favorite, media: Media?, category: Category? = nil) {
+        self.favorite = favorite
+        self.media = media
+        self.category = category
+    }
 
     var id: Favorite.ID { favorite.id }
     var mediaType: MediaType { media?.type ?? favorite.mediaType }
     var sourceID: Int { media?.sourceID ?? favorite.sourceID }
     var title: String { media?.title ?? favorite.title }
     var artworkURL: URL? { media?.coverURL ?? media?.backdropURL ?? favorite.artworkURL }
-    var categoryTitle: String? { favorite.categoryTitle }
+    var categoryTitle: String? { category?.title ?? favorite.categoryTitle }
     var isAvailableLocally: Bool { media != nil }
 }
 
 enum WatchActivityStore: Sendable {
+    struct WriteStamp: Equatable, Sendable {
+        let sessionStartedAt: Date
+        let generation: UInt64
+
+        init(sessionStartedAt: Date, generation: UInt64) {
+            self.sessionStartedAt = sessionStartedAt
+            self.generation = generation
+        }
+    }
+
     nonisolated static let minimumResumeSeconds = 30.0
     nonisolated static let minimumRemainingSeconds = 30.0
     nonisolated static let completionFraction = 0.9
@@ -512,15 +605,7 @@ enum WatchActivityStore: Sendable {
             return Array(
                 activities
                     .filter(\.isResumeEligible)
-                    .sorted { lhs, rhs in
-                        if lhs.lastWatchedAt != rhs.lastWatchedAt {
-                            return lhs.lastWatchedAt > rhs.lastWatchedAt
-                        }
-                        if lhs.title.localizedStandardCompare(rhs.title) != .orderedSame {
-                            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
-                        }
-                        return lhs.sourceID < rhs.sourceID
-                    }
+                    .sorted(by: activityOrdering)
                     .prefix(Swift.max(limit, 0))
             )
         } catch {
@@ -529,65 +614,111 @@ enum WatchActivityStore: Sendable {
         }
     }
 
+    nonisolated static func activityOrdering(_ lhs: WatchActivity, _ rhs: WatchActivity) -> Bool {
+        if lhs.lastWatchedAt != rhs.lastWatchedAt {
+            return lhs.lastWatchedAt > rhs.lastWatchedAt
+        }
+
+        let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
+        if titleOrder != .orderedSame {
+            return titleOrder == .orderedAscending
+        }
+
+        if lhs.mediaType != rhs.mediaType {
+            return lhs.mediaType.rawValue < rhs.mediaType.rawValue
+        }
+        if lhs.sourceID != rhs.sourceID {
+            return lhs.sourceID < rhs.sourceID
+        }
+        return lhs.id < rhs.id
+    }
+
     nonisolated static func recordProgress(
         for media: Media,
         providerID: Provider.ID,
         currentTime rawCurrentTime: Double,
         duration rawDuration: Double?,
         completed explicitlyCompleted: Bool,
+        writeStamp: WriteStamp,
         database: any DatabaseWriter
-    ) async {
-        guard media.type == .movie || media.type == .episode else { return }
-        guard rawCurrentTime.isFinite else { return }
+    ) async -> Bool {
+        guard media.type == .movie || media.type == .episode else { return false }
+        guard rawCurrentTime.isFinite,
+              writeStamp.sessionStartedAt.timeIntervalSinceReferenceDate.isFinite,
+              writeStamp.generation <= UInt64(Int64.max)
+        else { return false }
 
         let currentTime = Swift.max(rawCurrentTime, 0)
         let duration = resolvedDuration(rawDuration, mediaRuntimeSeconds: media.runtimeSeconds)
         let completed = explicitlyCompleted || isCompleted(currentTime: currentTime, duration: duration)
         let storedCurrentTime = completed ? Swift.max(currentTime, duration ?? currentTime) : currentTime
+        let writeGeneration = Int64(writeStamp.generation)
         let now = Date()
 
         do {
-            try await database.write { db in
+            return try await database.write { db in
+                let existing = try WatchActivity
+                    .where {
+                        $0.providerID.eq(providerID)
+                            .and($0.mediaType.eq(media.type))
+                            .and($0.sourceID.eq(media.sourceID))
+                    }
+                    .fetchOne(db)
+
+                if let existing,
+                   !accepts(writeStamp, generation: writeGeneration, after: existing) {
+                    return false
+                }
+
                 let categoryTitle: String? = if let categoryID = media.categoryID {
-                    try? Category
+                    try Category
                         .select(\.title)
                         .where { $0.id.eq(categoryID) }
                         .fetchOne(db)
                 } else {
                     nil
                 }
-
                 let artworkURL = media.backdropURL ?? media.coverURL
-                try WatchActivity.insert {
-                    WatchActivity.Draft(
-                        id: nil,
-                        providerID: providerID,
-                        mediaType: media.type,
-                        sourceID: media.sourceID,
-                        title: media.title,
-                        artworkURL: artworkURL,
-                        categoryTitle: categoryTitle,
-                        currentTime: storedCurrentTime,
-                        duration: duration,
-                        completed: completed,
-                        lastWatchedAt: now,
-                        updatedAt: now
-                    )
-                } onConflict: {
-                    ($0.providerID, $0.mediaType, $0.sourceID)
-                } doUpdate: {
-                    $0.title = media.title
-                    $0.artworkURL = #bind(artworkURL)
-                    $0.categoryTitle = #bind(categoryTitle)
-                    $0.currentTime = storedCurrentTime
-                    $0.duration = #bind(duration)
-                    $0.completed = completed
-                    $0.lastWatchedAt = now
-                    $0.updatedAt = now
-                }.execute(db)
+
+                if let existing {
+                    try WatchActivity.find(existing.id).update {
+                        $0.title = media.title
+                        $0.artworkURL = #bind(artworkURL)
+                        $0.categoryTitle = #bind(categoryTitle)
+                        $0.currentTime = storedCurrentTime
+                        $0.duration = #bind(duration)
+                        $0.completed = completed
+                        $0.lastWatchedAt = now
+                        $0.updatedAt = now
+                        $0.writeSessionStartedAt = #bind(writeStamp.sessionStartedAt)
+                        $0.writeGeneration = #bind(writeGeneration)
+                    }.execute(db)
+                } else {
+                    try WatchActivity.insert {
+                        WatchActivity.Draft(
+                            id: nil,
+                            providerID: providerID,
+                            mediaType: media.type,
+                            sourceID: media.sourceID,
+                            title: media.title,
+                            artworkURL: artworkURL,
+                            categoryTitle: categoryTitle,
+                            currentTime: storedCurrentTime,
+                            duration: duration,
+                            completed: completed,
+                            lastWatchedAt: now,
+                            updatedAt: now,
+                            writeSessionStartedAt: writeStamp.sessionStartedAt,
+                            writeGeneration: writeGeneration
+                        )
+                    }.execute(db)
+                }
+
+                return true
             }
         } catch {
             logger.warning("Failed to record watch activity: \(error.localizedDescription, privacy: .public)")
+            return false
         }
     }
 
@@ -596,6 +727,20 @@ enum WatchActivityStore: Sendable {
             .where { $0.providerID.eq(providerID) }
             .delete()
             .execute(db)
+    }
+
+    nonisolated private static func accepts(
+        _ writeStamp: WriteStamp,
+        generation: Int64,
+        after existing: WatchActivity
+    ) -> Bool {
+        guard let storedSessionStartedAt = existing.writeSessionStartedAt else {
+            return true
+        }
+        if writeStamp.sessionStartedAt != storedSessionStartedAt {
+            return writeStamp.sessionStartedAt > storedSessionStartedAt
+        }
+        return generation > existing.writeGeneration
     }
 
     nonisolated private static func resolvedDuration(_ rawDuration: Double?, mediaRuntimeSeconds: Int?) -> Double? {
@@ -613,6 +758,26 @@ enum WatchActivityStore: Sendable {
 
 
 enum FavoriteStore: Sendable {
+    enum MutationResult: Equatable, Sendable {
+        case added
+        case removed
+
+        var isFavorite: Bool {
+            self == .added
+        }
+    }
+
+    enum MutationError: LocalizedError, Equatable {
+        case missingProvider
+
+        var errorDescription: String? {
+            switch self {
+            case .missingProvider:
+                "A provider is required to update Favorites."
+            }
+        }
+    }
+
     nonisolated static let revisionKey = "library.favorites.revision"
 
     static func isFavorite(
@@ -668,11 +833,18 @@ enum FavoriteStore: Sendable {
                     mediaRows.map { (contentKey(mediaType: $0.type, sourceID: $0.sourceID), $0) },
                     uniquingKeysWith: { first, _ in first }
                 )
+                let categoryByID = Dictionary(
+                    uniqueKeysWithValues: try Category.fetchAll(db).map { ($0.id, $0) }
+                )
 
                 return favorites.map { favorite in
-                    FavoriteItem(
+                    let media = mediaByKey[
+                        contentKey(mediaType: favorite.mediaType, sourceID: favorite.sourceID)
+                    ]
+                    return FavoriteItem(
                         favorite: favorite,
-                        media: mediaByKey[contentKey(mediaType: favorite.mediaType, sourceID: favorite.sourceID)]
+                        media: media,
+                        category: media?.categoryID.flatMap { categoryByID[$0] }
                     )
                 }
             }
@@ -682,21 +854,44 @@ enum FavoriteStore: Sendable {
         }
     }
 
-    @discardableResult
     static func toggle(
         _ media: Media,
         providerID: Provider.ID?,
         categoryTitle suppliedCategoryTitle: String? = nil,
         database suppliedDatabase: (any DatabaseWriter)? = nil,
         defaults: UserDefaults = .standard
-    ) -> Bool {
-        if isFavorite(media, providerID: providerID, database: suppliedDatabase) {
-            remove(media, providerID: providerID, database: suppliedDatabase, defaults: defaults)
-            return false
+    ) throws -> MutationResult {
+        guard let providerID else { throw MutationError.missingProvider }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+        let now = Date()
+
+        let result = try database.write { db in
+            let existing = try Favorite
+                .where {
+                    $0.providerID.eq(providerID)
+                        .and($0.mediaType.eq(media.type))
+                        .and($0.sourceID.eq(media.sourceID))
+                }
+                .fetchOne(db)
+
+            if let existing {
+                try Favorite.find(existing.id).delete().execute(db)
+                return MutationResult.removed
+            }
+
+            try insert(
+                media,
+                providerID: providerID,
+                categoryTitle: suppliedCategoryTitle,
+                now: now,
+                in: db
+            )
+            return MutationResult.added
         }
 
-        add(media, providerID: providerID, categoryTitle: suppliedCategoryTitle, database: suppliedDatabase, defaults: defaults)
-        return true
+        bumpRevision(defaults: defaults)
+        return result
     }
 
     static func add(
@@ -705,45 +900,24 @@ enum FavoriteStore: Sendable {
         categoryTitle suppliedCategoryTitle: String? = nil,
         database suppliedDatabase: (any DatabaseWriter)? = nil,
         defaults: UserDefaults = .standard
-    ) {
-        guard let providerID else { return }
+    ) throws -> MutationResult {
+        guard let providerID else { throw MutationError.missingProvider }
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
         let now = Date()
 
-        do {
-            try database.write { db in
-                let categoryTitle = suppliedCategoryTitle ?? categoryTitle(for: media, in: db)
-                let artworkURL = media.coverURL ?? media.backdropURL
-
-                try Favorite.insert {
-                    Favorite.Draft(
-                        id: nil,
-                        providerID: providerID,
-                        mediaType: media.type,
-                        sourceID: media.sourceID,
-                        title: media.title,
-                        artworkURL: artworkURL,
-                        categoryID: media.categoryID,
-                        categoryTitle: categoryTitle,
-                        createdAt: now,
-                        updatedAt: now
-                    )
-                } onConflict: {
-                    ($0.providerID, $0.mediaType, $0.sourceID)
-                } doUpdate: {
-                    $0.title = media.title
-                    $0.artworkURL = #bind(artworkURL)
-                    $0.categoryID = #bind(media.categoryID)
-                    $0.categoryTitle = #bind(categoryTitle)
-                    $0.updatedAt = now
-                }.execute(db)
-            }
-
-            bumpRevision(defaults: defaults)
-        } catch {
-            logger.warning("Failed to save favorite: \(error.localizedDescription, privacy: .public)")
+        try database.write { db in
+            try insert(
+                media,
+                providerID: providerID,
+                categoryTitle: suppliedCategoryTitle,
+                now: now,
+                in: db
+            )
         }
+
+        bumpRevision(defaults: defaults)
+        return .added
     }
 
     static func remove(
@@ -751,46 +925,40 @@ enum FavoriteStore: Sendable {
         providerID: Provider.ID?,
         database suppliedDatabase: (any DatabaseWriter)? = nil,
         defaults: UserDefaults = .standard
-    ) {
-        guard let providerID else { return }
+    ) throws -> MutationResult {
+        guard let providerID else { throw MutationError.missingProvider }
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
 
-        do {
-            try database.write { db in
-                try Favorite
-                    .where {
-                        $0.providerID.eq(providerID)
-                            .and($0.mediaType.eq(media.type))
-                            .and($0.sourceID.eq(media.sourceID))
-                    }
-                    .delete()
-                    .execute(db)
-            }
-
-            bumpRevision(defaults: defaults)
-        } catch {
-            logger.warning("Failed to remove favorite: \(error.localizedDescription, privacy: .public)")
+        try database.write { db in
+            try Favorite
+                .where {
+                    $0.providerID.eq(providerID)
+                        .and($0.mediaType.eq(media.type))
+                        .and($0.sourceID.eq(media.sourceID))
+                }
+                .delete()
+                .execute(db)
         }
+
+        bumpRevision(defaults: defaults)
+        return .removed
     }
 
     static func remove(
         _ favorite: Favorite,
         database suppliedDatabase: (any DatabaseWriter)? = nil,
         defaults: UserDefaults = .standard
-    ) {
+    ) throws -> MutationResult {
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
 
-        do {
-            try database.write { db in
-                try Favorite.find(favorite.id).delete().execute(db)
-            }
-
-            bumpRevision(defaults: defaults)
-        } catch {
-            logger.warning("Failed to remove favorite row: \(error.localizedDescription, privacy: .public)")
+        try database.write { db in
+            try Favorite.find(favorite.id).delete().execute(db)
         }
+
+        bumpRevision(defaults: defaults)
+        return .removed
     }
 
     nonisolated static func deleteFavorites(for providerID: Provider.ID, in db: Database) throws {
@@ -808,13 +976,51 @@ enum FavoriteStore: Sendable {
         if lhs.updatedAt != rhs.updatedAt {
             return lhs.updatedAt > rhs.updatedAt
         }
-        if lhs.title.localizedStandardCompare(rhs.title) != .orderedSame {
-            return lhs.title.localizedStandardCompare(rhs.title) == .orderedAscending
+        let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
+        if titleOrder != .orderedSame {
+            return titleOrder == .orderedAscending
         }
         if lhs.mediaType != rhs.mediaType {
             return lhs.mediaType.rawValue < rhs.mediaType.rawValue
         }
-        return lhs.sourceID < rhs.sourceID
+        if lhs.sourceID != rhs.sourceID {
+            return lhs.sourceID < rhs.sourceID
+        }
+        return lhs.id < rhs.id
+    }
+
+    nonisolated private static func insert(
+        _ media: Media,
+        providerID: Provider.ID,
+        categoryTitle suppliedCategoryTitle: String?,
+        now: Date,
+        in db: Database
+    ) throws {
+        let categoryTitle = suppliedCategoryTitle ?? categoryTitle(for: media, in: db)
+        let artworkURL = media.coverURL ?? media.backdropURL
+
+        try Favorite.insert {
+            Favorite.Draft(
+                id: nil,
+                providerID: providerID,
+                mediaType: media.type,
+                sourceID: media.sourceID,
+                title: media.title,
+                artworkURL: artworkURL,
+                categoryID: media.categoryID,
+                categoryTitle: categoryTitle,
+                createdAt: now,
+                updatedAt: now
+            )
+        } onConflict: {
+            ($0.providerID, $0.mediaType, $0.sourceID)
+        } doUpdate: {
+            $0.title = media.title
+            $0.artworkURL = #bind(artworkURL)
+            $0.categoryID = #bind(media.categoryID)
+            $0.categoryTitle = #bind(categoryTitle)
+            $0.updatedAt = now
+        }.execute(db)
     }
 
     nonisolated private static func bumpRevision(defaults: UserDefaults) {

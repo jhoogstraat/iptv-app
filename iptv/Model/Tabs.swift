@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum Tabs: Equatable, Hashable, Identifiable {
+enum Tabs: CaseIterable, Equatable, Hashable, Identifiable {
     case home
     case movies
     case series
@@ -45,7 +45,16 @@ enum Tabs: Equatable, Hashable, Identifiable {
     }
     
     var customizationID: String {
-        return "com.jhoogstraat.iptv." + self.name
+        switch self {
+            case .home: "com.jhoogstraat.iptv.home"
+            case .movies: "com.jhoogstraat.iptv.movies"
+            case .series: "com.jhoogstraat.iptv.series"
+            case .live: "com.jhoogstraat.iptv.live"
+            case .favorites: "com.jhoogstraat.iptv.favorites"
+            case .downloads: "com.jhoogstraat.iptv.downloads"
+            case .search: "com.jhoogstraat.iptv.search"
+            case .settings: "com.jhoogstraat.iptv.settings"
+        }
     }
 
     var symbol: String {

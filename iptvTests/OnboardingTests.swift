@@ -16,7 +16,7 @@ struct OnboardingTests {
 
     @Test func providerFieldsBuildNormalizesEndpointAndKind() throws {
         let cases = [
-            (input: "example.com", expectedEndpoint: "http://example.com"),
+            (input: "example.com", expectedEndpoint: "https://example.com"),
             (input: "https://example.com/player_api.php", expectedEndpoint: "https://example.com"),
             (input: "https://example.com/player_api.php/player_api.php", expectedEndpoint: "https://example.com"),
         ]
@@ -44,10 +44,7 @@ struct OnboardingTests {
     @Test func requiresOnboardingForUninitializedActiveProvider() throws {
         try withTestDatabase { database in
             try resetDatabase(database)
-            try insertProvider(isInitialized: false, database: database)
-
-            let providerManager = ProviderManager(database: database)
-            try providerManager.loadActive()
+            let providerManager = try makeProviderManager(isInitialized: false, database: database)
 
             #expect(providerManager.requiresOnboarding == true)
         }
@@ -56,17 +53,14 @@ struct OnboardingTests {
     @Test func doesNotRequireOnboardingForInitializedActiveProvider() throws {
         try withTestDatabase { database in
             try resetDatabase(database)
-            try insertProvider(isInitialized: true, database: database)
-
-            let providerManager = ProviderManager(database: database)
-            try providerManager.loadActive()
+            let providerManager = try makeProviderManager(isInitialized: true, database: database)
 
             #expect(providerManager.requiresOnboarding == false)
         }
     }
 
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
-        let database = try appDatabase()
+        let database = try testAppDatabase()
         return try operation(database)
     }
 
@@ -78,27 +72,37 @@ struct OnboardingTests {
         }
     }
 
-    @discardableResult
-    private func insertProvider(isInitialized: Bool, database: any DatabaseWriter) throws -> Provider.ID {
-        let endpoint = try #require(URL(string: "https://example.com"))
+    private func makeProviderManager(
+        isInitialized: Bool,
+        database: any DatabaseWriter
+    ) throws -> ProviderManager {
+        let credentialStore = TestProviderCredentialStore()
+        let providerManager = ProviderManager(
+            database: database,
+            credentialStore: credentialStore
+        )
+        try providerManager.initialize(
+            ProviderConfiguration(
+                id: nil,
+                kind: .xtream,
+                name: "Primary",
+                username: "user",
+                password: "pass",
+                endpoint: try #require(URL(string: "https://example.com")),
+                allowsInsecureHTTP: false
+            )
+        )
 
-        return try database.write { db in
-            let provider = try Provider.insert {
-                Provider.Draft(
-                    id: nil,
-                    kind: .xtream,
-                    name: "Primary",
-                    username: "user",
-                    password: "pass",
-                    endpoint: endpoint,
-                    isActive: true
-                )
+        if isInitialized {
+            let providerID = try #require(providerManager.activeProviderID)
+            try database.write { db in
+                try Provider.find(providerID)
+                    .update { $0.isInitialized = true }
+                    .execute(db)
             }
-            .returning(\.self)
-            .fetchOne(db)!
-
-            try Provider.find(provider.id).update { $0.isInitialized = #bind(isInitialized) }.execute(db)
-            return provider.id
+            try providerManager.loadActive()
         }
+
+        return providerManager
     }
 }

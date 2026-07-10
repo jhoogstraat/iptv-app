@@ -1,5 +1,6 @@
 import Dependencies
 import Foundation
+import OSLog
 import SQLiteData
 
 /// Deterministic sort options supported by local catalog browse and search surfaces.
@@ -49,7 +50,7 @@ enum CategoryGrouping: Sendable {
     /// Pipe-delimited names such as `|NL| Movies` use the first pipe segment as the group key.
     /// Categories without that shape remain in the ungrouped bucket.
     static func key(for title: String) -> String {
-        if let match = title.firstMatch(of: #/\|([^|]+)\|\s*(.*)/#) {
+        if let match = title.firstMatch(of: #/^\|([^|]+)\|\s*(.*)/#) {
             let key = String(match.output.1).trimmingCharacters(in: .whitespacesAndNewlines)
             return key.isEmpty ? ungroupedKey : key
         }
@@ -124,6 +125,225 @@ struct LibraryFilterState: Hashable, Sendable {
         selectedCategoryID = nil
         selectedGroupKeys.removeAll()
         minimumRating = nil
+        sort = .title
+    }
+
+    mutating func retainSelections(availableIn categories: [Category]) {
+        let categoryIDs = Set(categories.map(\.id))
+        if let selectedCategoryID, !categoryIDs.contains(selectedCategoryID) {
+            self.selectedCategoryID = nil
+        }
+
+        let groupKeys = Set(categories.map { CategoryGrouping.key(for: $0.title) })
+        selectedGroupKeys.formIntersection(groupKeys)
+    }
+}
+
+enum LibraryEmptyCriteria: Equatable, Sendable {
+    case none
+    case queryOnly
+    case filtersOnly
+    case queryAndFilters
+
+    init(query: String, filterState: LibraryFilterState) {
+        let hasQuery = !LibraryQueryNormalizer.isEmpty(query)
+        switch (hasQuery, filterState.hasActiveFilters) {
+        case (false, false): self = .none
+        case (true, false): self = .queryOnly
+        case (false, true): self = .filtersOnly
+        case (true, true): self = .queryAndFilters
+        }
+    }
+}
+
+/// A provider-visible category projection. The complete relationship map remains separate
+/// from the selectable category list so hidden media never falls back to "Ungrouped".
+struct LibraryCategoryProjection: Sendable {
+    let categoryByID: [Category.ID: Category]
+    let selectableCategories: [Category]
+    let selectableCategoryIDs: Set<Category.ID>
+    let selectableGroupKeys: Set<String>
+
+    init(
+        categories: [Category],
+        hiddenGroupKeys: Set<String>,
+        includedTypes: Set<MediaType>? = nil
+    ) {
+        categoryByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        selectableCategories = categories
+            .filter { category in
+                let typeIsIncluded = includedTypes?.contains(category.type) ?? true
+                return typeIsIncluded
+                    && !hiddenGroupKeys.contains(CategoryGrouping.key(for: category.title))
+            }
+            .sorted { lhs, rhs in
+                let comparison = lhs.title.localizedStandardCompare(rhs.title)
+                if comparison != .orderedSame {
+                    return comparison == .orderedAscending
+                }
+                return lhs.id < rhs.id
+            }
+        selectableCategoryIDs = Set(selectableCategories.map(\.id))
+        selectableGroupKeys = Set(selectableCategories.map { CategoryGrouping.key(for: $0.title) })
+    }
+}
+
+enum LibrarySearchScope: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case movies
+    case series
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .all: "All"
+        case .movies: "Movies"
+        case .series: "Series"
+        }
+    }
+
+    var includedTypes: Set<MediaType> {
+        switch self {
+        case .all: [.movie, .series]
+        case .movies: [.movie]
+        case .series: [.series]
+        }
+    }
+
+    func includes(_ type: MediaType) -> Bool {
+        includedTypes.contains(type)
+    }
+}
+
+struct LibraryHydrationSnapshot: Sendable {
+    let statesByCategoryID: [Category.ID: SyncManager.CategoryHydrationState]
+
+    init(
+        categories: [Category],
+        media: [Media],
+        overrides: [Category.ID: SyncManager.CategoryHydrationState] = [:]
+    ) {
+        let mediaCounts = media.reduce(into: [Category.ID: Int]()) { counts, item in
+            guard let categoryID = item.categoryID else { return }
+            counts[categoryID, default: 0] += 1
+        }
+
+        statesByCategoryID = Dictionary(
+            uniqueKeysWithValues: categories.map { category in
+                let state: SyncManager.CategoryHydrationState
+                if let override = overrides[category.id] {
+                    state = override
+                } else if category.updatedAt == nil {
+                    state = .unhydrated
+                } else {
+                    let count = mediaCounts[category.id, default: 0]
+                    state = count == 0 ? .empty : .populated(count)
+                }
+                return (category.id, state)
+            }
+        )
+    }
+
+    func state(for category: Category?) -> SyncManager.CategoryHydrationState {
+        guard let category else { return .populated(0) }
+        return statesByCategoryID[category.id] ?? .unhydrated
+    }
+
+    func coverage(for categories: [Category]) -> LibraryHydrationCoverage {
+        LibraryHydrationCoverage(
+            states: categories.map { statesByCategoryID[$0.id] ?? .unhydrated }
+        )
+    }
+}
+
+struct LibraryHydrationCoverage: Equatable, Sendable {
+    let loadingCount: Int
+    let unhydratedCount: Int
+    let failedCount: Int
+
+    init(states: [SyncManager.CategoryHydrationState]) {
+        loadingCount = states.filter { $0 == .loading }.count
+        unhydratedCount = states.filter { $0 == .unhydrated }.count
+        failedCount = states.filter {
+            if case .failed = $0 { return true }
+            return false
+        }.count
+    }
+
+    var isPartial: Bool {
+        loadingCount > 0 || unhydratedCount > 0 || failedCount > 0
+    }
+
+    var message: String? {
+        guard isPartial else { return nil }
+
+        var parts: [String] = []
+        if loadingCount > 0 {
+            parts.append("\(loadingCount) \(loadingCount == 1 ? "category is" : "categories are") loading")
+        }
+        if unhydratedCount > 0 {
+            parts.append("\(unhydratedCount) \(unhydratedCount == 1 ? "category has" : "categories have") not been opened")
+        }
+        if failedCount > 0 {
+            parts.append("\(failedCount) \(failedCount == 1 ? "category failed" : "categories failed") to load")
+        }
+        return "\(parts.joined(separator: "; ")); results are local and may be partial."
+    }
+}
+
+struct LibraryContentKey: Hashable, Sendable {
+    let mediaType: MediaType
+    let sourceID: Int
+
+    init(mediaType: MediaType, sourceID: Int) {
+        self.mediaType = mediaType
+        self.sourceID = sourceID
+    }
+
+    init(media: Media) {
+        self.init(mediaType: media.type, sourceID: media.sourceID)
+    }
+}
+
+struct LibrarySearchIndexes: Sendable {
+    let categoryByID: [Category.ID: Category]
+    let favoriteContentKeys: Set<LibraryContentKey>
+    let resumableActivityByContentKey: [LibraryContentKey: WatchActivity]
+
+    init(
+        providerID: Provider.ID,
+        categories: [Category],
+        favorites: [Favorite],
+        watchActivities: [WatchActivity]
+    ) {
+        categoryByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        favoriteContentKeys = Set(
+            favorites.lazy
+                .filter { $0.providerID == providerID }
+                .map { LibraryContentKey(mediaType: $0.mediaType, sourceID: $0.sourceID) }
+        )
+
+        resumableActivityByContentKey = watchActivities.reduce(into: [:]) { index, activity in
+            guard activity.providerID == providerID, activity.isResumeEligible else { return }
+            let key = LibraryContentKey(mediaType: activity.mediaType, sourceID: activity.sourceID)
+            if let existing = index[key], existing.lastWatchedAt >= activity.lastWatchedAt {
+                return
+            }
+            index[key] = activity
+        }
+    }
+
+    func category(for media: Media) -> Category? {
+        media.categoryID.flatMap { categoryByID[$0] }
+    }
+
+    func isFavorite(_ media: Media) -> Bool {
+        favoriteContentKeys.contains(LibraryContentKey(media: media))
+    }
+
+    func watchActivity(for media: Media) -> WatchActivity? {
+        resumableActivityByContentKey[LibraryContentKey(media: media)]
     }
 }
 
@@ -210,7 +430,49 @@ enum LibraryFilterEngine: Sendable {
             return titleComparison == .orderedAscending
         }
 
-        return lhs.sourceID < rhs.sourceID
+        if lhs.sourceID != rhs.sourceID {
+            return lhs.sourceID < rhs.sourceID
+        }
+
+        if lhs.type != rhs.type {
+            return lhs.type.rawValue < rhs.type.rawValue
+        }
+
+        return lhs.id < rhs.id
+    }
+}
+
+struct CategoryPrefixVisibilityRequest: Hashable, Sendable {
+    let providerID: Provider.ID?
+    let revision: Int
+}
+
+struct CategoryPrefixVisibilitySnapshot: Equatable, Sendable {
+    let request: CategoryPrefixVisibilityRequest
+    let hiddenGroupKeys: Set<String>
+}
+
+struct CategoryPrefixVisibilityCache: Sendable {
+    private(set) var cachedSnapshot: CategoryPrefixVisibilitySnapshot?
+
+    func snapshot(for request: CategoryPrefixVisibilityRequest) -> CategoryPrefixVisibilitySnapshot? {
+        guard cachedSnapshot?.request == request else { return nil }
+        return cachedSnapshot
+    }
+
+    @discardableResult
+    mutating func resolve(
+        _ request: CategoryPrefixVisibilityRequest,
+        load: () -> CategoryPrefixVisibilitySnapshot
+    ) -> CategoryPrefixVisibilitySnapshot {
+        if let snapshot = snapshot(for: request) {
+            return snapshot
+        }
+
+        let snapshot = load()
+        precondition(snapshot.request == request)
+        cachedSnapshot = snapshot
+        return snapshot
     }
 }
 
@@ -242,9 +504,24 @@ enum CategoryPrefixVisibilityStore: Sendable {
                 )
             }
         } catch {
-            assertionFailure("Failed to load category prefix visibility: \(error.localizedDescription)")
+            logger.error("Failed to load category prefix visibility: \(error.localizedDescription, privacy: .public)")
             return []
         }
+    }
+
+    static func snapshot(
+        for request: CategoryPrefixVisibilityRequest,
+        database: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) -> CategoryPrefixVisibilitySnapshot {
+        CategoryPrefixVisibilitySnapshot(
+            request: request,
+            hiddenGroupKeys: hiddenGroupKeys(
+                for: request.providerID,
+                database: database,
+                defaults: defaults
+            )
+        )
     }
 
     static func setHiddenGroupKeys(
@@ -281,7 +558,7 @@ enum CategoryPrefixVisibilityStore: Sendable {
             }
             defaults.set(defaults.integer(forKey: revisionKey) + 1, forKey: revisionKey)
         } catch {
-            assertionFailure("Failed to save category prefix visibility: \(error.localizedDescription)")
+            logger.error("Failed to save category prefix visibility: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -325,3 +602,5 @@ enum CategoryPrefixVisibilityStore: Sendable {
         return "library.categoryPrefixVisibility.provider.\(providerID).hiddenGroups"
     }
 }
+
+private let logger = Logger(subsystem: "IPTV", category: "LibraryFilters")

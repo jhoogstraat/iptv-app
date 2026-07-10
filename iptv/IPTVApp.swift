@@ -12,25 +12,69 @@ import Dependencies
 import Nuke
 import Sharing
 
+@MainActor
+struct ApplicationRuntime {
+    let providerManager: ProviderManager
+    let player: Player
+}
+
+private struct ApplicationContentView: View {
+    let bootstrap: RecoverableBootstrap<ApplicationRuntime>
+
+    @ViewBuilder
+    var body: some View {
+        if let runtime = bootstrap.value {
+            AppRootView()
+                .withVideoPlayer()
+                .environment(runtime.player)
+                .environment(runtime.providerManager)
+        } else if let errorMessage = bootstrap.errorMessage {
+            BootstrapFailureView(
+                message: errorMessage,
+                isRetrying: bootstrap.isLoading,
+                retry: { bootstrap.retry() }
+            )
+        } else {
+            ProgressView("Opening iptv…")
+                .task { bootstrap.startIfNeeded() }
+        }
+    }
+}
+
+#if os(macOS)
+private struct ApplicationSettingsContentView: View {
+    let bootstrap: RecoverableBootstrap<ApplicationRuntime>
+
+    @ViewBuilder
+    var body: some View {
+        if let runtime = bootstrap.value {
+            SettingsScreen()
+                .environment(runtime.providerManager)
+        } else if let errorMessage = bootstrap.errorMessage {
+            BootstrapFailureView(
+                message: errorMessage,
+                isRetrying: bootstrap.isLoading,
+                retry: { bootstrap.retry() }
+            )
+        } else {
+            ProgressView("Opening iptv…")
+                .task { bootstrap.startIfNeeded() }
+        }
+    }
+}
+#endif
+
 @main
 struct IPTVApp: App {
-    private let providerManager: ProviderManager
-    @State private var player = Player()
+    @State private var bootstrap: RecoverableBootstrap<ApplicationRuntime>
+
     var body: some Scene {
         WindowGroup {
-            AppRootView()
-                #if !os(visionOS)
-                .withVideoPlayer()
-                #endif
-                .environment(player)
-                .environment(providerManager)
+            ApplicationContentView(bootstrap: bootstrap)
 #if os(macOS)
                 .toolbar(removing: .title)
                 .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
-#endif
-
-#if os(macOS) || os(visionOS)
-                .frame(minWidth: 600, maxWidth: .infinity, minHeight: 960, maxHeight: .infinity)
+                .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity)
 #endif
                 .preferredColorScheme(.dark)
         }
@@ -40,32 +84,40 @@ struct IPTVApp: App {
 
         #if os(macOS)
         Settings {
-            SettingsScreen()
-                .environment(providerManager)
+            ApplicationSettingsContentView(bootstrap: bootstrap)
         }
-        #endif
-        
-        // The video player window
-        #if os(macOS)
-        PlayerWindow(player: player, providerManager: providerManager)
+
+        PlayerWindow(bootstrap: bootstrap)
         #endif
     }
-    
-    /// Load video metadata and initialize the model container and video player model.
-    init() {
-        prepareDependencies {
-            $0.defaultDatabase = try! appDatabase()
-            $0.defaultAppStorage = UserDefaults.standard
-        }
-        
-        let providerManager = ProviderManager()
-       
-        // FIXME: Handle error gracefully
-        try! providerManager.loadActive()
-        
-        ImagePipeline.Configuration.isSignpostLoggingEnabled = true
 
-        self.providerManager = providerManager
+    
+    /// Loads persistence and session state behind a retryable boundary.
+    init() {
+        let bootstrap = RecoverableBootstrap<ApplicationRuntime> {
+            let credentialStore = KeychainProviderCredentialStore()
+            let database = try appDatabase(credentialStore: credentialStore)
+            prepareDependencies {
+                $0.defaultDatabase = database
+                $0.defaultAppStorage = UserDefaults.standard
+            }
+
+            let providerManager = ProviderManager(
+                database: database,
+                credentialStore: credentialStore
+            )
+            try providerManager.loadActive()
+
+            return ApplicationRuntime(
+                providerManager: providerManager,
+                player: Player(database: database, credentialStore: credentialStore)
+            )
+        }
+
+        bootstrap.startIfNeeded()
+        self._bootstrap = State(initialValue: bootstrap)
+
+        ImagePipeline.Configuration.isSignpostLoggingEnabled = true
     }
 }
 

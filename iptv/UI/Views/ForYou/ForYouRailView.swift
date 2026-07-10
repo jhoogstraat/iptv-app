@@ -8,7 +8,25 @@
 import SwiftUI
 
 enum ForYouBadge {
-    case new, series
+    case new
+    case series
+
+    var accessibilityDescription: String {
+        switch self {
+        case .new: "New"
+        case .series: "Series"
+        }
+    }
+}
+
+enum ForYouMediaIdentity {
+    static func poster(for media: Media) -> String {
+        "forYou.poster.\(media.type.rawValue).\(media.sourceID)"
+    }
+
+    static func continueWatching(for media: Media) -> String {
+        "forYou.continue.\(media.type.rawValue).\(media.sourceID)"
+    }
 }
 
 struct ForYouRailView<Destination: View>: View {
@@ -17,6 +35,9 @@ struct ForYouRailView<Destination: View>: View {
     let items: [Media]
     let badge: (Media) -> ForYouBadge?
     let destination: (Media) -> Destination
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     init(
         title: String,
@@ -33,10 +54,11 @@ struct ForYouRailView<Destination: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
 
                 if let subtitle {
                     Text(subtitle)
@@ -46,21 +68,52 @@ struct ForYouRailView<Destination: View>: View {
             }
 
             ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 14) {
+                LazyHStack(alignment: .top, spacing: cardSpacing) {
                     ForEach(items) { item in
                         NavigationLink {
                             destination(item)
                         } label: {
                             ForYouPosterCard(item: item, badge: badge(item))
-                                .frame(width: 170, height: 255)
+                                .frame(width: cardWidth)
                         }
                         .buttonStyle(.plain)
                     }
                 }
-                .padding(.horizontal, 1)
+                .padding(.horizontal, 2)
+                .padding(.vertical, focusPadding)
+                #if os(tvOS)
+                .focusSection()
+                #endif
             }
             .scrollIndicators(.never)
         }
+    }
+
+    private var cardWidth: CGFloat {
+        #if os(tvOS)
+        260
+        #elseif os(macOS)
+        dynamicTypeSize.isAccessibilitySize ? 230 : 190
+        #else
+        if dynamicTypeSize.isAccessibilitySize { return 220 }
+        return horizontalSizeClass == .compact ? 160 : 190
+        #endif
+    }
+
+    private var cardSpacing: CGFloat {
+        #if os(tvOS)
+        36
+        #else
+        16
+        #endif
+    }
+
+    private var focusPadding: CGFloat {
+        #if os(tvOS)
+        18
+        #else
+        2
+        #endif
     }
 }
 
@@ -68,63 +121,64 @@ private struct ForYouPosterCard: View {
     let item: Media
     let badge: ForYouBadge?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            AsyncImage(url: item.coverURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .boundedCoverArtwork()
-                case .failure:
-                    fallback
-                case .empty:
-                    Rectangle()
-                        .fill(.gray.opacity(0.25))
-                        .overlay { ProgressView() }
-                @unknown default:
-                    fallback
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack(alignment: .topTrailing) {
+                AsyncImage(url: item.coverURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .boundedCoverArtwork()
+                    case .empty:
+                        artworkPlaceholder
+                            .overlay { ProgressView() }
+                    case .failure:
+                        artworkPlaceholder
+                    @unknown default:
+                        artworkPlaceholder
+                    }
+                }
+                .accessibilityHidden(true)
+
+                if let badge {
+                    badgeView(badge)
+                        .padding(8)
+                        .accessibilityHidden(true)
                 }
             }
+            .aspectRatio(2 / 3, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .background(Color.secondary.opacity(0.12))
+            .clipShape(.rect(cornerRadius: 10))
 
-            if let badge {
-                badgeView(badge)
-                    .padding(8)
-            }
+            Text(item.title)
+                .font(.footnote.weight(.semibold))
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.secondary.opacity(0.12))
-        .clipShape(.rect(cornerRadius: 10))
+        .contentShape(.rect)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.title)
+        .accessibilityValue(badge?.accessibilityDescription ?? "")
+        .accessibilityIdentifier(ForYouMediaIdentity.poster(for: item))
     }
 
-    private var fallback: some View {
+    private var artworkPlaceholder: some View {
         Rectangle()
             .fill(.gray.opacity(0.25))
             .overlay {
-                Text(item.title)
-                    .font(.caption)
-                    .multilineTextAlignment(.center)
-                    .padding(8)
+                Image(systemName: item.type == .series ? "rectangle.stack" : "film")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
     }
 
     @ViewBuilder
     private func badgeView(_ badge: ForYouBadge) -> some View {
         switch badge {
-//        case .rating(let value):
-//            Label(value, systemImage: "star.fill")
-//                .labelStyle(.titleAndIcon)
-//                .font(.caption2.weight(.semibold))
-//                .padding(.horizontal, 6)
-//                .padding(.vertical, 4)
-//                .background(.thinMaterial)
-//                .clipShape(.capsule)
-//        case .language(let value):
-//            Text(value.uppercased())
-//                .font(.caption2.weight(.semibold))
-//                .padding(.horizontal, 6)
-//                .padding(.vertical, 4)
-//                .background(.thinMaterial)
-//                .clipShape(.capsule)
         case .new:
             Text("NEW")
                 .font(.caption2.weight(.semibold))

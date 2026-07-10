@@ -7,7 +7,7 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 ## Status
 
 - Target state: Live is a first-class watch surface backed by local live category/channel data, with channel playback through the shared player and future EPG/catch-up support.
-- Implementation status (reviewed 2026-07-06): Basic channel-only Live is implemented. Initial sync stores live categories alongside movie/series categories, `LiveScreen` reads local live categories/channels from SQLiteData, opening a live category lazily hydrates channel rows, local title search/group/category/sort filters apply to persisted rows, and tapping a channel calls the shared `Player.load` path with an Xtream live URL. EPG, catch-up, zapping, DVR, guide caching, downloads, profiles, and global Live search remain deferred.
+- Implementation status (reviewed 2026-07-10): Basic channel-only Live is implemented. Initial sync includes live categories; `LiveScreen` reads local rows, lazily reconciles selected-category channels, applies shared normalized search/filter/sort and hidden-prefix visibility, and launches the shared player with an Xtream live URL. Empty/loading/failure states reflect local coverage honestly. EPG, catch-up, zapping, DVR, guide caching, downloads, profiles, and global Live search remain deferred.
 - Existing planning: `docs/live-epg-catchup-spec.md` contains the deferred guide/catch-up roadmap.
 
 ## User Experience

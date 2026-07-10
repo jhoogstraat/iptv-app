@@ -80,6 +80,209 @@ struct LibraryFilterEngineTests {
         )
     }
 
+    @Test func hiddenCategoryRelationshipsRemainAvailableAcrossLibraryProjections() {
+        for (offset, type) in [MediaType.movie, .series, .live].enumerated() {
+            let base = offset * 10
+            let categories = [
+                makeCategory(id: base + 1, type: type, title: "|EN| Visible"),
+                makeCategory(id: base + 2, type: type, title: "|NL| Hidden"),
+                makeCategory(id: base + 3, type: type, title: "Actually Ungrouped"),
+            ]
+            let media = [
+                makeMedia(id: base + 1, sourceID: base + 100, type: type, title: "Alpha", categoryID: base + 1),
+                makeMedia(id: base + 2, sourceID: base + 101, type: type, title: "Beta", categoryID: base + 2),
+                makeMedia(id: base + 3, sourceID: base + 102, type: type, title: "Gamma", categoryID: base + 3),
+            ]
+            let projection = LibraryCategoryProjection(
+                categories: categories,
+                hiddenGroupKeys: ["NL"],
+                includedTypes: [type]
+            )
+
+            #expect(Set(projection.selectableCategories.map(\.id)) == [base + 1, base + 3])
+            #expect(projection.categoryByID[base + 2]?.title == "|NL| Hidden")
+            #expect(
+                LibraryFilterEngine.filteredMedia(
+                    media,
+                    categories: categories,
+                    state: LibraryFilterState(),
+                    hiddenGroupKeys: ["NL"]
+                ).map(\.sourceID) == [base + 100, base + 102]
+            )
+        }
+    }
+
+    @Test func categoryPrefixMustStartAtBeginningOfTitle() {
+        #expect(CategoryGrouping.key(for: "|NL| Movies") == "NL")
+        #expect(CategoryGrouping.key(for: "Movies |NL| Archive") == CategoryGrouping.ungroupedKey)
+        #expect(CategoryGrouping.key(for: "  |NL| Movies") == CategoryGrouping.ungroupedKey)
+    }
+
+    @Test func clearFiltersAlsoRestoresDefaultSort() {
+        var state = LibraryFilterState(
+            selectedCategoryID: 9,
+            selectedGroupKeys: ["NL"],
+            minimumRating: 8,
+            sort: .rating
+        )
+
+        state.clearFilters()
+
+        #expect(state == LibraryFilterState())
+    }
+
+    @Test func scopeChangeInvalidatesIncompatibleCategoryAndGroups() {
+        let categories = [
+            makeCategory(id: 1, type: .movie, title: "|MOV| Movies"),
+            makeCategory(id: 2, type: .series, title: "|SER| Series"),
+        ]
+        let seriesProjection = LibraryCategoryProjection(
+            categories: categories,
+            hiddenGroupKeys: [],
+            includedTypes: LibrarySearchScope.series.includedTypes
+        )
+        var state = LibraryFilterState(
+            selectedCategoryID: 1,
+            selectedGroupKeys: ["MOV"],
+            sort: .newest
+        )
+
+        state.retainSelections(availableIn: seriesProjection.selectableCategories)
+
+        #expect(state.selectedCategoryID == nil)
+        #expect(state.selectedGroupKeys.isEmpty)
+        #expect(state.sort == .newest)
+    }
+
+    @Test func scopeVisibleCoverageRemainsPartialForNonemptyAndZeroMatchResults() {
+        let categories = [
+            makeCategory(id: 1, type: .movie, title: "|EN| Visible"),
+            makeCategory(id: 2, type: .movie, title: "|NL| Hidden"),
+            makeCategory(id: 3, type: .series, title: "|EN| Out of Scope"),
+        ]
+        let media = [
+            makeMedia(id: 1, sourceID: 100, type: .movie, title: "Alpha", categoryID: 1),
+            makeMedia(id: 2, sourceID: 101, type: .movie, title: "Beta", categoryID: 2),
+        ]
+        let projection = LibraryCategoryProjection(
+            categories: categories,
+            hiddenGroupKeys: ["NL"],
+            includedTypes: LibrarySearchScope.movies.includedTypes
+        )
+        let hydration = LibraryHydrationSnapshot(
+            categories: categories,
+            media: media,
+            overrides: [
+                1: .loading,
+                2: .failed("Hidden failure"),
+                3: .unhydrated,
+            ]
+        )
+        let coverage = hydration.coverage(for: projection.selectableCategories)
+
+        let nonemptyResults = LibraryFilterEngine.filteredMedia(
+            media,
+            categories: categories,
+            state: LibraryFilterState(),
+            hiddenGroupKeys: ["NL"],
+            query: "Alpha"
+        )
+        let zeroMatchResults = LibraryFilterEngine.filteredMedia(
+            media,
+            categories: categories,
+            state: LibraryFilterState(),
+            hiddenGroupKeys: ["NL"],
+            query: "Missing"
+        )
+
+        #expect(nonemptyResults.map(\.sourceID) == [100])
+        #expect(zeroMatchResults.isEmpty)
+        #expect(coverage == LibraryHydrationCoverage(states: [.loading]))
+        #expect(coverage.message != nil)
+    }
+
+    @Test func emptyCriteriaDistinguishQueryFiltersAndCombinedRecovery() {
+        #expect(LibraryEmptyCriteria(query: "", filterState: LibraryFilterState()) == .none)
+        #expect(LibraryEmptyCriteria(query: "Alpha", filterState: LibraryFilterState()) == .queryOnly)
+        #expect(
+            LibraryEmptyCriteria(
+                query: "",
+                filterState: LibraryFilterState(selectedGroupKeys: ["EN"])
+            ) == .filtersOnly
+        )
+        #expect(
+            LibraryEmptyCriteria(
+                query: "Alpha",
+                filterState: LibraryFilterState(minimumRating: 8)
+            ) == .queryAndFilters
+        )
+    }
+
+    @Test func visibilityCacheLoadsOnceForProviderRevisionAndInvalidatesOnRevision() {
+        var cache = CategoryPrefixVisibilityCache()
+        var loadCount = 0
+        let firstRequest = CategoryPrefixVisibilityRequest(providerID: 1, revision: 4)
+
+        let first = cache.resolve(firstRequest) {
+            loadCount += 1
+            return CategoryPrefixVisibilitySnapshot(request: firstRequest, hiddenGroupKeys: ["NL"])
+        }
+        let repeated = cache.resolve(firstRequest) {
+            loadCount += 1
+            return CategoryPrefixVisibilitySnapshot(request: firstRequest, hiddenGroupKeys: ["EN"])
+        }
+
+        let nextRequest = CategoryPrefixVisibilityRequest(providerID: 1, revision: 5)
+        let revised = cache.resolve(nextRequest) {
+            loadCount += 1
+            return CategoryPrefixVisibilitySnapshot(request: nextRequest, hiddenGroupKeys: ["EN"])
+        }
+
+        #expect(first.hiddenGroupKeys == ["NL"])
+        #expect(repeated.hiddenGroupKeys == ["NL"])
+        #expect(revised.hiddenGroupKeys == ["EN"])
+        #expect(loadCount == 2)
+    }
+
+    @Test func searchIndexesProvideConstantTimeCategoryFavoriteAndActivityLookups() {
+        let providerID = 7
+        let category = makeCategory(id: 1, title: "|EN| Movies")
+        let media = makeMedia(id: 1, sourceID: 100, title: "Alpha", categoryID: category.id)
+        let favorite = Favorite(
+            id: 1,
+            providerID: providerID,
+            mediaType: .movie,
+            sourceID: media.sourceID,
+            title: media.title,
+            artworkURL: nil,
+            categoryID: category.id,
+            categoryTitle: category.title
+        )
+        let activity = WatchActivity(
+            id: 1,
+            providerID: providerID,
+            mediaType: .movie,
+            sourceID: media.sourceID,
+            title: media.title,
+            artworkURL: nil,
+            categoryTitle: category.title,
+            currentTime: 60,
+            duration: 300,
+            completed: false
+        )
+
+        let indexes = LibrarySearchIndexes(
+            providerID: providerID,
+            categories: [category],
+            favorites: [favorite],
+            watchActivities: [activity]
+        )
+
+        #expect(indexes.category(for: media) == category)
+        #expect(indexes.isFavorite(media))
+        #expect(indexes.watchActivity(for: media) == activity)
+    }
+
     @Test func titleSortUsesSourceIDTieBreaker() {
         let media = [
             makeMedia(id: 1, sourceID: 200, title: "Same"),
@@ -115,6 +318,42 @@ struct LibraryFilterEngineTests {
         let state = LibraryFilterState(sort: .rating)
 
         #expect(LibraryFilterEngine.filteredMedia(media, categories: [], state: state).map(\.sourceID) == [100, 200, 300, 400])
+    }
+
+    @Test func crossTypeSortTiesAreStrictAndIndependentOfInputOrder() {
+        let movie = makeMedia(
+            id: 20,
+            sourceID: 100,
+            type: .movie,
+            title: "Same",
+            rating: 8,
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+        let series = makeMedia(
+            id: 10,
+            sourceID: 100,
+            type: .series,
+            title: "Same",
+            rating: 8,
+            updatedAt: Date(timeIntervalSince1970: 100)
+        )
+
+        for sort in BrowseSort.allCases {
+            let state = LibraryFilterState(sort: sort)
+            let forward = LibraryFilterEngine.filteredMedia(
+                [movie, series],
+                categories: [],
+                state: state
+            )
+            let reversed = LibraryFilterEngine.filteredMedia(
+                [series, movie],
+                categories: [],
+                state: state
+            )
+
+            #expect(forward.map(\.type) == [.movie, .series])
+            #expect(reversed.map(\.type) == [.movie, .series])
+        }
     }
 
     @MainActor
@@ -158,7 +397,7 @@ struct LibraryFilterEngineTests {
 
     @MainActor
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
-        let database = try appDatabase()
+        let database = try testAppDatabase()
         return try operation(database)
     }
 
@@ -181,8 +420,9 @@ struct LibraryFilterEngineTests {
                     kind: .xtream,
                     name: name,
                     username: "user",
-                    password: "pass",
+                    credentialReference: "library-filter-\(UUID().uuidString)",
                     endpoint: endpoint,
+                    allowsInsecureHTTP: false,
                     isActive: false
                 )
             }
@@ -195,13 +435,25 @@ struct LibraryFilterEngineTests {
     }
 
 
-    private func makeCategory(id: iptv.Category.ID, title: String) -> iptv.Category {
-        iptv.Category(id: id, sourceID: "category-\(id)", type: .movie, title: title, updatedAt: nil)
+    private func makeCategory(
+        id: iptv.Category.ID,
+        type: MediaType = .movie,
+        title: String,
+        updatedAt: Date? = nil
+    ) -> iptv.Category {
+        iptv.Category(
+            id: id,
+            sourceID: "category-\(id)",
+            type: type,
+            title: title,
+            updatedAt: updatedAt
+        )
     }
 
     private func makeMedia(
         id: iptv.Media.ID,
         sourceID: Int,
+        type: MediaType = .movie,
         title: String,
         categoryID: iptv.Category.ID? = nil,
         rating: Double? = nil,
@@ -210,7 +462,7 @@ struct LibraryFilterEngineTests {
         iptv.Media(
             id: id,
             sourceID: sourceID,
-            type: .movie,
+            type: type,
             title: title,
             categoryID: categoryID,
             tmdbID: nil,

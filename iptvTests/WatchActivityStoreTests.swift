@@ -21,6 +21,7 @@ struct WatchActivityStoreTests {
                 currentTime: 95,
                 duration: 600,
                 completed: false,
+                writeStamp: stamp(session: 100, generation: 1),
                 database: database
             )
             await WatchActivityStore.recordProgress(
@@ -29,6 +30,7 @@ struct WatchActivityStoreTests {
                 currentTime: 45,
                 duration: 500,
                 completed: false,
+                writeStamp: stamp(session: 100, generation: 1),
                 database: database
             )
             await WatchActivityStore.recordProgress(
@@ -37,6 +39,7 @@ struct WatchActivityStoreTests {
                 currentTime: 125,
                 duration: 600,
                 completed: false,
+                writeStamp: stamp(session: 100, generation: 2),
                 database: database
             )
 
@@ -136,45 +139,178 @@ struct WatchActivityStoreTests {
         }
     }
 
-    @Test func providerEditAndDeleteClearWatchActivityForActiveProvider() async throws {
+    @Test func activityOrderingUsesMediaTypeSourceAndLocalIDTieBreakers() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
+            let watchedAt = Date(timeIntervalSince1970: 500)
+
+            try database.write { db in
+                try WatchActivity.insert {
+                    WatchActivity.Draft(
+                        id: nil,
+                        providerID: providerID,
+                        mediaType: .episode,
+                        sourceID: 44,
+                        title: "Same",
+                        artworkURL: nil,
+                        categoryTitle: nil,
+                        currentTime: 90,
+                        duration: 600,
+                        completed: false,
+                        lastWatchedAt: watchedAt,
+                        updatedAt: watchedAt
+                    )
+                }.execute(db)
+                try WatchActivity.insert {
+                    WatchActivity.Draft(
+                        id: nil,
+                        providerID: providerID,
+                        mediaType: .movie,
+                        sourceID: 44,
+                        title: "Same",
+                        artworkURL: nil,
+                        categoryTitle: nil,
+                        currentTime: 90,
+                        duration: 600,
+                        completed: false,
+                        lastWatchedAt: watchedAt,
+                        updatedAt: watchedAt
+                    )
+                }.execute(db)
+            }
+
+            let ordered = WatchActivityStore.unfinishedActivities(for: providerID, database: database)
+            #expect(ordered.map(\.mediaType) == [.movie, .episode])
+
+            let lowerID = WatchActivity(
+                id: 1,
+                providerID: providerID,
+                mediaType: .movie,
+                sourceID: 44,
+                title: "Same",
+                artworkURL: nil,
+                categoryTitle: nil,
+                currentTime: 90,
+                duration: 600,
+                completed: false,
+                lastWatchedAt: watchedAt,
+                updatedAt: watchedAt
+            )
+            let higherID = WatchActivity(
+                id: 2,
+                providerID: providerID,
+                mediaType: .movie,
+                sourceID: 44,
+                title: "Same",
+                artworkURL: nil,
+                categoryTitle: nil,
+                currentTime: 90,
+                duration: 600,
+                completed: false,
+                lastWatchedAt: watchedAt,
+                updatedAt: watchedAt
+            )
+            #expect(WatchActivityStore.activityOrdering(lowerID, higherID))
+            #expect(WatchActivityStore.activityOrdering(higherID, lowerID) == false)
+        }
+    }
+
+    @Test func reversedStaleWriteCannotOverwriteNewerPlaybackSnapshot() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
+            let media = makeMedia(sourceID: 704, title: "Ordered")
+            let sessionStartedAt = Date(timeIntervalSince1970: 600)
+
+            let committedNewer = await WatchActivityStore.recordProgress(
+                for: media,
+                providerID: providerID,
+                currentTime: 600,
+                duration: 600,
+                completed: true,
+                writeStamp: .init(sessionStartedAt: sessionStartedAt, generation: 2),
+                database: database
+            )
+            let rejectedOlder = await WatchActivityStore.recordProgress(
+                for: media,
+                providerID: providerID,
+                currentTime: 90,
+                duration: 600,
+                completed: false,
+                writeStamp: .init(sessionStartedAt: sessionStartedAt, generation: 1),
+                database: database
+            )
+
+            #expect(committedNewer)
+            #expect(rejectedOlder == false)
+            let activity = try #require(
+                WatchActivityStore.activity(for: media, providerID: providerID, database: database)
+            )
+            #expect(activity.currentTime == 600)
+            #expect(activity.completed)
+            #expect(activity.writeSessionStartedAt == sessionStartedAt)
+            #expect(activity.writeGeneration == 2)
+        }
+    }
+
+    @Test func laterRewatchSessionCanReplaceCompletedActivityWithLowerGeneration() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
+            let media = makeMedia(sourceID: 705, title: "Rewatch")
+
+            let completed = await WatchActivityStore.recordProgress(
+                for: media,
+                providerID: providerID,
+                currentTime: 600,
+                duration: 600,
+                completed: true,
+                writeStamp: stamp(session: 700, generation: 8),
+                database: database
+            )
+            let rewatched = await WatchActivityStore.recordProgress(
+                for: media,
+                providerID: providerID,
+                currentTime: 75,
+                duration: 600,
+                completed: false,
+                writeStamp: stamp(session: 800, generation: 1),
+                database: database
+            )
+
+            #expect(completed)
+            #expect(rewatched)
+            let activity = try #require(
+                WatchActivityStore.activity(for: media, providerID: providerID, database: database)
+            )
+            #expect(activity.currentTime == 75)
+            #expect(activity.completed == false)
+            #expect(activity.isResumeEligible)
+            #expect(activity.writeSessionStartedAt == Date(timeIntervalSince1970: 800))
+            #expect(activity.writeGeneration == 1)
+        }
+    }
+
+    @Test func explicitProviderDeleteClearsWatchActivity() async throws {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
             let media = makeMedia(sourceID: 88, title: "Tracked")
-            await WatchActivityStore.recordProgress(
+            _ = await WatchActivityStore.recordProgress(
                 for: media,
                 providerID: providerID,
                 currentTime: 80,
                 duration: 600,
                 completed: false,
+                writeStamp: stamp(session: 900, generation: 1),
                 database: database
             )
             #expect(WatchActivityStore.activity(for: media, providerID: providerID, database: database) != nil)
 
-            let manager = ProviderManager(database: database)
+            let credentialStore = TestProviderCredentialStore(passwords: ["test-Primary": "pass"])
+            let manager = ProviderManager(database: database, credentialStore: credentialStore)
             try manager.loadActive()
-            try manager.update(
-                provider: Provider.Draft(
-                    id: providerID,
-                    kind: .xtream,
-                    name: "Edited",
-                    username: "user",
-                    password: "pass",
-                    endpoint: try #require(URL(string: "https://edited.example.com")),
-                    isActive: true
-                )
-            )
-
-            #expect(WatchActivityStore.activity(for: media, providerID: providerID, database: database) == nil)
-
-            await WatchActivityStore.recordProgress(
-                for: media,
-                providerID: providerID,
-                currentTime: 80,
-                duration: 600,
-                completed: false,
-                database: database
-            )
             try manager.delete(provider: providerID)
 
             #expect(WatchActivityStore.activity(for: media, providerID: providerID, database: database) == nil)
@@ -187,10 +323,12 @@ struct WatchActivityStoreTests {
             let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
             let media = makeMedia(sourceID: 901, title: "Playable")
             let backend = FakePlaybackBackend()
+            let credentials = TestProviderCredentialStore(passwords: ["test-Primary": "pass"])
             let player = Player(
                 backendFactory: PlaybackBackendFactory(builders: [{ backend }]),
                 database: database,
-                playbackSourceResolver: StubPlaybackSourceResolver()
+                playbackSourceResolver: StubPlaybackSourceResolver(),
+                credentialStore: credentials
             )
 
             player.load(media, presentation: .inline)
@@ -210,6 +348,7 @@ struct WatchActivityStoreTests {
                 currentTime: 140,
                 duration: 600,
                 completed: false,
+                writeStamp: stamp(session: Date().addingTimeInterval(1).timeIntervalSince1970, generation: 1),
                 database: database
             )
 
@@ -217,7 +356,8 @@ struct WatchActivityStoreTests {
             let resumePlayer = Player(
                 backendFactory: PlaybackBackendFactory(builders: [{ resumeBackend }]),
                 database: database,
-                playbackSourceResolver: StubPlaybackSourceResolver()
+                playbackSourceResolver: StubPlaybackSourceResolver(),
+                credentialStore: credentials
             )
 
             resumePlayer.load(media, presentation: .inline)
@@ -237,12 +377,12 @@ struct WatchActivityStoreTests {
     }
 
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
-        let database = try appDatabase()
+        let database = try testAppDatabase(credentialStore: TestProviderCredentialStore())
         return try operation(database)
     }
 
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) async throws -> T) async throws -> T {
-        let database = try appDatabase()
+        let database = try testAppDatabase(credentialStore: TestProviderCredentialStore())
         return try await operation(database)
     }
 
@@ -267,8 +407,9 @@ struct WatchActivityStoreTests {
                     kind: .xtream,
                     name: name,
                     username: "user",
-                    password: "pass",
+                    credentialReference: "test-\(name)",
                     endpoint: endpoint,
+                    allowsInsecureHTTP: false,
                     isActive: isActive
                 )
             }
@@ -308,6 +449,13 @@ struct WatchActivityStoreTests {
         )
     }
 
+    private func stamp(session: TimeInterval, generation: UInt64) -> WatchActivityStore.WriteStamp {
+        WatchActivityStore.WriteStamp(
+            sessionStartedAt: Date(timeIntervalSince1970: session),
+            generation: generation
+        )
+    }
+
     private func eventuallyActivity(
         for media: Media,
         providerID: Provider.ID,
@@ -342,12 +490,16 @@ private struct StubPlaybackSourceResolver: MediaPlaybackSourceResolving {
 private final class FakePlaybackBackend: PlaybackBackend {
     let id: PlaybackBackendID = .av
     let isAvailable = true
-    private var continuation: AsyncStream<PlaybackEvent>.Continuation?
-    private lazy var eventStream = AsyncStream<PlaybackEvent> { continuation in
-        self.continuation = continuation
-    }
+    private let eventStream: AsyncStream<PlaybackEvent>
+    private let continuation: AsyncStream<PlaybackEvent>.Continuation
     private(set) var loadedURL: URL?
     private(set) var seekTimes: [Double] = []
+
+    init() {
+        var continuation: AsyncStream<PlaybackEvent>.Continuation?
+        eventStream = AsyncStream { continuation = $0 }
+        self.continuation = continuation!
+    }
 
     func canPlay(url: URL) -> Bool { true }
 
@@ -369,6 +521,6 @@ private final class FakePlaybackBackend: PlaybackBackend {
     }
 
     func send(_ event: PlaybackEvent) {
-        continuation?.yield(event)
+        continuation.yield(event)
     }
 }

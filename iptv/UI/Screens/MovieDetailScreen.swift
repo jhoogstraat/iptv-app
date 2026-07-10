@@ -41,11 +41,16 @@ struct MovieDetailScreen: View {
     @Environment(Player.self) private var player
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchOne private var persistedMovie: Media?
     @FetchAll private var watchActivities: [WatchActivity]
     @FetchAll private var favorites: [Favorite]
     @State private var playError: String?
-    @State private var enrichmentError: String?
+    @State private var favoriteError: String?
+    @State private var enrichmentState = DetailEnrichmentState.idle
+    @State private var enrichmentRequestID = 0
+    @State private var heroCollapseProgress: CGFloat = 0
+    @State private var heroScrollOffset: CGFloat = 0
 
     init(movie: Media, categoryTitle: String? = nil) {
         self.movie = movie
@@ -83,17 +88,34 @@ struct MovieDetailScreen: View {
         currentWatchActivity?.isResumeEligible == true
     }
 
+    private var heroTitleAccessibilityHidden: Bool {
+        #if os(iOS) || os(visionOS)
+        DetailHeroCollapse.collapsedHeaderIsAccessible(progress: heroCollapseProgress)
+        #else
+        true
+        #endif
+    }
 
     var body: some View {
         GeometryReader { proxy in
             let isCompact = proxy.size.width < 700
+            let stackHeroContent = isCompact || dynamicTypeSize.isAccessibilitySize
             let topInset = proxy.safeAreaInsets.top
-            let heroHeight = min(max(proxy.size.height * 0.58, 430), 590)
+            let backdropHeight = min(max(proxy.size.height * 0.52, 360), 560)
+            let collapseDistance = min(max(proxy.size.height * 0.2, 120), 220)
 
             ZStack(alignment: .top) {
                 ScrollView {
                     VStack(spacing: 0) {
-                        hero(availableWidth: proxy.size.width, height: heroHeight, topInset: topInset)
+                        hero(
+                            availableWidth: proxy.size.width,
+                            backdropHeight: backdropHeight,
+                            topInset: topInset,
+                            stackContent: stackHeroContent
+                        )
+                        .background {
+                            heroScrollMetrics(collapseDistance: collapseDistance)
+                        }
 
                         DetailContentLayout(isCompact: isCompact, availableWidth: proxy.size.width) {
                             section("Synopsis", text: synopsisText)
@@ -103,30 +125,42 @@ struct MovieDetailScreen: View {
                         .background(Color.black)
                     }
                 }
+                .coordinateSpace(name: DetailScrollCoordinateSpace.name)
+                .onPreferenceChange(DetailHeroProgressPreferenceKey.self) {
+                    heroCollapseProgress = $0
+                }
+                .onPreferenceChange(DetailHeroScrollOffsetPreferenceKey.self) {
+                    heroScrollOffset = $0
+                }
                 .background(Color.black)
 
-                topControls(topInset: topInset)
+                platformTopControls(topInset: topInset)
             }
             .background(Color.black)
             .ignoresSafeArea(edges: .top)
         }
         .navigationTitle(currentMovie.title)
         .detailNavigationChrome()
-        .task(id: currentMovie.id) {
+        .task(id: enrichmentRequestID) {
             await enrichCurrentMovie()
         }
     }
 
-    private func hero(availableWidth: CGFloat, height: CGFloat, topInset: CGFloat) -> some View {
+    private func hero(
+        availableWidth: CGFloat,
+        backdropHeight: CGFloat,
+        topInset: CGFloat,
+        stackContent: Bool
+    ) -> some View {
         let movie = currentMovie
 
-        return ZStack(alignment: .bottomLeading) {
+        return ZStack(alignment: .topLeading) {
             DetailHeroBackdrop(
                 artworkURL: movie.backdropURL ?? movie.coverURL,
-                height: height,
+                height: backdropHeight,
                 topInset: topInset,
-                collapseProgress: 0,
-                scrollOffset: 0,
+                collapseProgress: heroCollapseProgress,
+                scrollOffset: heroScrollOffset,
                 artworkContentMode: .fill
             )
 
@@ -138,92 +172,118 @@ struct MovieDetailScreen: View {
                     .foregroundStyle(.white.opacity(0.72))
 
                 Text(movie.title)
-                    .font(.system(size: availableWidth < 420 ? 42 : 58, weight: .black, design: .rounded))
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.72)
+                    .font(.system(.largeTitle, design: .rounded, weight: .black))
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityHidden(heroTitleAccessibilityHidden)
 
-                metadataPills
+                metadataPills(stacked: stackContent)
 
                 Text(synopsisText)
                     .font(.callout)
                     .lineSpacing(4)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.white.opacity(0.82))
                     .frame(maxWidth: 680, alignment: .leading)
 
-                actionRow
+                actionRow(stacked: stackContent)
 
                 if let playError {
                     Text(playError)
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(.red.opacity(0.94))
+                        .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(Color.black.opacity(0.55), in: Capsule(style: .continuous))
+                        .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                         .accessibilityLabel("Playback error: \(playError)")
                 }
             }
+            .padding(.top, topInset + max(132, backdropHeight * 0.28))
             .padding(.horizontal, availableWidth < 700 ? 20 : 40)
             .padding(.bottom, DetailSpacing.xl)
             .frame(maxWidth: 920, alignment: .leading)
         }
-        .frame(height: height + topInset)
+        .frame(maxWidth: .infinity, minHeight: backdropHeight + topInset, alignment: .topLeading)
+        .background(Color.black)
     }
 
-    private var metadataPills: some View {
-        HStack(spacing: DetailSpacing.xs) {
-            DetailMetaPill("Movie", systemImage: "film")
+    private func metadataPills(stacked: Bool) -> some View {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: DetailSpacing.xs))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: DetailSpacing.xs))
+
+        return layout {
+            DetailMetaPill(label: "Media type", value: "Movie", systemImage: "film")
 
             if let year = releaseYear {
-                DetailMetaPill(year, systemImage: "calendar")
+                DetailMetaPill(label: "Release year", value: year, systemImage: "calendar")
             }
 
             if let runtime = formattedRuntime {
-                DetailMetaPill(runtime, systemImage: "clock")
+                DetailMetaPill(label: "Runtime", value: runtime, systemImage: "clock")
             }
 
             if let rating = currentMovie.rating {
-                DetailMetaPill(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
+                DetailMetaPill(
+                    label: "Rating",
+                    value: rating.formatted(.number.precision(.fractionLength(1))),
+                    systemImage: "star.fill"
+                )
             }
         }
     }
 
-    private var actionRow: some View {
-        VStack(alignment: .leading, spacing: DetailSpacing.xs) {
-            HStack(spacing: DetailSpacing.sm) {
+    private func actionRow(stacked: Bool) -> some View {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: DetailSpacing.sm))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: DetailSpacing.sm))
+
+        return VStack(alignment: .leading, spacing: DetailSpacing.xs) {
+            layout {
                 Button {
                     playError = nil
                     player.load(currentMovie, presentation: .fullWindow)
                     playError = player.errorMessage
                 } label: {
-                    Label(playButtonTitle, systemImage: shouldResumeCurrentMovie ? "play.circle.fill" : "play.fill")
-                        .frame(maxWidth: .infinity)
+                    Label(
+                        playButtonTitle,
+                        systemImage: shouldResumeCurrentMovie ? "play.circle.fill" : "play.fill"
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(DetailActionStyle(variant: .primary))
 
-                Button {
-                    FavoriteStore.toggle(currentMovie, providerID: session.providerID, categoryTitle: categoryTitle)
-                } label: {
-                    Label(currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites", systemImage: currentFavorite == nil ? "heart" : "heart.fill")
-                        .labelStyle(.iconOnly)
+                Button(action: toggleFavorite) {
+                    Label(
+                        currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites",
+                        systemImage: currentFavorite == nil ? "heart" : "heart.fill"
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(DetailActionStyle(variant: .icon))
+                .buttonStyle(DetailActionStyle(variant: .secondary))
                 .accessibilityHint("Updates the persisted favorite state for this provider.")
 
-                Button {} label: {
-                    Label("Download unavailable", systemImage: "arrow.down.circle")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(DetailActionStyle(variant: .icon))
-                .disabled(true)
-                .accessibilityHint("Downloads are outside the active Library UX workstream.")
+                DownloadStatusBadge(presentation: .detailAction(.secondary))
+                    .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
             }
-            .frame(maxWidth: 620)
+            .frame(maxWidth: 720, alignment: .leading)
+
+            if let favoriteError {
+                Text(favoriteError)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Favorite error: \(favoriteError)")
+                    .frame(maxWidth: 720, alignment: .leading)
+            }
 
             resumeSummary
-                .frame(maxWidth: 620, alignment: .leading)
+                .frame(maxWidth: 720, alignment: .leading)
         }
     }
 
@@ -242,6 +302,7 @@ struct MovieDetailScreen: View {
                 Text(resumeSummaryText(for: activity))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(resumeSummaryText(for: activity))
@@ -249,6 +310,7 @@ struct MovieDetailScreen: View {
             Text("Watched. Play starts from the beginning.")
                 .font(.caption.weight(.medium))
                 .foregroundStyle(.white.opacity(0.72))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -262,16 +324,13 @@ struct MovieDetailScreen: View {
     private var availabilitySection: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             DetailSectionHeader(title: "Source and Downloads")
-            Text("Playback resolves from the active Xtream provider using the synced source identifier. Favorite state is persisted locally per provider; downloads are not persisted in this workstream.")
+            Text("Playback uses the active provider’s saved source. Favorites are stored for this provider. Offline downloads are unavailable.")
                 .font(.body)
                 .lineSpacing(5)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if let enrichmentError {
-                Text("Detail metadata could not be refreshed: \(enrichmentError)")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-            }
+            DetailEnrichmentStatus(state: enrichmentState, retry: retryEnrichment)
         }
     }
 
@@ -324,15 +383,39 @@ struct MovieDetailScreen: View {
         return value
     }
 
+    private func toggleFavorite() {
+        do {
+            _ = try FavoriteStore.toggle(
+                currentMovie,
+                providerID: session.providerID,
+                categoryTitle: categoryTitle
+            )
+            favoriteError = nil
+        } catch {
+            favoriteError = error.localizedDescription
+        }
+    }
+
     private func enrichCurrentMovie() async {
+        if enrichmentState == .idle {
+            enrichmentState.transition(.request)
+        }
+        guard enrichmentState == .loading else { return }
+
         do {
             try await session.enrichDetails(for: currentMovie)
-            enrichmentError = nil
+            enrichmentState.transition(.succeeded)
         } catch is CancellationError {
-            return
+            enrichmentState.transition(.cancelled)
         } catch {
-            enrichmentError = error.localizedDescription
+            enrichmentState.transition(.failed(error.localizedDescription))
         }
+    }
+
+    private func retryEnrichment() {
+        enrichmentState.transition(.retry)
+        guard enrichmentState == .loading else { return }
+        enrichmentRequestID &+= 1
     }
 
     private func resumeSummaryText(for activity: WatchActivity) -> String {
@@ -363,7 +446,33 @@ struct MovieDetailScreen: View {
                 .font(.body)
                 .lineSpacing(5)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private func heroScrollMetrics(collapseDistance: CGFloat) -> some View {
+        GeometryReader { heroProxy in
+            let minY = heroProxy.frame(in: .named(DetailScrollCoordinateSpace.name)).minY
+
+            Color.clear
+                .preference(
+                    key: DetailHeroProgressPreferenceKey.self,
+                    value: DetailHeroCollapse.progress(
+                        heroMinY: minY,
+                        collapseDistance: collapseDistance
+                    )
+                )
+                .preference(key: DetailHeroScrollOffsetPreferenceKey.self, value: minY)
+        }
+    }
+
+    @ViewBuilder
+    private func platformTopControls(topInset: CGFloat) -> some View {
+        #if os(iOS) || os(visionOS)
+        topControls(topInset: topInset)
+        #else
+        EmptyView()
+        #endif
     }
 
     private func topControls(topInset: CGFloat) -> some View {
@@ -384,7 +493,7 @@ struct MovieDetailScreen: View {
                 title: currentMovie.title,
                 artworkURL: currentMovie.coverURL,
                 titleArtworkURL: nil,
-                progress: 1
+                progress: heroCollapseProgress
             )
         }
         .padding(.top, topInset + 10)
@@ -405,13 +514,18 @@ struct SeriesDetailScreen: View {
 
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchOne private var persistedSeries: Media?
     @FetchAll private var seasons: [SeriesSeason]
     @FetchAll private var episodes: [Media]
     @FetchAll private var favorites: [Favorite]
     @State private var selectedTab: DetailTab = .episodes
     @State private var selectedSeasonNumber: Int?
-    @State private var enrichmentError: String?
+    @State private var favoriteError: String?
+    @State private var enrichmentState = DetailEnrichmentState.idle
+    @State private var enrichmentRequestID = 0
+    @State private var heroCollapseProgress: CGFloat = 0
+    @State private var heroScrollOffset: CGFloat = 0
 
     init(series: Media, categoryTitle: String? = nil) {
         self.series = series
@@ -438,18 +552,38 @@ struct SeriesDetailScreen: View {
         }
     }
 
+    private var heroTitleAccessibilityHidden: Bool {
+        #if os(iOS) || os(visionOS)
+        DetailHeroCollapse.collapsedHeaderIsAccessible(progress: heroCollapseProgress)
+        #else
+        true
+        #endif
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let isCompact = proxy.size.width < 700
+            let stackHeroContent = isCompact || dynamicTypeSize.isAccessibilitySize
             let topInset = proxy.safeAreaInsets.top
-            let heroHeight = min(max(proxy.size.height * 0.54, 400), 560)
+            let backdropHeight = min(max(proxy.size.height * 0.5, 350), 540)
+            let collapseDistance = min(max(proxy.size.height * 0.2, 120), 220)
 
             ZStack(alignment: .top) {
                 ScrollView {
                     VStack(spacing: 0) {
-                        hero(availableWidth: proxy.size.width, height: heroHeight, topInset: topInset)
+                        hero(
+                            availableWidth: proxy.size.width,
+                            backdropHeight: backdropHeight,
+                            topInset: topInset,
+                            stackContent: stackHeroContent
+                        )
+                        .background {
+                            heroScrollMetrics(collapseDistance: collapseDistance)
+                        }
 
                         DetailContentLayout(isCompact: isCompact, availableWidth: proxy.size.width) {
+                            DetailEnrichmentStatus(state: enrichmentState, retry: retryEnrichment)
+
                             Picker("Series detail section", selection: $selectedTab) {
                                 ForEach(DetailTab.allCases) { tab in
                                     Text(tab.rawValue).tag(tab)
@@ -467,16 +601,23 @@ struct SeriesDetailScreen: View {
                         .background(Color.black)
                     }
                 }
+                .coordinateSpace(name: DetailScrollCoordinateSpace.name)
+                .onPreferenceChange(DetailHeroProgressPreferenceKey.self) {
+                    heroCollapseProgress = $0
+                }
+                .onPreferenceChange(DetailHeroScrollOffsetPreferenceKey.self) {
+                    heroScrollOffset = $0
+                }
                 .background(Color.black)
 
-                topControls(topInset: topInset)
+                platformTopControls(topInset: topInset)
             }
             .background(Color.black)
             .ignoresSafeArea(edges: .top)
         }
         .navigationTitle(currentSeries.title)
         .detailNavigationChrome()
-        .task(id: currentSeries.id) {
+        .task(id: enrichmentRequestID) {
             await enrichCurrentSeries()
         }
         .onAppear(perform: synchronizeSelectedSeason)
@@ -485,16 +626,21 @@ struct SeriesDetailScreen: View {
         }
     }
 
-    private func hero(availableWidth: CGFloat, height: CGFloat, topInset: CGFloat) -> some View {
+    private func hero(
+        availableWidth: CGFloat,
+        backdropHeight: CGFloat,
+        topInset: CGFloat,
+        stackContent: Bool
+    ) -> some View {
         let series = currentSeries
 
-        return ZStack(alignment: .bottomLeading) {
+        return ZStack(alignment: .topLeading) {
             DetailHeroBackdrop(
                 artworkURL: series.backdropURL ?? series.coverURL,
-                height: height,
+                height: backdropHeight,
                 topInset: topInset,
-                collapseProgress: 0,
-                scrollOffset: 0,
+                collapseProgress: heroCollapseProgress,
+                scrollOffset: heroScrollOffset,
                 artworkContentMode: .fill
             )
 
@@ -506,62 +652,102 @@ struct SeriesDetailScreen: View {
                     .foregroundStyle(.white.opacity(0.72))
 
                 Text(series.title)
-                    .font(.system(size: availableWidth < 420 ? 40 : 56, weight: .black, design: .rounded))
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.72)
+                    .font(.system(.largeTitle, design: .rounded, weight: .black))
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityHidden(heroTitleAccessibilityHidden)
 
-                HStack(spacing: DetailSpacing.xs) {
-                    DetailMetaPill("Series", systemImage: "tv")
-                    if let year = releaseYear {
-                        DetailMetaPill(year, systemImage: "calendar")
-                    }
-                    if let rating = series.rating {
-                        DetailMetaPill(rating.formatted(.number.precision(.fractionLength(1))), systemImage: "star.fill")
-                    }
-                    DetailMetaPill(episodeCountTitle, systemImage: "rectangle.stack")
-                }
+                metadataPills(stacked: stackContent)
 
                 Text(synopsisText)
                     .font(.callout)
                     .lineSpacing(4)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
                     .foregroundStyle(.white.opacity(0.82))
                     .frame(maxWidth: 680, alignment: .leading)
 
-                HStack(spacing: DetailSpacing.sm) {
-                    Button {
-                        selectedTab = .episodes
-                    } label: {
-                        Label(episodes.isEmpty ? "Episodes unavailable" : "Select Episode", systemImage: "list.bullet.rectangle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(DetailActionStyle(variant: .primary))
-                    .disabled(episodes.isEmpty)
-
-                    Button {
-                        FavoriteStore.toggle(currentSeries, providerID: session.providerID, categoryTitle: categoryTitle)
-                    } label: {
-                        Label(currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites", systemImage: currentFavorite == nil ? "heart" : "heart.fill")
-                            .labelStyle(.iconOnly)
-                    }
-                    .buttonStyle(DetailActionStyle(variant: .icon))
-                    .accessibilityHint("Updates the persisted favorite state for this provider.")
-                    Button {} label: {
-                        Label("Download unavailable", systemImage: "arrow.down.circle")
-                            .labelStyle(.iconOnly)
-                    }
-                    .buttonStyle(DetailActionStyle(variant: .icon))
-                    .disabled(true)
-                }
-                .frame(maxWidth: 620)
+                actionRow(stacked: stackContent)
             }
+            .padding(.top, topInset + max(128, backdropHeight * 0.28))
             .padding(.horizontal, availableWidth < 700 ? 20 : 40)
             .padding(.bottom, DetailSpacing.xl)
             .frame(maxWidth: 920, alignment: .leading)
         }
-        .frame(height: height + topInset)
+        .frame(maxWidth: .infinity, minHeight: backdropHeight + topInset, alignment: .topLeading)
+        .background(Color.black)
+    }
+
+    private func metadataPills(stacked: Bool) -> some View {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: DetailSpacing.xs))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: DetailSpacing.xs))
+
+        return layout {
+            DetailMetaPill(label: "Media type", value: "Series", systemImage: "tv")
+
+            if let year = releaseYear {
+                DetailMetaPill(label: "Release year", value: year, systemImage: "calendar")
+            }
+
+            if let rating = currentSeries.rating {
+                DetailMetaPill(
+                    label: "Rating",
+                    value: rating.formatted(.number.precision(.fractionLength(1))),
+                    systemImage: "star.fill"
+                )
+            }
+
+            DetailMetaPill(label: "Episode count", value: episodeCountTitle, systemImage: "rectangle.stack")
+        }
+    }
+
+    private func actionRow(stacked: Bool) -> some View {
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: DetailSpacing.sm))
+            : AnyLayout(HStackLayout(alignment: .center, spacing: DetailSpacing.sm))
+
+        return VStack(alignment: .leading, spacing: DetailSpacing.xs) {
+            layout {
+                Button {
+                    selectedTab = .episodes
+                } label: {
+                    Label(
+                        episodes.isEmpty ? "Episodes unavailable" : "Select Episode",
+                        systemImage: "list.bullet.rectangle"
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DetailActionStyle(variant: .primary))
+                .disabled(episodes.isEmpty)
+
+                Button(action: toggleFavorite) {
+                    Label(
+                        currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites",
+                        systemImage: currentFavorite == nil ? "heart" : "heart.fill"
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DetailActionStyle(variant: .secondary))
+                .accessibilityHint("Updates the persisted favorite state for this provider.")
+
+                DownloadStatusBadge(presentation: .detailAction(.secondary))
+                    .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+
+            if let favoriteError {
+                Text(favoriteError)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Favorite error: \(favoriteError)")
+                    .frame(maxWidth: 720, alignment: .leading)
+            }
+        }
     }
 
     private var episodesSection: some View {
@@ -590,12 +776,6 @@ struct SeriesDetailScreen: View {
                         .buttonStyle(.plain)
                     }
                 }
-            }
-
-            if let enrichmentError {
-                Text("Episode metadata could not be refreshed: \(enrichmentError)")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
             }
         }
     }
@@ -633,6 +813,7 @@ struct SeriesDetailScreen: View {
                     .font(.body)
                     .lineSpacing(5)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: DetailSpacing.sm) {
@@ -706,10 +887,16 @@ struct SeriesDetailScreen: View {
     }
 
     private var episodesUnavailableDescription: String {
-        if let enrichmentError {
-            return "The provider detail request failed before episode rows could be persisted locally: \(enrichmentError)"
+        switch enrichmentState {
+        case .idle:
+            return "No saved episode rows are available yet."
+        case .loading:
+            return "Saved series information remains visible while episode details refresh."
+        case .success:
+            return "The provider returned no episode rows for this series."
+        case .failure:
+            return "Episode details could not be refreshed. Retry without leaving this screen."
         }
-        return "No playable episode rows are stored locally for this series yet. If the provider exposes series details, this screen refreshes them through sync/detail enrichment and then renders the persisted rows."
     }
 
     private var synopsisText: String {
@@ -746,16 +933,65 @@ struct SeriesDetailScreen: View {
         }
     }
 
+    private func toggleFavorite() {
+        do {
+            _ = try FavoriteStore.toggle(
+                currentSeries,
+                providerID: session.providerID,
+                categoryTitle: categoryTitle
+            )
+            favoriteError = nil
+        } catch {
+            favoriteError = error.localizedDescription
+        }
+    }
+
     private func enrichCurrentSeries() async {
+        if enrichmentState == .idle {
+            enrichmentState.transition(.request)
+        }
+        guard enrichmentState == .loading else { return }
+
         do {
             try await session.enrichDetails(for: currentSeries)
-            enrichmentError = nil
+            enrichmentState.transition(.succeeded)
             synchronizeSelectedSeason()
         } catch is CancellationError {
-            return
+            enrichmentState.transition(.cancelled)
         } catch {
-            enrichmentError = error.localizedDescription
+            enrichmentState.transition(.failed(error.localizedDescription))
         }
+    }
+
+    private func retryEnrichment() {
+        enrichmentState.transition(.retry)
+        guard enrichmentState == .loading else { return }
+        enrichmentRequestID &+= 1
+    }
+
+    private func heroScrollMetrics(collapseDistance: CGFloat) -> some View {
+        GeometryReader { heroProxy in
+            let minY = heroProxy.frame(in: .named(DetailScrollCoordinateSpace.name)).minY
+
+            Color.clear
+                .preference(
+                    key: DetailHeroProgressPreferenceKey.self,
+                    value: DetailHeroCollapse.progress(
+                        heroMinY: minY,
+                        collapseDistance: collapseDistance
+                    )
+                )
+                .preference(key: DetailHeroScrollOffsetPreferenceKey.self, value: minY)
+        }
+    }
+
+    @ViewBuilder
+    private func platformTopControls(topInset: CGFloat) -> some View {
+        #if os(iOS) || os(visionOS)
+        topControls(topInset: topInset)
+        #else
+        EmptyView()
+        #endif
     }
 
     private func topControls(topInset: CGFloat) -> some View {
@@ -776,7 +1012,7 @@ struct SeriesDetailScreen: View {
                 title: currentSeries.title,
                 artworkURL: currentSeries.coverURL,
                 titleArtworkURL: nil,
-                progress: 1
+                progress: heroCollapseProgress
             )
         }
         .padding(.top, topInset + 10)
@@ -887,17 +1123,9 @@ private struct DetailMetadataGrid: View {
     let rows: [DetailMetadataRow]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: DetailSpacing.xs) {
+        VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             ForEach(rows) { row in
-                HStack(alignment: .firstTextBaseline, spacing: DetailSpacing.md) {
-                    Text(row.label)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 96, alignment: .leading)
-
-                    selectableMetadataText(displayValue(for: row), isMissing: row.value == nil)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                metadataUnit(row)
             }
         }
         .padding(DetailSpacing.md)
@@ -906,6 +1134,40 @@ private struct DetailMetadataGrid: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(Color.white.opacity(0.08), lineWidth: 1)
         }
+    }
+
+    private func metadataUnit(_ row: DetailMetadataRow) -> some View {
+        let value = displayValue(for: row)
+        let isMissing = isMissing(row)
+
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: DetailSpacing.md) {
+                metadataLabel(row.label)
+                    .frame(width: 96, alignment: .leading)
+
+                selectableMetadataText(value, isMissing: isMissing)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: DetailSpacing.xxs) {
+                metadataLabel(row.label)
+
+                selectableMetadataText(value, isMissing: isMissing)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.label)
+        .accessibilityValue(value)
+    }
+
+    private func metadataLabel(_ label: String) -> some View {
+        Text(label)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
@@ -919,6 +1181,10 @@ private struct DetailMetadataGrid: View {
         #else
         text.textSelection(.enabled)
         #endif
+    }
+
+    private func isMissing(_ row: DetailMetadataRow) -> Bool {
+        row.value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false
     }
 
     private func displayValue(for row: DetailMetadataRow) -> String {
@@ -935,6 +1201,8 @@ private extension View {
         #if os(iOS)
         navigationBarTitleDisplayMode(.inline)
             .toolbar(.hidden, for: .navigationBar)
+        #elseif os(visionOS)
+        toolbar(.hidden, for: .navigationBar)
         #else
         self
         #endif

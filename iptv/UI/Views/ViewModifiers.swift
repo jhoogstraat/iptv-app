@@ -8,16 +8,60 @@
 import SwiftUI
 
 extension View {
-    #if !os(visionOS)
-    // Only used in iOS and tvOS for full-window modal presentation.
+    /// Presents the shared player whenever the player model requests full-window playback.
     func withVideoPlayer() -> some View {
         #if os(macOS)
-        self.modifier(OpenVideoPlayerModifier())
+        modifier(OpenVideoPlayerModifier())
         #else
-        self.modifier(FullScreenCoverModalModifier())
+        modifier(FullScreenCoverModalModifier())
         #endif
     }
-    #endif
+
+    /// Owns playback cleanup for one concrete player presentation.
+    func withPlayerPresentationLifecycle() -> some View {
+        modifier(PlayerPresentationLifecycleModifier())
+    }
+}
+
+enum PlayerWindowPresentationAction: Equatable {
+    case none
+    case open
+    case dismiss
+
+    static func action(from oldValue: Presentation, to newValue: Presentation) -> Self {
+        switch (oldValue, newValue) {
+        case (.inline, .fullWindow):
+            return .open
+        case (.fullWindow, .inline):
+            return .dismiss
+        default:
+            return .none
+        }
+    }
+}
+
+struct PlayerPresentationLifecycle: Equatable {
+    private(set) var didRequestReset = false
+
+    mutating func consumeResetOnDisappear(hasLoadedItem: Bool) -> Bool {
+        guard hasLoadedItem, !didRequestReset else { return false }
+        didRequestReset = true
+        return true
+    }
+}
+
+private struct PlayerPresentationLifecycleModifier: ViewModifier {
+    @Environment(Player.self) private var player
+    @State private var lifecycle = PlayerPresentationLifecycle()
+
+    func body(content: Content) -> some View {
+        content
+            .onDisappear {
+                if lifecycle.consumeResetOnDisappear(hasLoadedItem: player.currentItem != nil) {
+                    player.reset()
+                }
+            }
+    }
 }
 
 #if !os(macOS)
@@ -29,16 +73,13 @@ private struct FullScreenCoverModalModifier: ViewModifier {
         content
             .fullScreenCover(isPresented: $isPresentingPlayer) {
                 PlayerView()
-                    .onAppear {
-                        player.play()
-                    }
-                    .onDisappear {
-                        player.reset()
-                    }
+                    .withPlayerPresentationLifecycle()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()
             }
-            // Observe the player's presentation property.
+            .onAppear {
+                isPresentingPlayer = player.presentation == .fullWindow
+            }
             .onChange(of: player.presentation) { _, newPresentation in
                 isPresentingPlayer = newPresentation == .fullWindow
             }
@@ -50,14 +91,24 @@ private struct FullScreenCoverModalModifier: ViewModifier {
 private struct OpenVideoPlayerModifier: ViewModifier {
     @Environment(Player.self) private var player
     @Environment(\.openWindow) private var openWindow
-    
+    @Environment(\.dismissWindow) private var dismissWindow
     func body(content: Content) -> some View {
         content
-            .onChange(of: player.presentation, { oldValue, newValue in
-                if newValue == .fullWindow {
+            .onAppear {
+                if player.presentation == .fullWindow {
                     openWindow(id: PlayerView.identifier)
                 }
-            })
+            }
+            .onChange(of: player.presentation) { oldValue, newValue in
+                switch PlayerWindowPresentationAction.action(from: oldValue, to: newValue) {
+                case .open:
+                    openWindow(id: PlayerView.identifier)
+                case .dismiss:
+                    dismissWindow(id: PlayerView.identifier)
+                case .none:
+                    break
+                }
+            }
     }
 }
 #endif

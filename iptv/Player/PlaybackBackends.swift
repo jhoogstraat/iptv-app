@@ -19,6 +19,45 @@ import VLCKit
 
 private let playbackLogger = Logger(subsystem: "IPTV", category: "Playback")
 
+@MainActor
+protocol PlaybackAudioSessionCoordinating: AnyObject {
+    func activatePlayback() throws
+    func deactivatePlayback()
+}
+
+@MainActor
+final class SystemPlaybackAudioSessionCoordinator: PlaybackAudioSessionCoordinating {
+    #if os(iOS)
+    private let session: AVAudioSession
+    private var isActive = false
+
+    init(session: AVAudioSession = .sharedInstance()) {
+        self.session = session
+    }
+
+    func activatePlayback() throws {
+        guard !isActive else { return }
+        try session.setCategory(.playback, mode: .moviePlayback)
+        try session.setActive(true)
+        isActive = true
+    }
+
+    func deactivatePlayback() {
+        guard isActive else { return }
+        defer { isActive = false }
+        do {
+            try session.setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            playbackLogger.error("Failed to deactivate playback audio session: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+    #else
+    init() {}
+    func activatePlayback() throws {}
+    func deactivatePlayback() {}
+    #endif
+}
+
 private enum SystemOutputRouteID {
     static let automatic = "__route_automatic__"
     static let speaker = "__route_speaker__"
@@ -140,7 +179,6 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     private var progressTask: Task<Void, Never>?
     private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
-    private var automaticQualityTrackID: String?
     private var currentAspectRatioMode: PlayerAspectRatioMode = .fit
 
     override init() {
@@ -152,12 +190,11 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func canPlay(url: URL) -> Bool {
-        let scheme = url.scheme?.lowercased() ?? ""
-        return ["http", "https", "rtsp", "file"].contains(scheme) || !scheme.isEmpty
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return ["http", "https", "rtsp", "file"].contains(scheme)
     }
 
     func load(url: URL, autoplay: Bool) throws {
-        automaticQualityTrackID = nil
         player.media = VLCMedia(url: url)
         continuation.yield(.ready(duration: mediaDuration()))
         startMetadataProbe()
@@ -203,7 +240,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         return PlaybackCapabilities(
             supportsAudioTracks: !audio.isEmpty,
             supportsSubtitles: !subtitles.isEmpty,
-            supportsQualitySelection: quality.contains(where: { !$0.isAuto }),
+            supportsQualitySelection: quality.count > 1,
             supportsChapterMarkers: !chapters.isEmpty,
             supportsOutputRouteSelection: supportsSystemRoutePicker,
             supportsAudioDelay: true,
@@ -238,7 +275,6 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func qualityVariants() -> [QualityVariant] {
-        cacheAutomaticQualityTrackIfNeeded()
 
         let manualVariants = player.videoTracks.enumerated().map { index, track in
             let video = track.video
@@ -264,8 +300,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
             )
         }
 
-        guard !manualVariants.isEmpty else { return [] }
-        return [QualityVariant.auto] + manualVariants
+        return manualVariants
     }
 
     func chapterMarkers() -> [ChapterMarker] {
@@ -320,15 +355,6 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func selectQualityVariant(id: String) throws {
-        if id == QualityVariant.auto.id {
-            if let automaticQualityTrackID,
-               let track = player.videoTracks.first(where: { qualityVariantID(for: $0) == automaticQualityTrackID }) {
-                track.isSelectedExclusively = true
-            }
-            return
-        }
-
-        cacheAutomaticQualityTrackIfNeeded()
         guard let track = player.videoTracks.first(where: { qualityVariantID(for: $0) == id }) else {
             throw PlaybackRuntimeError.backendFailure("Quality variant is unavailable.")
         }
@@ -468,18 +494,6 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         "vlc-quality:\(track.trackId)"
     }
 
-    private func cacheAutomaticQualityTrackIfNeeded() {
-        guard automaticQualityTrackID == nil else { return }
-
-        if let selected = player.videoTracks.first(where: \.isSelected) {
-            automaticQualityTrackID = qualityVariantID(for: selected)
-            return
-        }
-
-        if let first = player.videoTracks.first {
-            automaticQualityTrackID = qualityVariantID(for: first)
-        }
-    }
 
     private func mediaTrackLabel(for track: VLCMediaPlayer.Track, fallbackPrefix: String) -> String {
         let preferredName = track.trackName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -595,6 +609,12 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     private var accessLogObserver: NSObjectProtocol?
     private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
+    private let audioSessionCoordinator: any PlaybackAudioSessionCoordinating
+    private var cachedAudioTracks: [MediaTrack]?
+    private var cachedSubtitleTracks: [MediaTrack]?
+    private var cachedQualityDescriptors: [QualityVariantDescriptor]?
+    private var cachedChapterMarkers: [ChapterMarker]?
+    private var audioSessionIsActive = false
 
     private struct QualityVariantDescriptor {
         let variant: QualityVariant
@@ -604,10 +624,13 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         let sortBitRate: Double
     }
 
-    override init() {
+    init(
+        audioSessionCoordinator: (any PlaybackAudioSessionCoordinating)? = nil
+    ) {
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
         self.stream = AsyncStream<PlaybackEvent> { continuation = $0 }
         self.continuation = continuation!
+        self.audioSessionCoordinator = audioSessionCoordinator ?? SystemPlaybackAudioSessionCoordinator()
         super.init()
         observePlayerState()
     }
@@ -642,11 +665,27 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func canPlay(url: URL) -> Bool {
-        ["m3u8", "mp4", "m4v", "mov", "mp3", "aac", "ac3", "wav"].contains(url.pathExtension.lowercased())
+        guard let scheme = url.scheme?.lowercased(),
+              ["http", "https", "file"].contains(scheme)
+        else {
+            return false
+        }
+
+        let pathExtension = url.pathExtension.lowercased()
+        if pathExtension.isEmpty {
+            return scheme == "http" || scheme == "https"
+        }
+        return ["m3u8", "mp4", "m4v", "mov", "mp3", "aac", "ac3", "wav"].contains(pathExtension)
     }
 
     func load(url: URL, autoplay: Bool) throws {
         cleanupItemObservers()
+        invalidateMetadataCaches()
+
+        if !audioSessionIsActive {
+            try audioSessionCoordinator.activatePlayback()
+            audioSessionIsActive = true
+        }
 
         let item = AVPlayerItem(url: url)
         observeItemStatus(item)
@@ -674,6 +713,10 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         player.pause()
         player.replaceCurrentItem(with: nil)
         cleanupItemObservers()
+        if audioSessionIsActive {
+            audioSessionCoordinator.deactivatePlayback()
+            audioSessionIsActive = false
+        }
     }
 
     func seek(to seconds: Double) {
@@ -686,13 +729,16 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func capabilities() -> PlaybackCapabilities {
-        let qualityDescriptors = qualityVariantDescriptors()
+        let audio = audioTracks()
+        let subtitles = subtitleTracks()
+        let quality = qualityVariantDescriptors()
+        let chapters = chapterMarkers()
 
         return PlaybackCapabilities(
-            supportsAudioTracks: mediaSelectionGroup(for: .audible) != nil,
-            supportsSubtitles: mediaSelectionGroup(for: .legible) != nil,
-            supportsQualitySelection: !qualityDescriptors.isEmpty,
-            supportsChapterMarkers: !chapterMarkers().isEmpty,
+            supportsAudioTracks: !audio.isEmpty,
+            supportsSubtitles: !subtitles.isEmpty,
+            supportsQualitySelection: !quality.isEmpty,
+            supportsChapterMarkers: !chapters.isEmpty,
             supportsOutputRouteSelection: supportsSystemRoutePicker,
             supportsAudioDelay: false,
             supportsBrightness: supportsBrightnessControl
@@ -700,11 +746,25 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func audioTracks() -> [MediaTrack] {
-        tracks(for: .audible, kind: .audio)
+        #if os(visionOS)
+        []
+        #else
+        if let cachedAudioTracks { return cachedAudioTracks }
+        let tracks = tracks(for: .audible, kind: .audio)
+        cachedAudioTracks = tracks
+        return tracks
+        #endif
     }
 
     func subtitleTracks() -> [MediaTrack] {
-        tracks(for: .legible, kind: .subtitle)
+        #if os(visionOS)
+        []
+        #else
+        if let cachedSubtitleTracks { return cachedSubtitleTracks }
+        let tracks = tracks(for: .legible, kind: .subtitle)
+        cachedSubtitleTracks = tracks
+        return tracks
+        #endif
     }
 
     func qualityVariants() -> [QualityVariant] {
@@ -714,15 +774,22 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func chapterMarkers() -> [ChapterMarker] {
+        if let cachedChapterMarkers { return cachedChapterMarkers }
+        #if os(visionOS)
+        let markers: [ChapterMarker] = []
+        #else
         guard let item = player.currentItem else { return [] }
         let groups = item.asset.chapterMetadataGroups(bestMatchingPreferredLanguages: preferredChapterLanguages())
-        return groups.enumerated().compactMap { index, group in
+        let markers: [ChapterMarker] = groups.enumerated().compactMap { index, group -> ChapterMarker? in
             let rawStart = group.timeRange.start.seconds
             guard rawStart.isFinite else { return nil }
             let title = chapterTitle(from: group) ?? "Chapter \(index + 1)"
             let markerID = "chapter-\(index)-\(Int((rawStart * 1000).rounded()))"
             return ChapterMarker(id: markerID, title: title, startSeconds: max(0, rawStart))
         }
+        #endif
+        cachedChapterMarkers = markers
+        return markers
     }
 
     func supportedAspectRatioModes() -> [PlayerAspectRatioMode] {
@@ -734,10 +801,17 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func selectAudioTrack(id: String) {
+        #if os(visionOS)
+        _ = id
+        #else
         selectTrack(id: id, for: .audible)
+        #endif
     }
 
     func selectSubtitleTrack(id: String) {
+        #if os(visionOS)
+        _ = id
+        #else
         guard let item = player.currentItem,
               let group = mediaSelectionGroup(for: .legible)
         else { return }
@@ -747,6 +821,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             return
         }
         selectTrack(id: id, for: .legible)
+        #endif
     }
 
     func selectQualityVariant(id: String) throws {
@@ -829,6 +904,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
                 guard let self else { return }
                 switch item.status {
                 case .readyToPlay:
+                    self.invalidateMetadataCaches()
                     self.continuation.yield(.ready(duration: self.currentDuration()))
                     self.startMetadataProbe()
                 case .failed:
@@ -867,6 +943,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             object: item,
             queue: .main
         ) { [weak self] _ in
+            self?.invalidateMetadataCaches()
             self?.continuation.yield(.advancedStateChanged)
         }
     }
@@ -876,6 +953,11 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         let seconds = item.duration.seconds
         guard seconds.isFinite && seconds > 0 else { return nil }
         return seconds
+    }
+
+    #if !os(visionOS)
+    private func mediaSelectionGroup(for characteristic: AVMediaCharacteristic) -> AVMediaSelectionGroup? {
+        player.currentItem?.asset.mediaSelectionGroup(forMediaCharacteristic: characteristic)
     }
 
     private func tracks(for characteristic: AVMediaCharacteristic, kind: MediaTrackKind) -> [MediaTrack] {
@@ -893,9 +975,6 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         }
     }
 
-    private func mediaSelectionGroup(for characteristic: AVMediaCharacteristic) -> AVMediaSelectionGroup? {
-        player.currentItem?.asset.mediaSelectionGroup(forMediaCharacteristic: characteristic)
-    }
 
     private func selectTrack(id: String, for characteristic: AVMediaCharacteristic) {
         guard let item = player.currentItem,
@@ -925,6 +1004,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         }
         return group.items.first?.stringValue
     }
+    #endif
 
     private func preferredChapterLanguages() -> [String] {
         if let code = Locale.current.language.languageCode?.identifier {
@@ -950,6 +1030,10 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     private func qualityVariantDescriptors() -> [QualityVariantDescriptor] {
+        if let cachedQualityDescriptors { return cachedQualityDescriptors }
+        #if os(visionOS)
+        let descriptors: [QualityVariantDescriptor] = []
+        #else
         guard #available(macOS 12.0, iOS 15.0, tvOS 15.0, *),
               let asset = player.currentItem?.asset as? AVURLAsset
         else {
@@ -994,14 +1078,15 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
                 sortHeight: hasVideoSize ? presentationSize.height : 0,
                 sortBitRate: preferredPeakBitRate
             )
-        }
-
-        return descriptors.sorted {
+        }.sorted {
             if $0.sortHeight == $1.sortHeight {
                 return $0.sortBitRate > $1.sortBitRate
             }
             return $0.sortHeight > $1.sortHeight
         }
+        #endif
+        cachedQualityDescriptors = descriptors
+        return descriptors
     }
 
     private func qualityVariantID(
@@ -1039,9 +1124,17 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
             for delay in probeDelays {
                 try? await Task.sleep(for: delay)
                 guard let self, !Task.isCancelled else { return }
+                self.invalidateMetadataCaches()
                 self.continuation.yield(.advancedStateChanged)
             }
         }
+    }
+
+    private func invalidateMetadataCaches() {
+        cachedAudioTracks = nil
+        cachedSubtitleTracks = nil
+        cachedQualityDescriptors = nil
+        cachedChapterMarkers = nil
     }
 
     private func cleanupItemObservers() {

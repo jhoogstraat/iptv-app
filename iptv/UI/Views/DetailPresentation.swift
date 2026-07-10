@@ -17,6 +17,58 @@ enum DetailSpacing {
     static let xl: CGFloat = 24
 }
 
+enum DetailEnrichmentState: Equatable {
+    case idle
+    case loading
+    case success
+    case failure(String)
+
+    mutating func transition(_ event: DetailEnrichmentEvent) {
+        switch (self, event) {
+        case (.idle, .request):
+            self = .loading
+        case (.failure, .retry):
+            self = .loading
+        case (.loading, .succeeded):
+            self = .success
+        case (.loading, .failed(let message)):
+            self = .failure(message)
+        case (.loading, .cancelled):
+            self = .idle
+        default:
+            break
+        }
+    }
+}
+
+enum DetailEnrichmentEvent: Equatable {
+    case request
+    case retry
+    case succeeded
+    case failed(String)
+    case cancelled
+}
+
+enum DetailHeroCollapse {
+    static let accessibleHeaderThreshold: CGFloat = 0.5
+
+    static func progress(heroMinY: CGFloat, collapseDistance: CGFloat) -> CGFloat {
+        guard collapseDistance > 0 else {
+            return heroMinY < 0 ? 1 : 0
+        }
+
+        return min(max(-heroMinY / collapseDistance, 0), 1)
+    }
+
+    static func collapsedHeaderIsAccessible(progress: CGFloat) -> Bool {
+        progress >= accessibleHeaderThreshold
+    }
+}
+
+enum DetailScrollCoordinateSpace {
+    static let name = "media-detail-scroll"
+}
+
 enum DetailActionVariant {
     case primary
     case secondary
@@ -118,6 +170,64 @@ struct DetailActionStyle: ButtonStyle {
     }
 }
 
+struct DetailEnrichmentStatus: View {
+    let state: DetailEnrichmentState
+    let retry: () -> Void
+
+    @ViewBuilder
+    var body: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .loading:
+            Label {
+                Text("Refreshing details…")
+            } icon: {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Refreshing details")
+        case .success:
+            Label("Details refreshed", systemImage: "checkmark.circle")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isStaticText)
+        case .failure(let message):
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: DetailSpacing.sm) {
+                    failureMessage
+                    retryButton
+                }
+
+                VStack(alignment: .leading, spacing: DetailSpacing.xs) {
+                    failureMessage
+                    retryButton
+                }
+            }
+            .accessibilityHint(message)
+        }
+    }
+
+    private var failureMessage: some View {
+        Label(
+            "Couldn’t refresh details. Saved information is still shown.",
+            systemImage: "exclamationmark.triangle"
+        )
+        .font(.footnote.weight(.medium))
+        .foregroundStyle(.orange)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var retryButton: some View {
+        Button("Retry", action: retry)
+            .buttonStyle(DetailActionStyle(variant: .compactSecondary))
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
 struct DetailContentLayout<Content: View>: View {
     let isCompact: Bool
     let spacing: CGFloat
@@ -186,6 +296,7 @@ struct DetailHeroBackdrop: View {
     let topInset: CGFloat
     let collapseProgress: CGFloat
     let scrollOffset: CGFloat
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let artworkContentMode: ContentMode
 
     init(
@@ -271,6 +382,8 @@ struct DetailHeroBackdrop: View {
     }
 
     private var parallaxOffset: CGFloat {
+        guard !reduceMotion else { return 0 }
+
         if scrollOffset < 0 {
             return scrollOffset * 0.18
         }
@@ -279,6 +392,7 @@ struct DetailHeroBackdrop: View {
     }
 
     private var stretchScale: CGFloat {
+        guard !reduceMotion else { return 1 }
         let pullDownDistance = max(scrollOffset, 0)
         return 1.0 + min(pullDownDistance / max(height, 1), 0.12)
     }
@@ -310,11 +424,13 @@ private func detailAlternativeSourceMatches(
 }
 
 struct DetailMetaPill: View {
-    let text: String
+    let label: String
+    let value: String
     let systemImage: String?
 
-    init(_ text: String, systemImage: String? = nil) {
-        self.text = text
+    init(label: String, value: String, systemImage: String? = nil) {
+        self.label = label
+        self.value = value
         self.systemImage = systemImage
     }
 
@@ -323,26 +439,33 @@ struct DetailMetaPill: View {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.footnote.weight(.semibold))
+                    .accessibilityHidden(true)
             }
 
-            Text(text)
-                .font(.title3.weight(.semibold))
+            Text(value)
+                .font(.headline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
         }
         .foregroundStyle(.white)
         .padding(.horizontal, 15)
         .padding(.vertical, 9)
         .background {
-            Capsule(style: .continuous)
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
                 .fill(Color.white.opacity(0.12))
                 .overlay {
-                    Capsule(style: .continuous)
+                    RoundedRectangle(cornerRadius: 15, style: .continuous)
                         .stroke(Color.white.opacity(0.15), lineWidth: 1)
                 }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+        .accessibilityValue(value)
     }
 }
 
 struct DetailCollapsedHeaderBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     let title: String
     let artworkURL: URL?
     let titleArtworkURL: URL?
@@ -359,7 +482,9 @@ struct DetailCollapsedHeaderBar: View {
                             .interpolation(.high)
                             .aspectRatio(contentMode: .fit)
                     default:
-                        EmptyView()
+                        Text(title)
+                            .font(.headline.weight(.semibold))
+                            .lineLimit(1)
                     }
                 }
                 .frame(maxWidth: 132, maxHeight: 30, alignment: .leading)
@@ -389,18 +514,27 @@ struct DetailCollapsedHeaderBar: View {
         .padding(.vertical, 9)
         .background {
             Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.42))
+                .fill(Color.black.opacity(0.72))
                 .overlay {
                     Capsule(style: .continuous)
                         .stroke(Color.white.opacity(0.14), lineWidth: 1)
                 }
         }
         .shadow(color: Color.black.opacity(0.22), radius: 16, y: 10)
-        .opacity(progress)
-        .scaleEffect(0.96 + (progress * 0.04))
-        .animation(.easeOut(duration: 0.2), value: progress)
+        .opacity(renderedProgress)
+        .scaleEffect(reduceMotion ? 1 : 0.96 + (renderedProgress * 0.04))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: renderedProgress)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
+        .accessibilityHidden(!DetailHeroCollapse.collapsedHeaderIsAccessible(progress: progress))
+    }
+
+    private var renderedProgress: CGFloat {
+        let clampedProgress = min(max(progress, 0), 1)
+        if reduceMotion {
+            return DetailHeroCollapse.collapsedHeaderIsAccessible(progress: clampedProgress) ? 1 : 0
+        }
+        return clampedProgress
     }
 }
 
@@ -412,10 +546,19 @@ struct DetailSectionHeader: View {
             .font(.caption.weight(.semibold))
             .tracking(1.3)
             .foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
     }
 }
 
 enum DetailHeroProgressPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+enum DetailHeroScrollOffsetPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
@@ -633,10 +776,31 @@ private struct DetailActionPalette {
 
 private struct DetailActionStyleBody<Label: View>: View {
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.isFocused) private var isFocused
 
     let label: Label
     let variant: DetailActionVariant
     let isPressed: Bool
+
+    var body: some View {
+        DetailActionSurface(
+            label: label,
+            variant: variant,
+            isPressed: isPressed,
+            isEnabled: isEnabled,
+            isFocused: isFocused
+        )
+    }
+}
+
+struct DetailActionSurface<Label: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let label: Label
+    let variant: DetailActionVariant
+    let isPressed: Bool
+    let isEnabled: Bool
+    let isFocused: Bool
 
     var body: some View {
         let size = variant.size
@@ -655,29 +819,44 @@ private struct DetailActionStyleBody<Label: View>: View {
                 backgroundShape(palette: palette)
             }
             .opacity(isEnabled ? 1 : 0.42)
-            .scaleEffect(isPressed ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.18), value: isPressed)
+            .scaleEffect(scale)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isPressed)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isFocused)
+    }
+
+    private var scale: CGFloat {
+        if reduceMotion {
+            return 1
+        }
+        if isPressed {
+            return 0.985
+        }
+        return isFocused ? 1.035 : 1
     }
 
     @ViewBuilder
     private func backgroundShape(palette: DetailActionPalette) -> some View {
+        let stroke = isFocused ? Color.white.opacity(0.95) : palette.stroke
+        let lineWidth: CGFloat = isFocused ? 3 : (isPressed ? 1.2 : 1)
+        let shadow = isFocused ? Color.white.opacity(0.28) : palette.shadow
+
         switch palette.shape {
         case .capsule:
             Capsule(style: .continuous)
                 .fill(palette.fill)
                 .overlay {
                     Capsule(style: .continuous)
-                        .stroke(palette.stroke, lineWidth: isPressed ? 1.2 : 1)
+                        .stroke(stroke, lineWidth: lineWidth)
                 }
-                .shadow(color: palette.shadow, radius: 14, y: 8)
+                .shadow(color: shadow, radius: isFocused ? 18 : 14, y: isFocused ? 0 : 8)
         case .circle:
             Circle()
                 .fill(palette.fill)
                 .overlay {
                     Circle()
-                        .stroke(palette.stroke, lineWidth: isPressed ? 1.2 : 1)
+                        .stroke(stroke, lineWidth: lineWidth)
                 }
-                .shadow(color: palette.shadow, radius: 14, y: 8)
+                .shadow(color: shadow, radius: isFocused ? 18 : 14, y: isFocused ? 0 : 8)
         }
     }
 }
@@ -724,7 +903,7 @@ private enum DetailScoreValueStyle {
             }
 
             HStack(spacing: 12) {
-                DetailMetaPill("8", systemImage: "star.fill")
+                DetailMetaPill(label: "Rating", value: "8", systemImage: "star.fill")
                 Text("1968")
                     .font(.title3.weight(.medium))
                     .foregroundStyle(.white)
