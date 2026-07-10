@@ -8,6 +8,24 @@
 import SwiftUI
 import SQLiteData
 
+enum FavoritesFocusProjection {
+    nonisolated static func successor(
+        afterRemoving removedID: Favorite.ID,
+        from visibleIDs: [Favorite.ID]
+    ) -> Favorite.ID? {
+        guard let removedIndex = visibleIDs.firstIndex(of: removedID) else {
+            return visibleIDs.first
+        }
+
+        let nextIndex = visibleIDs.index(after: removedIndex)
+        if nextIndex < visibleIDs.endIndex {
+            return visibleIDs[nextIndex]
+        }
+        guard removedIndex > visibleIDs.startIndex else { return nil }
+        return visibleIDs[visibleIDs.index(before: removedIndex)]
+    }
+}
+
 struct FavoritesScreen: View {
     private enum FavoriteScope: String, CaseIterable, Identifiable {
         case all
@@ -44,6 +62,12 @@ struct FavoritesScreen: View {
         }
     }
 
+    private enum FavoriteFocusTarget: Hashable {
+        case scope(FavoriteScope)
+        case content(Favorite.ID)
+        case remove(Favorite.ID)
+    }
+
     private struct FavoriteSection: Identifiable {
         let mediaType: MediaType
         let items: [FavoriteItem]
@@ -59,15 +83,29 @@ struct FavoritesScreen: View {
         }
     }
 
+    private struct RemovalFailure: Identifiable {
+        let message: String
+        var id: String { message }
+    }
+
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @FetchAll private var favorites: [Favorite]
     @FetchAll private var media: [Media]
+    @FetchAll private var categories: [Category]
     @State private var scope: FavoriteScope = .all
+    @State private var removalFailure: RemovalFailure?
+    @FocusState private var focusedTarget: FavoriteFocusTarget?
 
     private var scopedFavorites: [FavoriteItem] {
         let mediaByKey = Dictionary(
             media.map { (FavoriteStore.contentKey(mediaType: $0.type, sourceID: $0.sourceID), $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let categoryByID = Dictionary(
+            categories.map { ($0.id, $0) },
             uniquingKeysWith: { first, _ in first }
         )
 
@@ -75,37 +113,102 @@ struct FavoritesScreen: View {
             .filter { $0.providerID == session.providerID && scope.includes($0.mediaType) }
             .sorted(by: FavoriteStore.favoriteOrdering)
             .map { favorite in
-                FavoriteItem(
+                let localMedia = mediaByKey[
+                    FavoriteStore.contentKey(mediaType: favorite.mediaType, sourceID: favorite.sourceID)
+                ]
+                let currentCategory = localMedia
+                    .flatMap(\.categoryID)
+                    .flatMap { categoryByID[$0] }
+                return FavoriteItem(
                     favorite: favorite,
-                    media: mediaByKey[FavoriteStore.contentKey(mediaType: favorite.mediaType, sourceID: favorite.sourceID)]
+                    media: localMedia,
+                    category: currentCategory
                 )
             }
     }
 
     private var sections: [FavoriteSection] {
         let order: [MediaType] = [.movie, .series, .episode, .live]
+        let items = scopedFavorites
         return order.compactMap { mediaType in
-            let items = scopedFavorites.filter { $0.mediaType == mediaType }
-            return items.isEmpty ? nil : FavoriteSection(mediaType: mediaType, items: items)
+            let sectionItems = items.filter { $0.mediaType == mediaType }
+            return sectionItems.isEmpty ? nil : FavoriteSection(mediaType: mediaType, items: sectionItems)
         }
+    }
+
+    private var visibleFavoriteIDs: [Favorite.ID] {
+        sections.flatMap(\.items).map(\.id)
+    }
+
+    private var usesScrollableScopeSelector: Bool {
+        horizontalSizeClass == .compact || dynamicTypeSize >= .xLarge
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Favorite type", selection: $scope) {
-                    ForEach(FavoriteScope.allCases) { scope in
-                        Text(scope.title).tag(scope)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-
+                scopeSelector
                 content
             }
             .navigationTitle("Favorites")
         }
+        .alert(item: $removalFailure) { failure in
+            Alert(
+                title: Text("Couldn’t Remove Favorite"),
+                message: Text(failure.message),
+                dismissButton: .default(Text("OK"))
+            )
+        }
+    }
+
+    private var scopeSelector: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Show favorites")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            if usesScrollableScopeSelector {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(FavoriteScope.allCases) { candidate in
+                            Button {
+                                scope = candidate
+                            } label: {
+                                Text(candidate.title)
+                                    .lineLimit(1)
+                            }
+                            .buttonStyle(.bordered)
+                            .buttonBorderShape(.capsule)
+                            .tint(scope == candidate ? .accentColor : .secondary)
+                            .background {
+                                if scope == candidate {
+                                    Capsule()
+                                        .fill(Color.accentColor.opacity(0.16))
+                                }
+                            }
+                            .accessibilityLabel("\(candidate.title) favorites")
+                            .accessibilityAddTraits(scope == candidate ? .isSelected : [])
+                            .accessibilityHint("Shows \(candidate.title.lowercased()) favorites")
+                            .focused($focusedTarget, equals: .scope(candidate))
+                        }
+                    }
+                    .padding(.horizontal)
+                }
+            } else {
+                Picker("Favorite type", selection: $scope) {
+                    ForEach(FavoriteScope.allCases) { candidate in
+                        Text(candidate.title).tag(candidate)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .accessibilityLabel("Favorite type")
+                .accessibilityValue(scope.title)
+                .focused($focusedTarget, equals: .scope(scope))
+            }
+        }
+        .padding(.vertical, 10)
     }
 
     @ViewBuilder
@@ -140,48 +243,153 @@ struct FavoritesScreen: View {
     private func favoriteRow(for item: FavoriteItem) -> some View {
         if let media = item.media {
             if media.type == .live {
-                Button {
-                    player.load(media, presentation: .fullWindow)
-                } label: {
-                    FavoriteRow(item: item)
-                }
-                .buttonStyle(.plain)
-                .swipeActions {
-                    Button(role: .destructive) {
-                        FavoriteStore.remove(item.favorite)
-                    } label: {
-                        Label("Remove", systemImage: "heart.slash")
-                    }
+                removableRow(for: item) {
+                    liveFavoriteButton(for: item, media: media)
                 }
             } else {
-                NavigationLink {
-                    MediaDetailDestination(media: media, categoryTitle: item.categoryTitle)
-                } label: {
-                    FavoriteRow(item: item)
-                }
-                .swipeActions {
-                    Button(role: .destructive) {
-                        FavoriteStore.remove(item.favorite)
+                removableRow(for: item) {
+                    NavigationLink {
+                        MediaDetailDestination(media: media, categoryTitle: item.categoryTitle)
                     } label: {
-                        Label("Remove", systemImage: "heart.slash")
+                        FavoriteRow(
+                            item: item,
+                            isFocused: focusedTarget == .content(item.id)
+                        )
                     }
+                    .focused($focusedTarget, equals: .content(item.id))
+                    .accessibilityHint("Shows details for \(item.title)")
                 }
             }
         } else {
-            FavoriteRow(item: item)
-                .swipeActions {
-                    Button(role: .destructive) {
-                        FavoriteStore.remove(item.favorite)
-                    } label: {
-                        Label("Remove", systemImage: "heart.slash")
-                    }
-                }
+            removableRow(for: item) {
+                unavailableFavoriteRow(for: item)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func liveFavoriteButton(for item: FavoriteItem, media: Media) -> some View {
+        let button = Button {
+            player.load(media, presentation: .fullWindow)
+        } label: {
+            FavoriteRow(
+                item: item,
+                isFocused: focusedTarget == .content(item.id)
+            )
+        }
+        .focused($focusedTarget, equals: .content(item.id))
+        .accessibilityLabel("Play \(item.title)")
+        .accessibilityHint("Starts live playback")
+
+#if os(tvOS)
+        button
+#else
+        button.buttonStyle(.plain)
+#endif
+    }
+
+    @ViewBuilder
+    private func unavailableFavoriteRow(for item: FavoriteItem) -> some View {
+#if os(macOS)
+        FavoriteRow(
+            item: item,
+            isFocused: focusedTarget == .content(item.id)
+        )
+        .focusable()
+        .focused($focusedTarget, equals: .content(item.id))
+        .accessibilityHint("Press Delete or open the context menu to remove this unavailable favorite")
+#else
+        FavoriteRow(item: item)
+#endif
+    }
+
+    @ViewBuilder
+    private func removableRow<Content: View>(
+        for item: FavoriteItem,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+#if os(iOS)
+        content()
+            .swipeActions {
+                removalButton(for: item)
+            }
+#elseif os(macOS)
+        content()
+            .contextMenu {
+                removalButton(for: item)
+                    .keyboardShortcut(.delete, modifiers: [])
+            }
+            .onDeleteCommand {
+                removeFavorite(item)
+            }
+#elseif os(tvOS)
+        HStack(spacing: 16) {
+            content()
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            removalButton(for: item)
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .focused($focusedTarget, equals: .remove(item.id))
+        }
+#else
+        content()
+            .contextMenu {
+                removalButton(for: item)
+            }
+#endif
+    }
+
+    private func removalButton(for item: FavoriteItem) -> some View {
+        Button(role: .destructive) {
+            removeFavorite(item)
+        } label: {
+            Label("Remove", systemImage: "heart.slash")
+        }
+        .accessibilityLabel("Remove \(item.title) from Favorites")
+        .accessibilityHint("Removes this item from the active provider’s favorites")
+    }
+
+    private func removeFavorite(_ item: FavoriteItem) {
+        let successorID = FavoritesFocusProjection.successor(
+            afterRemoving: item.id,
+            from: visibleFavoriteIDs
+        )
+
+        do {
+            switch try FavoriteStore.remove(item.favorite) {
+            case .removed:
+                moveFocusAfterRemoval(to: successorID)
+            case .added:
+                removalFailure = RemovalFailure(
+                    message: "\(item.title) was not removed. Please try again."
+                )
+            }
+        } catch {
+            removalFailure = RemovalFailure(message: error.localizedDescription)
+        }
+    }
+
+    private func moveFocusAfterRemoval(to successorID: Favorite.ID?) {
+#if os(tvOS)
+        scheduleFocus(successorID.map(FavoriteFocusTarget.remove) ?? .scope(scope))
+#elseif os(macOS)
+        scheduleFocus(successorID.map(FavoriteFocusTarget.content) ?? .scope(scope))
+#endif
+    }
+
+    private func scheduleFocus(_ target: FavoriteFocusTarget) {
+        focusedTarget = nil
+        Task { @MainActor in
+            await Task.yield()
+            focusedTarget = target
         }
     }
 }
 
 private struct FavoriteRow: View {
     let item: FavoriteItem
+    var isFocused = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -229,6 +437,15 @@ private struct FavoriteRow: View {
             Spacer()
         }
         .padding(.vertical, 4)
+        .background(
+            isFocused ? Color.accentColor.opacity(0.12) : Color.clear,
+            in: .rect(cornerRadius: 10)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isFocused ? Color.accentColor : .clear, lineWidth: 3)
+        }
+        .animation(.easeOut(duration: 0.16), value: isFocused)
         .accessibilityElement(children: .combine)
     }
 

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPTV Best Path Forward</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0b0d10;--panel:#141821;--panel2:#10141b;--text:#f4f6fb;--muted:#a8b0bf;--line:#283142;--accent:#77b7ff;--ok:#8ee6a8;--warn:#ffd37a;--bad:#ff9b9b}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#0b0d10,#111620);color:var(--text);font:16px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text",Segoe UI,sans-serif}main{max-width:1180px;margin:auto;padding:48px 24px 72px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.hero{border:1px solid var(--line);background:radial-gradient(circle at 20% 0%,#19314a 0,#141821 34%,#10141b 100%);border-radius:24px;padding:36px}.eyebrow{color:var(--accent);text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:700}h1{font-size:46px;line-height:1.05;margin:10px 0 16px}h2{font-size:28px;margin:34px 0 14px}h3{font-size:20px;margin:0 0 10px}.lead{font-size:19px;color:var(--muted);max-width:900px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin-top:18px}.card{border:1px solid var(--line);background:rgba(20,24,33,.82);border-radius:18px;padding:20px}.card p{color:var(--muted);margin:8px 0 0}.badge{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:4px 10px;color:var(--muted);font-size:13px}.p0{color:var(--ok)}.p1{color:var(--warn)}.p2{color:var(--muted)}ol.timeline{list-style:none;counter-reset:step;padding:0;margin:20px 0;display:grid;gap:12px}ol.timeline>li{counter-increment:step;border:1px solid var(--line);background:var(--panel2);border-radius:16px;padding:18px 18px 18px 58px;position:relative}ol.timeline>li:before{content:counter(step);position:absolute;left:18px;top:18px;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#203247;color:var(--accent);font-weight:700}.note{border-left:4px solid var(--accent);background:#101a27;padding:14px 16px;border-radius:12px;color:var(--muted)}.links{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}.links a{border:1px solid var(--line);border-radius:999px;padding:7px 12px;background:#111722}.small{font-size:14px;color:var(--muted)}
+  </style>
+</head>
+<body>
+<main>
+  <section class="hero">
+    <div class="eyebrow">Planning index · reviewed 2026-07-05</div>
+    <h1>Best path forward</h1>
+    <p class="lead">A simple, local-first roadmap for the open IPTV app work. The bias is deliberate: stabilize the single active provider/session model, make existing Movies/Series/Search/Playback honest, then add persisted user state. Defer profiles, downloads, EPG, and indexing until the prerequisites are real.</p>
+    <div class="links">
+      <a href="foundation-local-data.html">Foundation</a>
+      <a href="library-ux.html">Library UX</a>
+      <a href="playback-watch-activity.html">Playback + Watch</a>
+      <a href="user-state-discovery.html">Favorites + For You</a>
+      <a href="live-tv.html">Live TV</a>
+      <a href="deferred-complexity.html">Profiles + Downloads</a>
+    </div>
+  </section>
+
+  <h2>Priority order</h2>
+  <ol class="timeline">
+    <li><strong>P0 Foundation:</strong> lock provider/session/catalog invariants, type-aware catalog identity, lazy hydration semantics, and DB-backed prefix visibility. <a href="foundation-local-data.html">Open plan</a></li>
+    <li><strong>P1-A Library honesty:</strong> fix browse/search loading vs empty states, partial local coverage messaging, shared query normalization, and keep search local. <a href="library-ux.html">Open plan</a></li>
+    <li><strong>P0/P1 Playback + watch activity:</strong> persist resumable progress, clean advanced controls, keep preferences device-global until profiles exist. <a href="playback-watch-activity.html">Open plan</a></li>
+    <li><strong>P1 Discovery:</strong> add persisted favorites and a deterministic local For You screen from favorites/watch/catalog rows. <a href="user-state-discovery.html">Open plan</a></li>
+    <li><strong>P1-B/P1-C Library enrichment:</strong> add minimal nullable metadata and series episode persistence only after the core UX is honest. <a href="library-ux.html#metadata-episodes">Jump to section</a></li>
+    <li><strong>P1/P2 Live TV:</strong> basic channels first using the same local catalog/player pattern; EPG/catch-up later. <a href="live-tv.html">Open plan</a></li>
+    <li><strong>P2 Deferred complexity:</strong> profiles before downloads, downloads after profile-aware user state and a playback-source-origin seam. <a href="deferred-complexity.html">Open plan</a></li>
+  </ol>
+
+  <h2>Plan pages</h2>
+  <section class="grid">
+    <article class="card"><span class="badge p0">P0</span><h3><a href="foundation-local-data.html">Foundation and local data</a></h3><p>Clarifies the singleton active-provider catalog and makes it safe before other work builds on it.</p></article>
+    <article class="card"><span class="badge p1">P1</span><h3><a href="library-ux.html">Library browsing, search, filters, details</a></h3><p>Hardens the surfaces users already touch without adding a parallel search/index architecture.</p></article>
+    <article class="card"><span class="badge p0">P0/P1</span><h3><a href="playback-watch-activity.html">Playback and watch activity</a></h3><p>Turns player progress into local state and removes misleading control stubs.</p></article>
+    <article class="card"><span class="badge p1">P1</span><h3><a href="user-state-discovery.html">Favorites and For You</a></h3><p>Adds persisted favorites and a deterministic local discovery page.</p></article>
+    <article class="card"><span class="badge p1">P1/P2</span><h3><a href="live-tv.html">Live TV</a></h3><p>Builds live categories/channels before guide, catch-up, or zapping complexity.</p></article>
+    <article class="card"><span class="badge p2">P2</span><h3><a href="deferred-complexity.html">Profiles and downloads</a></h3><p>Defines guardrails so complex capabilities do not pollute the current simple architecture.</p></article>
+  </section>
+
+  <h2>Spec relationship map</h2>
+  <p class="note">The source specs remain Markdown under <code>docs/</code>. These HTML plans link to them and describe the next dependent work. Common functionality is intentionally cross-linked: local data feeds search/browse/details/player; watch activity feeds For You; profiles must wait for user-state rows; downloads must wait for profiles and playback-source origin.</p>
+
+  <h2>Subagent review status</h2>
+  <p class="small">Drafted from planning subagents: FoundationPlan, LibraryUXPlan, PlaybackPlan, DiscoveryPlan, LiveTVPlan, DeferredPlan. A separate reviewer pass is required after draft generation; reviewer feedback is recorded on each plan page when applied.</p>
+</main>
+</body>
+</html>

@@ -15,20 +15,23 @@ struct OnboardingFlowView: View {
     @State private var step: OnboardingStep = .source
     @State private var isSubmitting = false
     @State private var errorMessage: String?
-    @State private var didStartExistingProviderSync = false
+    @State private var showsValidationErrors = false
+    @State private var syncingRevision: Int?
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 20) {
-                if step != .source {
+                if step == .credentials || step == .failed {
                     Button {
                         step = .source
+                        errorMessage = nil
                     } label: {
                         Label("Back", systemImage: "chevron.left")
                     }
                     .buttonStyle(.bordered)
+                    .disabled(isSubmitting)
                     .accessibilityIdentifier("onboarding.back")
                 }
 
@@ -37,8 +40,8 @@ struct OnboardingFlowView: View {
             .frame(maxWidth: 720)
             .padding(32)
         }
-        .task {
-            await startExistingProviderSyncIfNeeded()
+        .task(id: providerManager.revision) {
+            await reactToProviderRevision()
         }
     }
 
@@ -57,6 +60,7 @@ struct OnboardingFlowView: View {
     }
 
     private var sourceStep: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 28) {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Welcome to iptv")
@@ -67,7 +71,7 @@ struct OnboardingFlowView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            VStack(spacing: 12) {
+            VStack(alignment: .trailing, spacing: 12) {
                 ForEach(ProviderSourceKind.allCases) { kind in
                     Button {
                         selectedKind = kind
@@ -143,6 +147,7 @@ struct OnboardingFlowView: View {
             .controlSize(.large)
             .accessibilityIdentifier("onboarding.source.continue")
         }
+        }
     }
 
     private var credentialsStep: some View {
@@ -186,21 +191,14 @@ struct OnboardingFlowView: View {
                 isSaving: isSubmitting,
                 saveLabel: saveLabel,
                 errorMessage: errorMessage,
+                showsValidationErrors: showsValidationErrors,
                 saveAccessibilityIdentifier: showsBackButton ? "onboarding.retry" : "onboarding.provider.save",
                 onSave: {
                     Task { await submit() }
                 },
-                onClear: nil
+                onRemove: nil
             )
 
-            if showsBackButton {
-                Section {
-                    Button("Back to source") {
-                        step = .source
-                    }
-                    .buttonStyle(.bordered)
-                }
-            }
         }
         .formStyle(.grouped)
 #if os(macOS)
@@ -263,6 +261,8 @@ struct OnboardingFlowView: View {
                 "Preparing your library…"
             case .clearingLibrary:
                 "Preparing local storage…"
+            case .replacingCatalog:
+                "Replacing the local catalog…"
             case .syncingMovies:
                 "Syncing movie categories…"
             case .syncingSeries:
@@ -280,32 +280,59 @@ struct OnboardingFlowView: View {
         "We couldn’t sync this source. Check the URL, username, and password, then try again."
     }
 
-    private func startExistingProviderSyncIfNeeded() async {
-        guard !didStartExistingProviderSync else { return }
-        guard let session = providerManager.session, !providerManager.activeProviderIsInitialized else {
-            step = .source
-            return
-        }
+    private func reactToProviderRevision() async {
+        do {
+            guard let configuration = try providerManager.activeProviderConfiguration() else {
+                providerFields = ProviderFields(name: "", endpoint: "", username: "", password: "")
+                selectedKind = .xtream
+                showsValidationErrors = false
+                errorMessage = nil
+                step = .source
+                return
+            }
 
-        didStartExistingProviderSync = true
-        providerFields.name = session.provider.name
-        providerFields.endpoint = session.provider.endpoint.absoluteString
-        providerFields.username = session.provider.username
-        providerFields.password = session.provider.password
-        selectedKind = session.provider.kind
-        step = .syncing
+            providerFields = ProviderFields(
+                name: configuration.name,
+                endpoint: configuration.endpoint.absoluteString,
+                username: configuration.username,
+                password: configuration.password,
+                allowsInsecureHTTP: configuration.allowsInsecureHTTP
+            )
+            selectedKind = configuration.kind
+            showsValidationErrors = false
 
-        let result = await providerManager.runInitialSyncForActiveProvider()
-        if result == .failure {
-            errorMessage = session.syncErrorMessage ?? fallbackSyncErrorMessage
-            step = .failed
+            guard providerManager.session != nil else {
+                switch providerManager.accessState {
+                    case .credentialsRequired:
+                        errorMessage = "Enter the provider password to continue."
+                    case .credentialsUnavailable:
+                        errorMessage = "The saved password couldn’t be read. Enter it again to continue."
+                    case .insecureTransportApprovalRequired:
+                        errorMessage = "Review and explicitly allow insecure HTTP, or use an HTTPS URL."
+                    case .noProvider, .ready:
+                        errorMessage = "Review the provider settings and try again."
+                }
+                step = .credentials
+                return
+            }
+
+            guard !providerManager.activeProviderIsInitialized else { return }
+            step = .syncing
+            await syncActiveProvider(for: providerManager.revision)
+        } catch {
+            errorMessage = error.localizedDescription
+            step = .credentials
         }
     }
 
     private func submit() async {
         guard !isSubmitting else { return }
-        guard let draft = providerFields.build(id: providerManager.session?.providerID, kind: selectedKind) else {
-            errorMessage = "Please complete all provider fields."
+        showsValidationErrors = true
+        guard let configuration = providerFields.build(
+            id: providerManager.activeProviderID,
+            kind: selectedKind
+        ) else {
+            errorMessage = "Correct the highlighted provider fields."
             return
         }
 
@@ -313,23 +340,31 @@ struct OnboardingFlowView: View {
         errorMessage = nil
 
         do {
-            if providerManager.session == nil {
-                try providerManager.initialize(draft)
+            if providerManager.activeProviderID == nil {
+                try providerManager.initialize(configuration)
             } else {
-                try providerManager.update(provider: draft)
+                try providerManager.update(provider: configuration)
             }
 
+            showsValidationErrors = false
             step = .syncing
-            let result = await providerManager.runInitialSyncForActiveProvider()
             isSubmitting = false
-
-            if result == .failure {
-                errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
-                step = .failed
-            }
+            await syncActiveProvider(for: providerManager.revision)
         } catch {
             isSubmitting = false
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func syncActiveProvider(for revision: Int) async {
+        guard syncingRevision != revision else { return }
+        syncingRevision = revision
+        defer { syncingRevision = nil }
+
+        let result = await providerManager.runInitialSyncForActiveProvider()
+        if result == .failure {
+            errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
+            step = .failed
         }
     }
 }

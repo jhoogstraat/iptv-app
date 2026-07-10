@@ -7,8 +7,8 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Status
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
-- Implementation status (reviewed 2026-07-06): Partial. `SyncManager.sync(provider:)` clears all local `Media` and `Category`, fetches VOD, series, and live categories, and stores category rows. `BrowseScreen` lazily hydrates unhydrated movie/series categories through `Session.update(_:in:)`; `LiveScreen` lazily hydrates unhydrated live categories the same way. Hydration upserts `Media` rows and stamps `Category.updatedAt`. Provider-scoped `WatchActivity` persists movie/episode progress separately from catalog rows.
-- Current schema: provider, category, media, series season, category prefix visibility, watch-activity, and favorites tables exist. Live channels are represented as `MediaType.live` rows in `media`; EPG/catch-up/guide cache tables, downloads/offline persistence, provider-isolated catalog rows, and recommendation persistence are not yet visible in the current schema.
+- Implementation status (reviewed 2026-07-10): `SyncManager.sync()` single-flights initial sync, fetches movie, series, and live categories, and atomically replaces the category catalog only after all required families succeed. Category hydration is single-flight and reconciles incoming movie/series/live rows by deleting stale rows and updating timestamps. Provider changes invalidate active sync/detail/hydration ownership so stale work cannot commit into a replacement catalog.
+- Current schema: provider, category, media, series season, category prefix visibility, watch-activity, and favorites tables exist. Provider passwords live in Keychain behind a database credential reference; plaintext credentials migrate out of SQLite. Live channels use `MediaType.live`; EPG/catch-up, downloads/offline, profile, and recommendation persistence remain deferred.
 
 ## User Experience
 
@@ -20,13 +20,13 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 
 ## Data and State
 
-- `providers`: provider identity, endpoint, credentials, source kind, active flag, initialized flag.
-- `categories`: source category ID, media type, display title, update timestamp.
-- `media`: source stream ID, media type, title, category ID, TMDB ID, cover URL, rating, container extension where available, and update timestamp. Live rows persist available channel metadata such as logo URL, added date, and stream type without inventing EPG data.
-- `SyncManager.InitialSyncPhase`: idle, clearing library, syncing movies, syncing series, syncing live, succeeded, failed.
+- `providers`: provider identity, endpoint, Keychain credential reference, source kind, explicit insecure-HTTP approval, active flag, and initialized flag.
+- `categories`: source category ID, media type, display title, and hydration timestamp.
+- `media`: source stream ID, media type, title, category ID, rich detail metadata, episode/series linkage, container extension where available, and update timestamp. Live rows persist available channel metadata without inventing EPG data.
+- `SyncManager.InitialSyncPhase`: idle, syncing movies, syncing series, syncing live, replacing catalog, succeeded, failed.
 - `SyncManager.SyncStatus`: idle, active, success, failure.
 - `Category.updatedAt == nil` means the category has not been lazily hydrated yet.
-- `watch_activity`: provider-scoped movie/episode progress keyed by provider ID, media type, and source ID, with title/artwork/category snapshots, time/duration, completed flag, last watched, and update timestamps. Live playback does not persist watch progress.
+- `watch_activity`: provider-scoped movie/episode progress with ordered write-session/generation stamps so late asynchronous writes cannot regress newer progress. Live playback does not persist watch progress.
 
 ## Key Files
 
@@ -41,12 +41,12 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 
 ## Target Acceptance Criteria
 
-- Initial sync clears stale library rows before loading the new provider's categories.
+- Initial sync preserves the last good catalog until movie, series, and live category fetches all succeed, then replaces catalog rows atomically.
 - Movie, series, and live category sync state is visible to onboarding.
-- Lazy category hydration fetches streams/channels only when needed and stamps `Category.updatedAt` on success.
+- Lazy category hydration fetches streams/channels only when needed, reconciles stale children, and stamps `Category.updatedAt` on success.
 - Hydrated category media is stored locally and reused by browse/search/detail/live surfaces.
-- Provider changes do not leak categories or media from the previous provider.
-- Sync failures preserve enough state to retry and show meaningful error copy.
+- Provider changes invalidate old work before clearing/replacing the singleton catalog, preventing stale commits or cross-provider leakage.
+- Sync failures preserve the last good catalog and expose meaningful retry copy.
 
 ## Current Gaps / Planned Work
 

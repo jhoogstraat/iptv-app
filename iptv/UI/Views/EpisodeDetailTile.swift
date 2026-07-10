@@ -9,6 +9,7 @@ import SwiftUI
 import SQLiteData
 
 struct EpisodeDetailTile: View {
+    static let playbackPresentation: Presentation = .fullWindow
     let series: Media?
     let episode: Media
 
@@ -17,6 +18,7 @@ struct EpisodeDetailTile: View {
     @FetchAll private var watchActivities: [WatchActivity]
     @FetchAll private var favorites: [Favorite]
     @State private var playError: String?
+    @State private var favoriteError: String?
 
     init(series: Media?, episode: Media) {
         self.series = series
@@ -39,6 +41,7 @@ struct EpisodeDetailTile: View {
                     Text(episode.title)
                         .font(.largeTitle.weight(.bold))
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityAddTraits(.isHeader)
 
                     if let series {
                         Text(series.title)
@@ -54,19 +57,30 @@ struct EpisodeDetailTile: View {
                     HStack(spacing: DetailSpacing.sm) {
                         Button {
                             playError = nil
-                            player.load(episode, presentation: .inline)
+                            player.load(episode, presentation: Self.playbackPresentation)
                             playError = player.errorMessage
                         } label: {
-                            Label(playButtonTitle, systemImage: shouldResumeEpisode ? "play.circle.fill" : "play.fill")
-                                .frame(maxWidth: .infinity)
+                            Label(playButtonTitle, systemImage: playButtonSystemImage)
+                                .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(DetailActionStyle(variant: .primary))
+                        .accessibilityHint(playButtonHint)
 
                         Button {
-                            FavoriteStore.toggle(episode, providerID: session.providerID, categoryTitle: series?.title)
+                            do {
+                                _ = try FavoriteStore.toggle(
+                                    episode,
+                                    providerID: session.providerID,
+                                    categoryTitle: series?.title
+                                )
+                                favoriteError = nil
+                            } catch {
+                                favoriteError = error.localizedDescription
+                            }
                         } label: {
                             Label(currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites", systemImage: currentFavorite == nil ? "heart" : "heart.fill")
                                 .labelStyle(.iconOnly)
+                                .frame(minWidth: 44, minHeight: 44)
                         }
                         .buttonStyle(DetailActionStyle(variant: .icon))
                         .accessibilityHint("Updates the persisted favorite state for this provider.")
@@ -74,10 +88,18 @@ struct EpisodeDetailTile: View {
                         DownloadStatusBadge()
                     }
 
+                    if let favoriteError {
+                        Text("Couldn’t update Favorites: \(favoriteError)")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                            .accessibilityLabel("Favorites update failed. \(favoriteError)")
+                    }
+
                     if let playError {
                         Text(playError)
                             .font(.footnote)
                             .foregroundStyle(.red)
+                            .accessibilityLabel("Playback failed. \(playError)")
                     }
 
                     section("About", text: aboutText)
@@ -145,8 +167,28 @@ struct EpisodeDetailTile: View {
     }
 
     private var playButtonTitle: String {
+        if currentWatchActivity?.completed == true {
+            return "Replay"
+        }
         guard shouldResumeEpisode, let activity = currentWatchActivity else { return "Play" }
         return "Resume \(Self.formatDuration(activity.currentTime))"
+    }
+
+    private var playButtonSystemImage: String {
+        if currentWatchActivity?.completed == true {
+            return "arrow.counterclockwise"
+        }
+        return shouldResumeEpisode ? "play.circle.fill" : "play.fill"
+    }
+
+    private var playButtonHint: String {
+        if currentWatchActivity?.completed == true {
+            return "Starts this episode again from the beginning in the full-window player."
+        }
+        if shouldResumeEpisode {
+            return "Continues this episode in the full-window player."
+        }
+        return "Starts this episode in the full-window player."
     }
 
     @ViewBuilder

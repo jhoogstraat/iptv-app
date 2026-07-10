@@ -14,6 +14,7 @@ struct BrowseScreen: View {
 
     @Environment(Session.self) private var session
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
+    @State private var prefixVisibilityCache = CategoryPrefixVisibilityCache()
 
     @State private var selectedCategoryID: Category.ID?
     @State private var selectedGroupKeys: Set<String> = []
@@ -24,33 +25,50 @@ struct BrowseScreen: View {
     @FetchAll
     private var categories: [Category]
 
-    private var category: Category? { categories.first { $0.id == selectedCategoryID } }
-    private var categoryHydrationState: SyncManager.CategoryHydrationState {
-        category.map { session.hydrationState(for: $0) } ?? .populated(0)
+    @FetchAll
+    private var media: [Media]
+
+    private var visibilityRequest: CategoryPrefixVisibilityRequest {
+        CategoryPrefixVisibilityRequest(
+            providerID: session.providerID,
+            revision: prefixVisibilityRevision
+        )
     }
 
+    private var visibilitySnapshot: CategoryPrefixVisibilitySnapshot? {
+        prefixVisibilityCache.snapshot(for: visibilityRequest)
+    }
 
     private var hiddenGroupKeys: Set<String> {
-        _ = prefixVisibilityRevision
-        return CategoryPrefixVisibilityStore.hiddenGroupKeys(for: session.providerID)
+        visibilitySnapshot?.hiddenGroupKeys ?? []
+    }
+
+    private var categoryProjection: LibraryCategoryProjection {
+        LibraryCategoryProjection(categories: categories, hiddenGroupKeys: hiddenGroupKeys)
     }
 
     private var visibleCategories: [Category] {
-        categories
-            .filter { !hiddenGroupKeys.contains(CategoryGrouping.key(for: $0.title)) }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        categoryProjection.selectableCategories
     }
 
-    private var visibleCategoryIDs: [Category.ID] {
-        visibleCategories.map(\.id)
+    private var category: Category? {
+        selectedCategoryID.flatMap { categoryProjection.categoryByID[$0] }
     }
 
-    private var visibleGroupKeys: Set<String> {
-        Set(visibleCategories.map { CategoryGrouping.key(for: $0.title) })
+    private var hydrationSnapshot: LibraryHydrationSnapshot {
+        LibraryHydrationSnapshot(
+            categories: categories,
+            media: media,
+            overrides: session.runtimeHydrationStates
+        )
     }
 
-    private var visibleHydrationStates: [SyncManager.CategoryHydrationState] {
-        visibleCategories.map { session.hydrationState(for: $0) }
+    private var categoryHydrationState: SyncManager.CategoryHydrationState {
+        hydrationSnapshot.state(for: category)
+    }
+
+    private var visibleHydrationCoverage: LibraryHydrationCoverage {
+        hydrationSnapshot.coverage(for: visibleCategories)
     }
 
     private var fallbackScreenTitle: String {
@@ -79,12 +97,13 @@ struct BrowseScreen: View {
 
     init(type: MediaType) {
         self.type = type
-        self._categories = FetchAll((Category.where { $0.type.eq(type) }))
+        self._categories = FetchAll(Category.where { $0.type.eq(type) })
+        self._media = FetchAll(Media.where { $0.type.eq(type) })
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !categories.isEmpty {
+            if visibilitySnapshot != nil, !categories.isEmpty {
                 LibraryFilterBar(
                     categories: visibleCategories,
                     state: Binding(
@@ -108,18 +127,24 @@ struct BrowseScreen: View {
         .task(id: selectedCategoryID) {
             await hydrateSelectedCategoryIfNeeded()
         }
-        .onChange(of: visibleCategoryIDs) { _, ids in
-            if let selectedCategoryID, !ids.contains(selectedCategoryID) {
-                self.selectedCategoryID = nil
+        .task(id: visibilityRequest) {
+            prefixVisibilityCache.resolve(visibilityRequest) {
+                CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
             }
-
-            selectedGroupKeys = selectedGroupKeys.intersection(visibleGroupKeys)
+        }
+        .onChange(of: categoryProjection.selectableCategoryIDs) { _, categoryIDs in
+            var nextState = filterState
+            nextState.retainSelections(availableIn: visibleCategories)
+            apply(nextState)
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if categories.isEmpty {
+        if visibilitySnapshot == nil {
+            ProgressView("Loading category visibility")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if categories.isEmpty {
             ContentUnavailableView {
                 Text("No \(fallbackScreenTitle) available")
             } description: {
@@ -140,11 +165,14 @@ struct BrowseScreen: View {
                 type: type,
                 filterState: filterState,
                 filter: searchText,
-                categories: visibleCategories,
+                categories: categories,
+                media: media,
                 hiddenGroupKeys: hiddenGroupKeys,
                 selectedCategory: category,
                 hydrationState: categoryHydrationState,
-                visibleHydrationStates: visibleHydrationStates,
+                visibleHydrationCoverage: visibleHydrationCoverage,
+                clearFilters: clearFilters,
+                clearSearchAndFilters: clearSearchAndFilters,
                 retryHydration: {
                     Task { await hydrateSelectedCategory(force: true) }
                 }
@@ -153,9 +181,21 @@ struct BrowseScreen: View {
     }
 
     private func clearFilters() {
-        selectedCategoryID = nil
-        selectedGroupKeys.removeAll()
-        minimumRating = nil
+        var nextState = filterState
+        nextState.clearFilters()
+        apply(nextState)
+    }
+
+    private func clearSearchAndFilters() {
+        clearFilters()
+        searchText = ""
+    }
+
+    private func apply(_ state: LibraryFilterState) {
+        selectedCategoryID = state.selectedCategoryID
+        selectedGroupKeys = state.selectedGroupKeys
+        minimumRating = state.minimumRating
+        sort = state.sort
     }
 
     private func hydrateSelectedCategoryIfNeeded() async {
@@ -172,7 +212,7 @@ struct BrowseScreen: View {
         } catch is CancellationError {
             return
         } catch {
-            assertionFailure("Failed to hydrate category: \(error.localizedDescription)")
+            return
         }
     }
 }
@@ -182,39 +222,44 @@ struct CoverGridSection: View {
     let filterState: LibraryFilterState
     let filter: String
     let categories: [Category]
+    let media: [Media]
     let hiddenGroupKeys: Set<String>
     let selectedCategory: Category?
     let hydrationState: SyncManager.CategoryHydrationState
-    let visibleHydrationStates: [SyncManager.CategoryHydrationState]
+    let visibleHydrationCoverage: LibraryHydrationCoverage
+    let clearFilters: () -> Void
+    let clearSearchAndFilters: () -> Void
     let retryHydration: () -> Void
     @Environment(Session.self) private var session
     @FetchAll private var favorites: [Favorite]
     @FetchAll private var watchActivities: [WatchActivity]
-    @FetchAll private var media: [Media]
 
     init(
         type: MediaType,
         filterState: LibraryFilterState,
         filter: String,
         categories: [Category],
+        media: [Media],
         hiddenGroupKeys: Set<String>,
         selectedCategory: Category?,
         hydrationState: SyncManager.CategoryHydrationState,
-        visibleHydrationStates: [SyncManager.CategoryHydrationState],
+        visibleHydrationCoverage: LibraryHydrationCoverage,
+        clearFilters: @escaping () -> Void,
+        clearSearchAndFilters: @escaping () -> Void,
         retryHydration: @escaping () -> Void
     ) {
         self.type = type
         self.filterState = filterState
         self.filter = filter
         self.categories = categories
+        self.media = media
         self.hiddenGroupKeys = hiddenGroupKeys
         self.selectedCategory = selectedCategory
         self.hydrationState = hydrationState
-        self.visibleHydrationStates = visibleHydrationStates
+        self.visibleHydrationCoverage = visibleHydrationCoverage
+        self.clearFilters = clearFilters
+        self.clearSearchAndFilters = clearSearchAndFilters
         self.retryHydration = retryHydration
-        _media = FetchAll(Media.where {
-            $0.type.eq(type)
-        })
     }
 
     private var filteredMedia: [Media] {
@@ -245,13 +290,7 @@ struct CoverGridSection: View {
 
     @ViewBuilder
     var body: some View {
-        if selectedCategory == nil, media.isEmpty {
-            ContentUnavailableView {
-                Label("No local streams loaded", systemImage: "folder.badge.questionmark")
-            } description: {
-                Text("Categories sync first. Open a category to lazily load its streams into the local library. Search and filters only use rows already stored locally.")
-            }
-        } else if let selectedCategory {
+        if let selectedCategory {
             switch hydrationState {
             case .unhydrated:
                 ContentUnavailableView {
@@ -285,50 +324,71 @@ struct CoverGridSection: View {
 
     @ViewBuilder
     private var populatedGrid: some View {
-        if filteredMedia.isEmpty {
-            ContentUnavailableView.search(text: filter)
-        } else {
-            VStack(alignment: .leading, spacing: 12) {
-                coverageStatus
-                CoverGrid(media: filteredMedia, categories: categories, favoriteContentKeys: favoriteContentKeys, resumableContentKeys: resumableContentKeys)
-                    .id(filterState)
-                    .transition(.scale(scale: 0.9).combined(with: .opacity))
+        VStack(alignment: .leading, spacing: 12) {
+            coverageStatus
+
+            if filteredMedia.isEmpty {
+                emptyResults
+            } else {
+                CoverGrid(
+                    media: filteredMedia,
+                    categories: categories,
+                    favoriteContentKeys: favoriteContentKeys,
+                    resumableContentKeys: resumableContentKeys
+                )
+                .id(filterState)
+                .transition(.scale(scale: 0.9).combined(with: .opacity))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var emptyResults: some View {
+        switch LibraryEmptyCriteria(query: filter, filterState: filterState) {
+        case .none:
+            ContentUnavailableView {
+                Label("No local streams loaded", systemImage: "folder.badge.questionmark")
+            } description: {
+                Text("Categories sync first. Open a category to load its streams into the local library.")
+            }
+        case .queryOnly:
+            ContentUnavailableView {
+                Label("No titles match your search", systemImage: "magnifyingglass")
+            } description: {
+                Text("Try a different title or clear the search.")
+            } actions: {
+                Button("Clear Search") {
+                    clearSearchAndFilters()
+                }
+            }
+        case .filtersOnly:
+            ContentUnavailableView {
+                Label("No titles match these filters", systemImage: "line.3.horizontal.decrease.circle")
+            } description: {
+                Text("Clear the category, group, or rating filters to broaden the local results.")
+            } actions: {
+                Button("Clear Filters", action: clearFilters)
+            }
+        case .queryAndFilters:
+            ContentUnavailableView {
+                Label("No titles match your search and filters", systemImage: "magnifyingglass")
+            } description: {
+                Text("Clear the search and filters to show all locally available titles.")
+            } actions: {
+                Button("Clear Search and Filters", action: clearSearchAndFilters)
             }
         }
     }
 
     @ViewBuilder
     private var coverageStatus: some View {
-        if selectedCategory == nil, let message = partialCoverageMessage {
+        if selectedCategory == nil, let message = visibleHydrationCoverage.message {
             Label(message, systemImage: "externaldrive.badge.questionmark")
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
                 .padding(.top, 8)
         }
-    }
-
-    private var partialCoverageMessage: String? {
-        let loadingCount = visibleHydrationStates.filter { $0 == .loading }.count
-        let unhydratedCount = visibleHydrationStates.filter { $0 == .unhydrated }.count
-        let failedCount = visibleHydrationStates.filter { state in
-            if case .failed = state { return true }
-            return false
-        }.count
-
-        if loadingCount > 0 {
-            return "\(loadingCount) category \(loadingCount == 1 ? "is" : "are") still loading; results are local and may be partial."
-        }
-
-        if unhydratedCount > 0 {
-            return "\(unhydratedCount) category \(unhydratedCount == 1 ? "has" : "have") not been opened yet; results only include hydrated local rows."
-        }
-
-        if failedCount > 0 {
-            return "\(failedCount) category \(failedCount == 1 ? "failed" : "failed") to load; retry from its category view for complete local coverage."
-        }
-
-        return nil
     }
 }
 
@@ -548,35 +608,41 @@ private struct CoverGrid: View {
     }
     
     private struct ShimmerEffect: ViewModifier {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
         @State private var phase: CGFloat = -1
-        
+
+        @ViewBuilder
         func body(content: Content) -> some View {
-            content
-                .overlay {
-                    GeometryReader { proxy in
-                        let width = proxy.size.width
-                        LinearGradient(
-                            colors: [
-                                .clear,
-                                Color.white.opacity(0.18),
-                                .clear
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .frame(width: max(width * 0.45, 1))
-                        .rotationEffect(.degrees(18))
-                        .offset(x: phase * width * 1.6)
+            if reduceMotion {
+                content
+            } else {
+                content
+                    .overlay {
+                        GeometryReader { proxy in
+                            let width = proxy.size.width
+                            LinearGradient(
+                                colors: [
+                                    .clear,
+                                    Color.white.opacity(0.18),
+                                    .clear
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                            .frame(width: max(width * 0.45, 1))
+                            .rotationEffect(.degrees(18))
+                            .offset(x: phase * width * 1.6)
+                        }
+                        .allowsHitTesting(false)
+                        .clipShape(.rect(cornerRadius: 8))
                     }
-                    .allowsHitTesting(false)
-                    .clipShape(.rect(cornerRadius: 8))
-                }
-                .onAppear {
-                    guard phase < 0 else { return }
-                    withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
-                        phase = 1.1
+                    .onAppear {
+                        guard phase < 0 else { return }
+                        withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                            phase = 1.1
+                        }
                     }
-                }
+            }
         }
     }
 }
@@ -798,7 +864,7 @@ struct FilterPill: View {
         .font(.subheadline)
         .foregroundStyle(isActive ? Color.white : Color.primary)
         .padding(.horizontal, 12)
-        .frame(minHeight: 34)
+        .frame(minHeight: 44)
         .background(isActive ? Color.accentColor : Color.secondary.opacity(0.14))
         .clipShape(Capsule(style: .continuous))
         .contentShape(Capsule(style: .continuous))

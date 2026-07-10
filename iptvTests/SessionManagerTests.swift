@@ -8,10 +8,12 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct SessionManagerTests {
+    private let credentialStore = TestProviderCredentialStore()
+
     @Test func loadWithoutActiveProviderSetsNoProviderState() throws {
         try withTestDatabase { database in
             try resetDatabase(database)
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.loadActive()
 
             #expect(providerManager.hasActiveProvider == false)
@@ -24,7 +26,7 @@ struct SessionManagerTests {
             try resetDatabase(database)
             let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
 
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.loadActive()
 
             #expect(providerManager.hasActiveProvider == true)
@@ -36,7 +38,7 @@ struct SessionManagerTests {
     @Test func initializeCreatesAnActiveProviderSession() throws {
         try withTestDatabase { database in
             try resetDatabase(database)
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.initialize(
                 .init(
                     id: nil,
@@ -45,7 +47,7 @@ struct SessionManagerTests {
                     username: "user",
                     password: "pass",
                     endpoint: #require(URL(string: "https://example.com")),
-                    isActive: true
+                    allowsInsecureHTTP: false
                 )
             )
 
@@ -66,7 +68,7 @@ struct SessionManagerTests {
             try insertProvider(name: "Primary", isActive: true, database: database)
             try insertLibraryRows(database)
 
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.loadActive()
             try providerManager.initialize(
                 .init(
@@ -76,7 +78,7 @@ struct SessionManagerTests {
                     username: "user",
                     password: "pass",
                     endpoint: #require(URL(string: "https://replacement.example.com")),
-                    isActive: true
+                    allowsInsecureHTTP: false
                 )
             )
 
@@ -93,7 +95,7 @@ struct SessionManagerTests {
             let nextProviderID = try insertProvider(name: "Next", isActive: false, database: database)
             try insertLibraryRows(database)
 
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.loadActive()
             try providerManager.change(to: nextProviderID)
 
@@ -114,7 +116,7 @@ struct SessionManagerTests {
             let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
             try insertLibraryRows(database)
 
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.loadActive()
             try providerManager.update(
                 provider: .init(
@@ -124,7 +126,7 @@ struct SessionManagerTests {
                     username: "user",
                     password: "pass",
                     endpoint: #require(URL(string: "https://edited.example.com")),
-                    isActive: true
+                    allowsInsecureHTTP: false
                 )
             )
 
@@ -145,7 +147,7 @@ struct SessionManagerTests {
             try insertProvider(name: "Primary", isActive: true, database: database)
             try insertLibraryRows(database)
 
-            let providerManager = ProviderManager(database: database)
+            let providerManager = ProviderManager(database: database, credentialStore: credentialStore)
             try providerManager.loadActive()
             try providerManager.delete(provider: try #require(providerManager.session?.providerID))
 
@@ -167,7 +169,7 @@ struct SessionManagerTests {
     }
 
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
-        let database = try appDatabase()
+        let database = try testAppDatabase()
         return try operation(database)
     }
 
@@ -197,29 +199,27 @@ struct SessionManagerTests {
         database: any DatabaseWriter
     ) throws -> Provider.ID {
         let endpoint = try #require(URL(string: "https://example.com"))
-        var providerID: Provider.ID?
+        let credentialReference = "session-manager-\(UUID().uuidString)"
+        try credentialStore.setPassword("pass", for: credentialReference)
 
-        try database.write { db in
+        return try database.write { db in
             let provider = try Provider.insert {
                 Provider.Draft(
                     id: nil,
                     kind: .xtream,
                     name: name,
                     username: "user",
-                    password: "pass",
+                    credentialReference: credentialReference,
                     endpoint: endpoint,
+                    allowsInsecureHTTP: false,
+                    isInitialized: isInitialized,
                     isActive: isActive
                 )
             }
             .returning(\.self)
             .fetchOne(db)!
-
-            providerID = provider.id
-
-            try Provider.find(provider.id).update { $0.isInitialized = #bind(isInitialized) }.execute(db)
+            return provider.id
         }
-
-        return try #require(providerID)
     }
 
     private func insertLibraryRows(_ database: any DatabaseWriter) throws {

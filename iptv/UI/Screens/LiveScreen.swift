@@ -12,6 +12,7 @@ struct LiveScreen: View {
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
+    @State private var prefixVisibilityCache = CategoryPrefixVisibilityCache()
 
     @FetchAll
     private var categories: [Category]
@@ -29,31 +30,43 @@ struct LiveScreen: View {
         self._channels = FetchAll(Media.where { $0.type.eq(MediaType.live) })
     }
 
-    private var selectedCategory: Category? {
-        categories.first { $0.id == selectedCategoryID }
+    private var visibilityRequest: CategoryPrefixVisibilityRequest {
+        CategoryPrefixVisibilityRequest(
+            providerID: session.providerID,
+            revision: prefixVisibilityRevision
+        )
     }
 
-    private var selectedHydrationState: SyncManager.CategoryHydrationState {
-        selectedCategory.map { session.hydrationState(for: $0) } ?? .populated(channels.count)
+    private var visibilitySnapshot: CategoryPrefixVisibilitySnapshot? {
+        prefixVisibilityCache.snapshot(for: visibilityRequest)
     }
 
     private var hiddenGroupKeys: Set<String> {
-        _ = prefixVisibilityRevision
-        return CategoryPrefixVisibilityStore.hiddenGroupKeys(for: session.providerID)
+        visibilitySnapshot?.hiddenGroupKeys ?? []
+    }
+
+    private var categoryProjection: LibraryCategoryProjection {
+        LibraryCategoryProjection(categories: categories, hiddenGroupKeys: hiddenGroupKeys)
     }
 
     private var visibleCategories: [Category] {
-        categories
-            .filter { !hiddenGroupKeys.contains(CategoryGrouping.key(for: $0.title)) }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        categoryProjection.selectableCategories
     }
 
-    private var visibleCategoryIDs: [Category.ID] {
-        visibleCategories.map(\.id)
+    private var selectedCategory: Category? {
+        selectedCategoryID.flatMap { categoryProjection.categoryByID[$0] }
     }
 
-    private var visibleGroupKeys: Set<String> {
-        Set(visibleCategories.map { CategoryGrouping.key(for: $0.title) })
+    private var hydrationSnapshot: LibraryHydrationSnapshot {
+        LibraryHydrationSnapshot(
+            categories: categories,
+            media: channels,
+            overrides: session.runtimeHydrationStates
+        )
+    }
+
+    private var selectedHydrationState: SyncManager.CategoryHydrationState {
+        hydrationSnapshot.state(for: selectedCategory)
     }
 
     private var filterState: LibraryFilterState {
@@ -67,7 +80,7 @@ struct LiveScreen: View {
     private var filteredChannels: [Media] {
         LibraryFilterEngine.filteredMedia(
             channels,
-            categories: visibleCategories,
+            categories: categories,
             state: filterState,
             hiddenGroupKeys: hiddenGroupKeys,
             query: searchText
@@ -81,7 +94,7 @@ struct LiveScreen: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if !categories.isEmpty {
+                if visibilitySnapshot != nil, !categories.isEmpty {
                     LiveFilterBar(
                         categories: visibleCategories,
                         selectedCategoryID: $selectedCategoryID,
@@ -99,19 +112,28 @@ struct LiveScreen: View {
             .task(id: selectedCategoryID) {
                 await hydrateSelectedCategoryIfNeeded()
             }
-            .onChange(of: visibleCategoryIDs) { _, ids in
-                if let selectedCategoryID, !ids.contains(selectedCategoryID) {
+            .task(id: visibilityRequest) {
+                prefixVisibilityCache.resolve(visibilityRequest) {
+                    CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
+                }
+            }
+            .onChange(of: categoryProjection.selectableCategoryIDs) { _, _ in
+                if let selectedCategoryID,
+                   !categoryProjection.selectableCategoryIDs.contains(selectedCategoryID) {
                     self.selectedCategoryID = nil
                 }
 
-                selectedGroupKeys = selectedGroupKeys.intersection(visibleGroupKeys)
+                selectedGroupKeys.formIntersection(categoryProjection.selectableGroupKeys)
             }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        if categories.isEmpty {
+        if visibilitySnapshot == nil {
+            ProgressView("Loading category visibility")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if categories.isEmpty {
             liveCategoryEmptyState
         } else if visibleCategories.isEmpty {
             ContentUnavailableView {
@@ -180,7 +202,7 @@ struct LiveScreen: View {
                         } label: {
                             LiveCategoryRow(
                                 category: category,
-                                hydrationState: session.hydrationState(for: category)
+                                hydrationState: hydrationSnapshot.state(for: category)
                             )
                         }
                         .buttonStyle(.plain)
@@ -252,8 +274,12 @@ struct LiveScreen: View {
             } else {
                 List {
                     Section {
+#if os(tvOS)
+                        unavailableGuideCallout
+#else
                         unavailableGuideCallout
                             .listRowSeparator(.hidden)
+#endif
                     }
 
                     Section {
@@ -314,13 +340,13 @@ struct LiveScreen: View {
         } catch is CancellationError {
             return
         } catch {
-            assertionFailure("Failed to hydrate live category: \(error.localizedDescription)")
+            return
         }
     }
 
     private func categoryTitle(for channel: Media) -> String? {
         guard let categoryID = channel.categoryID else { return nil }
-        return categories.first { $0.id == categoryID }?.title
+        return categoryProjection.categoryByID[categoryID]?.title
     }
 }
 

@@ -9,36 +9,10 @@ import SwiftUI
 import SQLiteData
 
 struct SearchScreen: View {
-    private enum SearchScope: String, CaseIterable, Identifiable {
-        case all
-        case movies
-        case series
-
-        var id: Self { self }
-
-        var title: String {
-            switch self {
-            case .all: "All"
-            case .movies: "Movies"
-            case .series: "Series"
-            }
-        }
-
-        func includes(_ type: MediaType) -> Bool {
-            switch self {
-            case .all:
-                type == .movie || type == .series
-            case .movies:
-                type == .movie
-            case .series:
-                type == .series
-            }
-        }
-    }
 
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
+    @State private var prefixVisibilityCache = CategoryPrefixVisibilityCache()
     @Environment(Session.self) private var session
-    @FetchOne(Provider.where(\.isActive)) private var provider: Provider?
     @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var categories: [Category]
     @FetchAll(Media.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var media: [Media]
     @FetchAll private var favorites: [Favorite]
@@ -49,25 +23,49 @@ struct SearchScreen: View {
     @State private var selectedGroupKeys: Set<String> = []
     @State private var minimumRating: Double?
     @State private var sort: BrowseSort = .title
-    @State private var scope: SearchScope = .all
+    @State private var scope: LibrarySearchScope = .all
+
+    private var visibilityRequest: CategoryPrefixVisibilityRequest {
+        CategoryPrefixVisibilityRequest(
+            providerID: session.providerID,
+            revision: prefixVisibilityRevision
+        )
+    }
+
+    private var visibilitySnapshot: CategoryPrefixVisibilitySnapshot? {
+        prefixVisibilityCache.snapshot(for: visibilityRequest)
+    }
 
     private var hiddenGroupKeys: Set<String> {
-        _ = prefixVisibilityRevision
-        return CategoryPrefixVisibilityStore.hiddenGroupKeys(for: provider?.id)
+        visibilitySnapshot?.hiddenGroupKeys ?? []
+    }
+
+    private var categoryProjection: LibraryCategoryProjection {
+        LibraryCategoryProjection(
+            categories: categories,
+            hiddenGroupKeys: hiddenGroupKeys,
+            includedTypes: scope.includedTypes
+        )
     }
 
     private var visibleCategories: [Category] {
-        categories
-            .filter { !hiddenGroupKeys.contains(CategoryGrouping.key(for: $0.title)) }
-            .sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+        categoryProjection.selectableCategories
     }
 
-    private var visibleCategoryIDs: [Category.ID] {
-        visibleCategories.map(\.id)
+    private var hydrationSnapshot: LibraryHydrationSnapshot {
+        LibraryHydrationSnapshot(
+            categories: categories,
+            media: media,
+            overrides: session.runtimeHydrationStates
+        )
     }
 
-    private var visibleGroupKeys: Set<String> {
-        Set(visibleCategories.map { CategoryGrouping.key(for: $0.title) })
+    private var visibleHydrationCoverage: LibraryHydrationCoverage {
+        hydrationSnapshot.coverage(for: visibleCategories)
+    }
+
+    private var scopedMedia: [Media] {
+        media.filter { scope.includes($0.type) }
     }
 
     private var filterState: LibraryFilterState {
@@ -79,37 +77,14 @@ struct SearchScreen: View {
         )
     }
 
-    private var categoryHydrationStates: [SyncManager.CategoryHydrationState] {
-        categories.map { session.hydrationState(for: $0) }
-    }
-
-    private var hasUnhydratedCategories: Bool {
-        categoryHydrationStates.contains(.unhydrated)
-    }
-
-    private var hasLoadingCategories: Bool {
-        categoryHydrationStates.contains(.loading)
-    }
-
-    private var hasFailedCategories: Bool {
-        categoryHydrationStates.contains { state in
-            if case .failed = state { return true }
-            return false
-        }
-    }
-
     private var searchIsActive: Bool {
         !LibraryQueryNormalizer.isEmpty(searchText) || filterState.hasActiveFilters
     }
 
     private var results: [Media] {
-        let scopedMedia = media.filter { item in
-            scope.includes(item.type)
-        }
-
-        return LibraryFilterEngine.filteredMedia(
+        LibraryFilterEngine.filteredMedia(
             scopedMedia,
-            categories: visibleCategories,
+            categories: categories,
             state: filterState,
             hiddenGroupKeys: hiddenGroupKeys,
             query: searchText
@@ -117,19 +92,22 @@ struct SearchScreen: View {
     }
 
     var body: some View {
+        let indexes = LibrarySearchIndexes(
+            providerID: session.providerID,
+            categories: categories,
+            favorites: favorites,
+            watchActivities: watchActivities
+        )
+        let projectedResults = results
+
         NavigationStack {
             VStack(spacing: 0) {
-                if !categories.isEmpty {
+                if visibilitySnapshot != nil, !categories.isEmpty {
                     LibraryFilterBar(
                         categories: visibleCategories,
                         state: Binding(
                             get: { filterState },
-                            set: { nextState in
-                                selectedCategoryID = nextState.selectedCategoryID
-                                selectedGroupKeys = nextState.selectedGroupKeys
-                                minimumRating = nextState.minimumRating
-                                sort = nextState.sort
-                            }
+                            set: apply
                         ),
                         clearFilters: clearFilters
                     )
@@ -137,7 +115,7 @@ struct SearchScreen: View {
                 }
 
                 Picker("Scope", selection: $scope) {
-                    ForEach(SearchScope.allCases) { scope in
+                    ForEach(LibrarySearchScope.allCases) { scope in
                         Text(scope.title).tag(scope)
                     }
                 }
@@ -145,118 +123,152 @@ struct SearchScreen: View {
                 .padding(.horizontal)
                 .padding(.vertical, 10)
 
-                content
+                content(indexes: indexes, results: projectedResults)
             }
             .navigationTitle("Search")
             .searchable(text: $searchText, prompt: "Search Movies and Series")
-            .onChange(of: visibleCategoryIDs) { _, ids in
-                if let selectedCategoryID, !ids.contains(selectedCategoryID) {
-                    self.selectedCategoryID = nil
+            .task(id: visibilityRequest) {
+                prefixVisibilityCache.resolve(visibilityRequest) {
+                    CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
                 }
+            }
+            .onChange(of: scope) { _, _ in
+                retainScopeCompatibleSelections()
+            }
+            .onChange(of: categoryProjection.selectableCategoryIDs) { _, _ in
+                retainScopeCompatibleSelections()
+            }
+        }
+    }
 
-                selectedGroupKeys = selectedGroupKeys.intersection(visibleGroupKeys)
+    private func content(indexes: LibrarySearchIndexes, results: [Media]) -> some View {
+        Group {
+            if visibilitySnapshot == nil {
+                ProgressView("Loading category visibility")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if categories.filter({ scope.includes($0.type) }).isEmpty {
+                ContentUnavailableView {
+                    Label("No searchable \(scope.title.lowercased()) library", systemImage: "magnifyingglass")
+                } description: {
+                    Text("Sync \(scope.title == "All" ? "Movies or Series" : scope.title) before searching.")
+                }
+            } else if visibleCategories.isEmpty {
+                ContentUnavailableView {
+                    Label("All category groups hidden", systemImage: "line.3.horizontal.decrease.circle")
+                } description: {
+                    Text("Clear prefix visibility settings to search the \(scope.title.lowercased()) library.")
+                } actions: {
+                    Button("Clear Prefix Visibility") {
+                        CategoryPrefixVisibilityStore.setHiddenGroupKeys([], for: session.providerID)
+                    }
+                }
+            } else {
+                searchExperience(indexes: indexes, results: results)
+            }
+        }
+    }
+
+    private func searchExperience(indexes: LibrarySearchIndexes, results: [Media]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let message = visibleHydrationCoverage.message {
+                Label(message, systemImage: "externaldrive.badge.questionmark")
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+            }
+
+            if !searchIsActive {
+                if scopedMedia.isEmpty {
+                    ContentUnavailableView {
+                        Label("No local \(scope.title.lowercased()) streams loaded", systemImage: "folder.badge.questionmark")
+                    } description: {
+                        Text("Open a category in Browse to load streams into the local library.")
+                    }
+                } else {
+                    ContentUnavailableView {
+                        Label("Search your library", systemImage: "magnifyingglass")
+                    } description: {
+                        Text("Search local Movies and Series, then narrow results with category group, category, rating, and sort filters.")
+                    }
+                }
+            } else if results.isEmpty {
+                emptyResults
+            } else {
+                List(results) { media in
+                    NavigationLink {
+                        MediaDetailDestination(media: media, categoryTitle: indexes.category(for: media)?.title)
+                    } label: {
+                        SearchResultRow(
+                            media: media,
+                            category: indexes.category(for: media),
+                            isFavorite: indexes.isFavorite(media),
+                            watchActivity: indexes.watchActivity(for: media)
+                        )
+                    }
+                }
+                .listStyle(.plain)
             }
         }
     }
 
     @ViewBuilder
-    private var content: some View {
-        if categories.isEmpty {
+    private var emptyResults: some View {
+        switch LibraryEmptyCriteria(query: searchText, filterState: filterState) {
+        case .none:
+            ContentUnavailableView("No local results", systemImage: "tray")
+        case .queryOnly:
             ContentUnavailableView {
-                Label("No searchable library", systemImage: "magnifyingglass")
+                Label("No titles match your search", systemImage: "magnifyingglass")
             } description: {
-                Text("Sync Movies or Series before searching.")
-            }
-        } else if visibleCategories.isEmpty {
-            ContentUnavailableView {
-                Label("All category groups hidden", systemImage: "line.3.horizontal.decrease.circle")
-            } description: {
-                Text("Clear prefix visibility settings to search the local library.")
+                Text("Try a different title or clear the search.")
             } actions: {
-                Button("Clear Prefix Visibility") {
-                    CategoryPrefixVisibilityStore.setHiddenGroupKeys([], for: provider?.id)
+                Button("Clear Search") {
+                    searchText = ""
                 }
             }
-        } else if media.isEmpty {
+        case .filtersOnly:
             ContentUnavailableView {
-                Label(emptyHydrationTitle, systemImage: emptyHydrationSystemImage)
+                Label("No titles match these filters", systemImage: "line.3.horizontal.decrease.circle")
             } description: {
-                Text(emptyHydrationDescription)
+                Text("Clear the category, group, or rating filters to broaden the local results.")
+            } actions: {
+                Button("Clear Filters", action: clearFilters)
             }
-        } else if !searchIsActive {
+        case .queryAndFilters:
             ContentUnavailableView {
-                Label("Search your library", systemImage: "magnifyingglass")
+                Label("No titles match your search and filters", systemImage: "magnifyingglass")
             } description: {
-                Text("Search local Movies and Series, then narrow results with category group, category, rating, and sort filters.")
-            }
-        } else if results.isEmpty {
-            ContentUnavailableView.search(text: searchText)
-        } else {
-            List(results) { media in
-                NavigationLink {
-                    MediaDetailDestination(media: media, categoryTitle: category(for: media)?.title)
-                } label: {
-                    SearchResultRow(media: media, category: category(for: media), isFavorite: isFavorite(media), watchActivity: watchActivity(for: media))
+                Text("Clear the search and filters to show all locally available titles.")
+            } actions: {
+                Button("Clear Search and Filters") {
+                    clearFilters()
+                    searchText = ""
                 }
             }
-            .listStyle(.plain)
         }
     }
 
-    private func category(for media: Media) -> Category? {
-        guard let categoryID = media.categoryID else { return nil }
-        return categories.first { $0.id == categoryID }
-    }
-
-    private func isFavorite(_ media: Media) -> Bool {
-        favorites.contains {
-            $0.providerID == session.providerID
-                && $0.mediaType == media.type
-                && $0.sourceID == media.sourceID
-        }
-    }
-
-    private func watchActivity(for media: Media) -> WatchActivity? {
-        watchActivities.first {
-            $0.providerID == session.providerID
-                && $0.mediaType == media.type
-                && $0.sourceID == media.sourceID
-                && $0.isResumeEligible
-        }
-    }
 
     private func clearFilters() {
-        selectedCategoryID = nil
-        selectedGroupKeys.removeAll()
-        minimumRating = nil
+        var nextState = filterState
+        nextState.clearFilters()
+        apply(nextState)
     }
 
-    private var emptyHydrationTitle: String {
-        if hasLoadingCategories { return "Loading category streams" }
-        if hasFailedCategories { return "Some categories failed to load" }
-        if hasUnhydratedCategories { return "No hydrated categories" }
-        return "No searchable streams"
+    private func retainScopeCompatibleSelections() {
+        var nextState = filterState
+        nextState.retainSelections(availableIn: visibleCategories)
+        apply(nextState)
     }
 
-    private var emptyHydrationSystemImage: String {
-        if hasLoadingCategories { return "clock.arrow.circlepath" }
-        if hasFailedCategories { return "exclamationmark.triangle" }
-        if hasUnhydratedCategories { return "folder.badge.questionmark" }
-        return "tray"
+    private func apply(_ state: LibraryFilterState) {
+        selectedCategoryID = state.selectedCategoryID
+        selectedGroupKeys = state.selectedGroupKeys
+        minimumRating = state.minimumRating
+        sort = state.sort
     }
 
-    private var emptyHydrationDescription: String {
-        if hasLoadingCategories {
-            return "Search results will appear after the selected category finishes loading."
-        }
-        if hasFailedCategories {
-            return "Retry the failed category from Browse, then search the local library again."
-        }
-        if hasUnhydratedCategories {
-            return "Initial sync stores categories only. Open a category in Browse to lazily load its streams into the local library."
-        }
-        return "The hydrated categories did not contain any Movies or Series streams."
-    }
 }
 
 private struct SearchResultRow: View {

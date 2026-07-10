@@ -17,23 +17,28 @@ final class Session {
     @ObservationIgnored
     private let database: any DatabaseWriter
    
-    private let syncManager: SyncManager
+    @ObservationIgnored
+    private nonisolated let syncManager: SyncManager
+    private let providerPassword: String
     
     // MARK: - State
     var providerID: Provider.ID
     
    // MARK: - Init
-    init(syncManager: SyncManager, providerID: Provider.ID, database: (any DatabaseWriter)? = nil) {
+    init(
+        syncManager: SyncManager,
+        providerID: Provider.ID,
+        providerPassword: String,
+        database: (any DatabaseWriter)? = nil
+    ) {
         @Dependency(\.defaultDatabase) var defaultDatabase
         self.syncManager = syncManager
         self.providerID = providerID
+        self.providerPassword = providerPassword
         self.database = database ?? defaultDatabase
     }
     
     // MARK: - Helper
-    var provider: Provider {
-        return try! database.read { try Provider.find($0, key: providerID) }
-    }
     
     var sync: SyncManager.SyncStatus {
         if syncManager.movieSync == .active || syncManager.seriesSync == .active || syncManager.liveSync == .active { return .active }
@@ -47,6 +52,11 @@ final class Session {
     var movieSyncStatus: SyncManager.SyncStatus { syncManager.movieSync }
     var seriesSyncStatus: SyncManager.SyncStatus { syncManager.seriesSync }
     var liveSyncStatus: SyncManager.SyncStatus { syncManager.liveSync }
+    var runtimeHydrationStates: [Category.ID: SyncManager.CategoryHydrationState] {
+        syncManager.categoryHydrationStates
+    }
+    nonisolated var isCurrent: Bool { syncManager.isCurrent }
+
     func hydrationState(for category: Category) -> SyncManager.CategoryHydrationState {
         if let state = syncManager.categoryHydrationStates[category.id] {
             return state
@@ -68,7 +78,11 @@ final class Session {
     // MARK: - Methods
     @discardableResult
     func runInitialSync() async -> SyncManager.SyncStatus {
-        await syncManager.sync(provider: providerID)
+        await syncManager.sync()
+    }
+
+    func invalidate() {
+        syncManager.invalidate()
     }
     
     func update(_ type: MediaType, in category: Category.ID) async throws {

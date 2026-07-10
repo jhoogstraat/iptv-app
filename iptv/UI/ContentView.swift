@@ -37,6 +37,13 @@ struct ContentView: View {
                 
                 Tab(value: Tabs.search, role: .search) {
                     SearchScreen()
+                        .requireSessionOrElse {
+                            ContentUnavailableView {
+                                Label("No provider configured", systemImage: "magnifyingglass")
+                            } description: {
+                                Text("Add a provider to sync and search movies and series.")
+                            }
+                        }
                 }
                 .customizationID(Tabs.search.customizationID)
 #if !os(macOS) && !os(tvOS)
@@ -65,7 +72,7 @@ struct ContentView: View {
                                     ContentUnavailableView {
                                         Label("Quite empty in here", systemImage: "tray")
                                     } description: {
-                                        Text("Add a provider to start syncing your library and browse movies.")
+                                        Text("Add a provider to start syncing your library and browse series.")
                                     }
                                 }
                         }

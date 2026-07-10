@@ -7,8 +7,8 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 ## Status
 
 - Target state: one root gate decides onboarding versus main shell; one canonical tab model defines app surfaces; feature screens own their internal stacks and detail routing.
-- Implementation status (reviewed 2026-07-06): Partial. `Tabs` is the canonical tab identity model, `ContentView` renders a `sidebarAdaptable` tab shell, Search uses SwiftUI's search role, Movies/Series are session-guarded `NavigationStack`s, browse/search rows route to `MediaDetailDestination`, series detail episode rows route to `EpisodeDetailTile`, and root player presentation is wired through `IPTVApp`, `.withVideoPlayer()`, and macOS `PlayerWindow`.
-- Current gaps: For You, Live, and Favorites are inline placeholders; Downloads delegates to a placeholder `DownloadsScreen`; there is still no central route enum or shared `NavigationPath` for media details.
+- Implementation status (reviewed 2026-07-10): `Tabs` provides stable non-localized customization IDs, `ContentView` renders the `sidebarAdaptable` shell, and every data-backed top-level surface is mounted through `SessionGuard`, including Search. For You, Search, Movies, Series, Live, and Favorites own working local-data experiences; detail routes use `MediaDetailDestination`; player presentation is wired through root full-screen presentation, visionOS window presentation, and macOS `PlayerWindow`.
+- Current gaps: Downloads remains an explicit unsupported screen, and detail navigation still uses feature-local stacks rather than one central route enum or shared `NavigationPath`.
 
 ## User Experience
 
@@ -52,11 +52,9 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 
 ## Current Gaps / Planned Work
 
-- `ContentView` currently inlines the For You placeholder instead of using `ForYouScreen`.
-- Live and Favorites currently use inline placeholders instead of their screen structs.
-- `DownloadsScreen` is mounted from the Downloads tab but still shows a not-implemented state.
-- There is no central route enum or `NavigationPath` for media details.
-- Several top-level surfaces are not complete navigable experiences yet: For You, Live, Favorites, and Downloads.
+- `DownloadsScreen` is mounted from the Downloads tab but remains an explicit not-implemented state.
+- There is no central route enum or shared `NavigationPath` for cross-tab media details.
+- Feature-local navigation is intentional today; a central path should be added only when real cross-tab deep-link requirements exist.
 
 ## Notes for Agents
 

@@ -7,8 +7,8 @@ The app should behave like a local media library backed by a remote Xtream provi
 ## Status
 
 - Target state: provider configuration creates an active session, sync replicates provider catalog data into local persistence, screens render from local models, and playback operates through a stable player state model with swappable renderers.
-- Implementation status (reviewed 2026-07-05): Partial. `IPTVApp` prepares SQLiteData/GRDB dependencies, loads the active provider, injects `ProviderManager` and `Player`, applies `.withVideoPlayer()`, and installs `PlayerWindow` on macOS. `ProviderManager` builds `Session`/`SyncManager`; Movies, Series, Search, and Details read local `Category`/`Media` rows.
-- Important mismatch to preserve in docs: product intent still describes SwiftData as the persistence direction, while current code uses `SQLiteData`/GRDB tables and a single active local library.
+- Implementation status (reviewed 2026-07-10): `IPTVApp` bootstraps SQLiteData/GRDB and active-provider state through a retryable `RecoverableBootstrap`, then injects one `ProviderManager` and `Player` into the root shell, Settings scene, and macOS player window. `ProviderManager` builds `Session`/`SyncManager`; For You, Search, Movies, Series, Live, Favorites, and Details read local catalog/user-state rows.
+- Current persistence uses SQLiteData/GRDB tables and a singleton active-provider catalog. Provider-scoped credentials, prefix visibility, favorites, and watch activity are isolated even though category/media rows still rely on clean catalog replacement during provider changes.
 
 ## User Experience
 
@@ -52,11 +52,11 @@ The app should behave like a local media library backed by a remote Xtream provi
 
 ## Current Gaps / Planned Work
 
-- `IPTVApp.init()` currently uses `try! providerManager.loadActive()` and should eventually provide graceful launch recovery.
-- Current initial sync persists categories but not all stream/media rows; streams are hydrated lazily when categories are opened.
-- Live sync is represented by state but not included in initial sync.
-- Watch progress, favorites, downloads, live channels, recommendations, profile state, and richer metadata are not yet persisted in the visible schema.
-- For You, Favorites, Live, and Downloads are placeholder or planned-only surfaces; Search and media details are partially implemented from local rows.
+- Launch database/provider failures render a retryable bootstrap failure surface instead of terminating the process.
+- Initial sync atomically replaces category families after every required remote fetch succeeds; streams remain lazily hydrated when categories are opened.
+- Live categories participate in initial sync, and live channel rows are persisted by lazy hydration.
+- Watch progress, favorites, prefix visibility, live channels, seasons, episodes, and rich detail metadata are persisted. Downloads, profiles, recommendations, EPG/catch-up, and DVR remain deferred.
+- For You, Search, Movies, Series, Live, Favorites, Settings, and media details are active surfaces. Downloads remains an explicit unsupported surface.
 
 ## Notes for Agents
 

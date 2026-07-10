@@ -75,6 +75,24 @@ struct MediaPlaybackSourceResolverTests {
         #expect(url.absoluteString == "https://stream.example.com/live/live-user/live-pass/7001")
     }
 
+    @Test func credentialsArePercentEncodedAsSinglePathSegments() throws {
+        let resolver = XtreamMediaPlaybackSourceResolver()
+        let provider = makeProvider(
+            endpoint: try #require(URL(string: "https://stream.example.com")),
+            username: "name/with ?#%",
+            password: "päss/word?#%"
+        )
+        let media = makeMedia(sourceID: 42, type: .movie)
+
+        let url = try resolver.playbackURL(for: media, provider: provider)
+
+        #expect(
+            url.absoluteString
+                == "https://stream.example.com/movie/name%2Fwith%20%3F%23%25/p%C3%A4ss%2Fword%3F%23%25/42"
+        )
+        #expect(url.pathComponents.suffix(4) == ["movie", "name/with ?#%", "päss/word?#%", "42"])
+    }
+
     @Test func seriesCollectionRowsAreRejectedAsUnsupportedCollections() throws {
         let resolver = XtreamMediaPlaybackSourceResolver()
         let provider = makeProvider(endpoint: try #require(URL(string: "https://stream.example.com")))

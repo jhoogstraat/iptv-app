@@ -7,7 +7,7 @@ Favorites lets users mark movies, series, channels, and playable items they care
 ## Status
 
 - Target state: favorite state is provider-scoped, persisted locally, visible across relevant surfaces, and available to local discovery/search surfaces.
-- Implementation status (reviewed 2026-07-06): Provider-scoped `favorites` rows are persisted in SQLiteData with media type/source ID, title/artwork/category snapshots, and created/updated timestamps. `FavoriteStore` supports add/remove/toggle/isFavorite and returns favorites joined to live local `Media` rows where possible. `FavoritesScreen` is live in the Favorites tab, and movie, series, episode, player, browse, search, and For You surfaces observe the same persisted state.
+- Implementation status (reviewed 2026-07-10): Provider-scoped `favorites` rows persist in SQLiteData with media type/source ID and display snapshots. `FavoriteStore` reports committed mutation outcomes and joins current catalog/category metadata when available. `FavoritesScreen` is live with adaptive scope controls plus platform-native remove actions for touch, pointer, keyboard, and tvOS focus; details, player, browse, search, and For You observe the same state.
 
 ## User Experience
 

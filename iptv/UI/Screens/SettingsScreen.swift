@@ -94,20 +94,64 @@ private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
 }
 
 struct MediaCount: FetchKeyRequest {
-  struct Value {
-      var movies = 0
-      var series = 0
-      var live = 0
-  }
-  
+    struct Value {
+        var movies = 0
+        var series = 0
+        var live = 0
+        var movieCategories = 0
+        var seriesCategories = 0
+        var liveCategories = 0
+    }
+
     let provider: Provider.ID?
-    
-  func fetch(_ db: Database) throws -> Value {
-    try Value(
-        movies: Media.where { $0.type.eq(MediaType.movie) }.fetchCount(db),
-        series: Media.where { $0.type.eq(MediaType.series) }.fetchCount(db),
-    )
-  }
+
+    func fetch(_ db: Database) throws -> Value {
+        try Value(
+            movies: Media.where { $0.type.eq(MediaType.movie) }.fetchCount(db),
+            series: Media.where { $0.type.eq(MediaType.series) }.fetchCount(db),
+            live: Media.where { $0.type.eq(MediaType.live) }.fetchCount(db),
+            movieCategories: Category.where { $0.type.eq(MediaType.movie) }.fetchCount(db),
+            seriesCategories: Category.where { $0.type.eq(MediaType.series) }.fetchCount(db),
+            liveCategories: Category.where { $0.type.eq(MediaType.live) }.fetchCount(db)
+        )
+    }
+}
+
+struct ProviderSettingsRevisionState {
+    private(set) var loadedRevision: Int?
+
+    mutating func didLoad(revision: Int) {
+        loadedRevision = revision
+    }
+
+    mutating func clear() {
+        loadedRevision = nil
+    }
+
+    func canSave(currentRevision: Int) -> Bool {
+        loadedRevision == currentRevision
+    }
+}
+
+struct ProviderRemovalConfirmationState {
+    private(set) var pendingProviderID: Provider.ID?
+
+    var isPresented: Bool {
+        pendingProviderID != nil
+    }
+
+    mutating func requestRemoval(of providerID: Provider.ID) {
+        pendingProviderID = providerID
+    }
+
+    mutating func cancel() {
+        pendingProviderID = nil
+    }
+
+    mutating func confirm() -> Provider.ID? {
+        defer { pendingProviderID = nil }
+        return pendingProviderID
+    }
 }
 
 struct SettingsScreen: View {
@@ -116,6 +160,10 @@ struct SettingsScreen: View {
     @State private var providerErrorMessage: String?
     @State private var hiddenCategoryGroups: Set<String> = []
     @State private var isPrefixSelectorPresented = false
+    @State private var removalConfirmation = ProviderRemovalConfirmationState()
+    @State private var providerRevisionState = ProviderSettingsRevisionState()
+    @State private var showsProviderValidationErrors = false
+    @State private var isResyncing = false
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
   
     @Dependency(\.defaultDatabase) var database
@@ -136,7 +184,7 @@ struct SettingsScreen: View {
                     settingsDetail(for: destination)
                 }
         }
-        .task(id: providerManager.session) { populateProviderFieldsFromSession() }
+        .task(id: providerManager.revision) { populateProviderFields() }
         .task(id: provider?.id) { loadPrefixVisibility() }
         .task(id: prefixVisibilityRevision) { loadPrefixVisibility() }
         .sheet(isPresented: $isPrefixSelectorPresented) {
@@ -149,15 +197,48 @@ struct SettingsScreen: View {
                 isPrefixSelectorPresented = false
             }
         }
+        .confirmationDialog(
+            "Remove Provider?",
+            isPresented: Binding(
+                get: { removalConfirmation.isPresented },
+                set: { if !$0 { removalConfirmation.cancel() } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Remove Provider", role: .destructive) {
+                confirmProviderRemoval()
+            }
+            Button("Cancel", role: .cancel) {
+                removalConfirmation.cancel()
+            }
+        } message: {
+            Text("This removes the provider, local catalog, favorites, and watch history. This action can’t be undone.")
+        }
     }
     
-    private func populateProviderFieldsFromSession() {
-        guard let session = providerManager.session else { return }
+    private func populateProviderFields() {
+        do {
+            guard let configuration = try providerManager.activeProviderConfiguration() else {
+                providerFields = .init(name: "", endpoint: "", username: "", password: "")
+                providerRevisionState.clear()
+                showsProviderValidationErrors = false
+                providerErrorMessage = nil
+                return
+            }
 
-        providerFields.name = session.provider.name
-        providerFields.endpoint = session.provider.endpoint.absoluteString
-        providerFields.username = session.provider.username
-        providerFields.password = session.provider.password
+            providerFields = .init(
+                name: configuration.name,
+                endpoint: configuration.endpoint.absoluteString,
+                username: configuration.username,
+                password: configuration.password,
+                allowsInsecureHTTP: configuration.allowsInsecureHTTP
+            )
+            providerRevisionState.didLoad(revision: providerManager.revision)
+            showsProviderValidationErrors = false
+            providerErrorMessage = nil
+        } catch {
+            providerErrorMessage = error.localizedDescription
+        }
     }
     
     @ViewBuilder
@@ -173,12 +254,12 @@ struct SettingsScreen: View {
         }
         .formStyle(.grouped)
         .navigationTitle("Settings")
-#if !os(macOS)
+#if !os(macOS) && !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
 #if os(macOS)
         .padding(20)
-        .frame(minWidth: 800, minHeight: 600)
+        .frame(minWidth: 600)
 #endif
     }
     
@@ -215,12 +296,12 @@ struct SettingsScreen: View {
         }
         .formStyle(.grouped)
         .navigationTitle(title)
-#if !os(macOS)
+#if !os(macOS) && !os(tvOS)
         .navigationBarTitleDisplayMode(.inline)
 #endif
 #if os(macOS)
         .padding(20)
-        .frame(minWidth: 520, minHeight: 420)
+        .frame(minWidth: 520)
 #endif
     }
     
@@ -228,41 +309,91 @@ struct SettingsScreen: View {
 
     @ViewBuilder
     private var providerOverviewSection: some View {
-        let hasActiveProvider = providerManager.hasActiveProvider
+        let status = providerStatus
         Section {
             let layout = sizeClass == .compact
                         ? AnyLayout(VStackLayout(spacing: 20))
                         : AnyLayout(HStackLayout(spacing: 20))
 
             layout {
-                StatsCard(title: "Movies", value: "\(mediaCount.movies)", subtitle: "Categories")
-                StatsCard(title: "Series", value: "\(mediaCount.series)", subtitle: "Categories")
-                StatsCard(title: "TV", value: "Soon", subtitle: "Live TV stats will appear here once TV support lands.")
+                StatsCard(title: "Movies", value: "\(mediaCount.movies)", subtitle: categoryCountDescription(mediaCount.movieCategories))
+                StatsCard(title: "Series", value: "\(mediaCount.series)", subtitle: categoryCountDescription(mediaCount.seriesCategories))
+                StatsCard(title: "Live", value: "\(mediaCount.live)", subtitle: categoryCountDescription(mediaCount.liveCategories))
             }
             
             LabeledContent("Status") {
                 HStack(spacing: 6) {
-                    Image(systemName: hasActiveProvider ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                    Text(hasActiveProvider ? "All good" : "Needs Setup")
+                    Image(systemName: status.systemImage)
+                    Text(status.title)
                 }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(hasActiveProvider ? .green : .orange)
+                .foregroundStyle(status.color)
+            }
+
+            if status.title == "Sync Failed", let errorMessage = providerManager.session?.syncErrorMessage {
+                LabeledContent("Sync Error") {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.trailing)
+                }
             }
         }
     }
     
+    private var providerStatus: (title: String, systemImage: String, color: Color) {
+        guard let session = providerManager.session else {
+            return ("Needs Setup", "exclamationmark.circle.fill", .orange)
+        }
+
+        switch session.sync {
+            case .active:
+                return ("Syncing", "arrow.trianglehead.2.clockwise.rotate.90", .blue)
+            case .failure:
+                return ("Sync Failed", "xmark.circle.fill", .red)
+            case .idle, .success:
+                if providerManager.activeProviderIsInitialized {
+                    return ("Ready", "checkmark.circle.fill", .green)
+                }
+                return ("Needs Sync", "exclamationmark.circle.fill", .orange)
+        }
+    }
+
+    private func categoryCountDescription(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "category" : "categories")"
+    }
+
     
+    @ViewBuilder
     private var providerConfigurationSection: some View {
         ProviderEditorSection(
             fields: providerFields,
             sourceKind: provider?.kind ?? .xtream,
             isConfigured: providerManager.hasActiveProvider,
-            isSaving: false,
+            isSaving: isResyncing,
             saveLabel: "Save",
             errorMessage: providerErrorMessage,
+            showsValidationErrors: showsProviderValidationErrors,
             onSave: save,
-            onClear: clear
+            onRemove: clear
         )
+
+        Section {
+            Button {
+                Task { await resync() }
+            } label: {
+                if isResyncing {
+                    Label("Syncing Catalog", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                } else {
+                    Label("Resync Catalog", systemImage: "arrow.trianglehead.2.clockwise.rotate.90")
+                }
+            }
+            .disabled(!providerManager.hasActiveProvider || isResyncing)
+            .accessibilityIdentifier("settings.provider.resync")
+        } header: {
+            Text("Catalog")
+        } footer: {
+            Text("Resync replaces the local catalog from this provider. Favorites and watch history are preserved.")
+        }
     }
     
     private var librarySection: some View {
@@ -376,28 +507,63 @@ struct SettingsScreen: View {
     }
     
     private func save() {
-        guard let provider = providerFields.build(id: provider?.id, kind: provider?.kind ?? .xtream) else {
-            providerErrorMessage = "Please complete all provider fields."
+        showsProviderValidationErrors = true
+        guard let configuration = providerFields.build(
+            id: providerManager.activeProviderID,
+            kind: provider?.kind ?? .xtream
+        ) else {
+            providerErrorMessage = "Correct the highlighted provider fields."
             return
         }
-       
+        guard providerManager.activeProviderID == nil
+                || providerRevisionState.canSave(currentRevision: providerManager.revision)
+        else {
+            providerErrorMessage = "Provider settings changed in another window. Review the refreshed values and save again."
+            populateProviderFields()
+            return
+        }
+
         do {
-            if provider.id != nil {
-                try providerManager.update(provider: provider)
+            if configuration.id != nil {
+                try providerManager.update(
+                    provider: configuration,
+                    expectedRevision: providerRevisionState.loadedRevision
+                )
             } else {
-                try providerManager.initialize(provider)
+                try providerManager.initialize(configuration)
             }
-            providerErrorMessage = nil
+            populateProviderFields()
         } catch {
             providerErrorMessage = error.localizedDescription
+            if case ProviderManagerError.staleProviderRevision = error {
+                populateProviderFields()
+            }
+        }
+    }
+
+    private func resync() async {
+        guard !isResyncing else { return }
+        isResyncing = true
+        providerErrorMessage = nil
+        let result = await providerManager.resyncActiveProvider()
+        isResyncing = false
+
+        if result == .failure {
+            providerErrorMessage = providerManager.session?.syncErrorMessage
+                ?? "The catalog couldn’t be synced. Check the provider settings and try again."
         }
     }
     
     private func clear() {
+        guard let provider else { return }
+        removalConfirmation.requestRemoval(of: provider.id)
+    }
+
+    private func confirmProviderRemoval() {
+        guard let providerID = removalConfirmation.confirm() else { return }
+
         do {
-            if let provider {
-                try providerManager.delete(provider: provider.id)
-            }
+            try providerManager.delete(provider: providerID)
             providerErrorMessage = nil
             providerFields = .init(name: "", endpoint: "", username: "", password: "")
         } catch {
@@ -460,7 +626,7 @@ private struct CategoryPrefixVisibilitySelector: View {
                 }
             }
             .navigationTitle("Visible Prefixes")
-#if !os(macOS)
+#if !os(macOS) && !os(tvOS)
             .navigationBarTitleDisplayMode(.inline)
 #endif
             .searchable(text: $searchText, prompt: "Search Prefixes")

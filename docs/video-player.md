@@ -7,8 +7,8 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-06): Partial. `Player`, `PlaybackBackend`, VLC and AV backends, `PlayerRendererContainer`, `PlayerView`, root presentation, one-time VLC-to-AV fallback, local watch-activity persistence, and provider-scoped favorite toggling exist. `Player.playbackURL(for:)` resolves active-provider Xtream movie, persisted episode, and live channel rows through `MediaPlaybackSourceResolver`, including container extensions when available for movies/episodes. Movie/episode detail actions and Live channel rows can start real playback through the shared player path; live playback does not create resume/watch-progress rows.
-- Current blocker: offline playback, profile-scoped preferences, fully wired episode quick switching, complete quality/chapter UI exposure, and richer live EPG/catch-up player controls remain incomplete.
+- Implementation status (reviewed 2026-07-10): `Player`, VLC/AV backends, stable renderer container, root presentation, and one-time VLC-to-AV fallback are active. AV accepts extensionless HTTP(S) Xtream streams; runtime fallback carries position and play/pause intent; track preferences apply after metadata arrives; live playback rejects seek/rate mutations at the player boundary; ordered watch writes prevent stale progress regression. Episode playback uses the same full-window path as movies, macOS windows dismiss cleanly, visionOS uses its own player window, and tvOS back/focus behavior is explicit.
+- Current gaps: offline playback, profile-scoped preferences, episode quick switching, and richer EPG/catch-up/DVR live controls remain deferred.
 
 ## User Experience
 

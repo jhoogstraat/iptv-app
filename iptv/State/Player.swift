@@ -125,25 +125,36 @@ final class Player {
     private var eventTask: Task<Void, Never>?
     private var sleepTimerTask: Task<Void, Never>?
     private var didFallbackForCurrentItem = false
+    private var lastScheduledProgressByVideoKey: [String: (time: Double, fraction: Double)] = [:]
     private var lastPersistedProgressByVideoKey: [String: (time: Double, fraction: Double)] = [:]
+    private var progressWriteTask: Task<Void, Never>?
+    private var progressWriteSessionStartedAt = Date.distantPast
+    private var progressWriteGeneration: UInt64 = 0
     private var preferredAudioLanguageCode: String?
     private var preferredSubtitleLanguageCode: String?
     private var subtitleEnabledByDefault = false
-    private var didApplyTrackPreferencesForCurrentItem = false
+    private var didApplyAudioPreferenceForCurrentItem = false
+    private var didApplySubtitlePreferenceForCurrentItem = false
     private(set) var currentProviderID: Provider.ID?
     private var pendingResumeTime: Double?
+    private var pendingHandoffTime: Double?
+    private var handoffProgressFloor: Double?
     private var lastEpisodeSwitchAttemptID: Int?
+    @ObservationIgnored
+    private let credentialStore: any ProviderCredentialStoring
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
         database: (any DatabaseWriter)? = nil,
         playbackSourceResolver: (any MediaPlaybackSourceResolving)? = nil,
+        credentialStore: any ProviderCredentialStoring = KeychainProviderCredentialStore(),
         defaults: UserDefaults = .standard
     ) {
         @Dependency(\.defaultDatabase) var defaultDatabase
         self.backendFactory = backendFactory ?? PlaybackBackendFactory()
         self.database = database ?? defaultDatabase
         self.playbackSourceResolver = playbackSourceResolver ?? XtreamMediaPlaybackSourceResolver()
+        self.credentialStore = credentialStore
         self.defaults = defaults
         loadSavedPreferencesForCurrentProfile()
     }
@@ -162,7 +173,10 @@ final class Player {
 
     /// Loads a stream for playback in the requested presentation.
     func load(_ media: Media, presentation: Presentation, autoplay: Bool = true) {
+        persistProgressIfNeeded(force: true)
         currentItem = media
+        currentProviderID = nil
+        pendingResumeTime = nil
         shouldAutoPlay = autoplay
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -174,13 +188,20 @@ final class Player {
         duration = nil
         playbackState = .loading
         self.presentation = presentation
-        didApplyTrackPreferencesForCurrentItem = false
+        didApplyAudioPreferenceForCurrentItem = false
+        didApplySubtitlePreferenceForCurrentItem = false
+        pendingHandoffTime = nil
+        handoffProgressFloor = nil
 
         loadSavedPreferencesForCurrentProfile()
+        if media.type == .live {
+            playbackSpeed = 1
+        }
 
         do {
             let provider = try activeProvider()
             currentProviderID = provider.id
+            beginProgressWriteSession()
             pendingResumeTime = WatchActivityStore.resumeTime(
                 for: media,
                 providerID: provider.id,
@@ -188,8 +209,6 @@ final class Player {
             )
             let url = try playbackSourceResolver.playbackURL(for: media, provider: provider)
             try activateBackend(for: url)
-            refreshAdvancedStateFromBackend()
-            applySavedPreferencesIfPossible()
             try backend?.load(url: url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
         } catch {
@@ -199,6 +218,7 @@ final class Player {
 
     /// Clears any loaded media and resets the player model to its default state.
     func reset() {
+        persistProgressIfNeeded(force: true)
         eventTask?.cancel()
         eventTask = nil
 
@@ -212,11 +232,11 @@ final class Player {
         activeBackendID = nil
         rendererRevision += 1
 
-        persistProgressIfNeeded(force: true)
-
         currentItem = nil
         currentProviderID = nil
         pendingResumeTime = nil
+        pendingHandoffTime = nil
+        handoffProgressFloor = nil
         shouldAutoPlay = true
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
@@ -250,7 +270,9 @@ final class Player {
         volume = 1
         brightness = 0.5
 
-        didApplyTrackPreferencesForCurrentItem = false
+        didApplyAudioPreferenceForCurrentItem = false
+        didApplySubtitlePreferenceForCurrentItem = false
+        lastScheduledProgressByVideoKey.removeAll()
         lastPersistedProgressByVideoKey.removeAll()
     }
 
@@ -258,22 +280,47 @@ final class Player {
         reset()
     }
 
+    func closeAndFlush() async {
+        reset()
+        await progressWriteTask?.value
+    }
+
     // MARK: - Transport control
 
     func play() {
+        shouldAutoPlay = true
+        if isPlaybackComplete {
+            beginProgressWriteSession()
+            isPlaybackComplete = false
+            currentTime = 0
+            backend?.seek(to: 0)
+        }
         backend?.play()
     }
 
     func pause() {
+        shouldAutoPlay = false
         backend?.pause()
     }
 
     func togglePlayback() {
-        backend?.togglePlayback()
+        if isPlaybackComplete || !isPlaying {
+            play()
+        } else {
+            pause()
+        }
     }
 
     func seek(to seconds: Double) {
-        backend?.seek(to: seconds)
+        guard currentItem?.type != .live else {
+            reportUnsupportedControl("Seeking is unavailable for live channels.")
+            return
+        }
+        guard seconds.isFinite else { return }
+        let resolvedTime = max(0, seconds)
+        handoffProgressFloor = nil
+        currentTime = resolvedTime
+        backend?.seek(to: resolvedTime)
     }
 
     // MARK: - Advanced controls
@@ -297,6 +344,11 @@ final class Player {
     }
 
     func setPlaybackSpeed(_ speed: Double) {
+        guard currentItem?.type != .live else {
+            playbackSpeed = 1
+            reportUnsupportedControl("Playback speed is unavailable for live channels.")
+            return
+        }
         let clamped = max(0.5, min(speed, 2.0))
         playbackSpeed = clamped
         backend?.setPlaybackSpeed(clamped)
@@ -486,13 +538,33 @@ final class Player {
     // MARK: - Internals
 
     private func activeProvider() throws -> Provider {
-        guard let provider = try database.read({ db in
+        guard var provider = try database.read({ db in
             try Provider.where(\.isActive).fetchOne(db)
         }) else {
             throw MediaPlaybackSourceResolutionError.missingActiveProvider
         }
+        let scheme = provider.endpoint.scheme?.lowercased()
+        guard scheme == "https" || (scheme == "http" && provider.allowsInsecureHTTP) else {
+            throw MediaPlaybackSourceResolutionError.insecureProviderTransport
+        }
+        guard !provider.credentialReference.isEmpty else {
+            throw MediaPlaybackSourceResolutionError.providerCredentialsUnavailable
+        }
 
-        return provider
+        do {
+            guard let password = try credentialStore.password(for: provider.credentialReference),
+                  !password.isEmpty
+            else {
+                throw MediaPlaybackSourceResolutionError.providerCredentialsUnavailable
+            }
+            provider.password = password
+            return provider
+        } catch is MediaPlaybackSourceResolutionError {
+            throw MediaPlaybackSourceResolutionError.providerCredentialsUnavailable
+        } catch {
+            logger.error("Failed to resolve provider credentials: \(error.localizedDescription, privacy: .public)")
+            throw MediaPlaybackSourceResolutionError.providerCredentialsUnavailable
+        }
     }
 
     private func playbackURL(for media: Media) throws -> URL {
@@ -511,6 +583,8 @@ final class Player {
         backend = selected
         activeBackendID = selected.id
         rendererRevision += 1
+        didApplyAudioPreferenceForCurrentItem = false
+        didApplySubtitlePreferenceForCurrentItem = false
         bindEvents(for: selected)
     }
 
@@ -526,6 +600,8 @@ final class Player {
     }
 
     private func handle(_ event: PlaybackEvent, from backendID: PlaybackBackendID) {
+        guard backendID == activeBackendID else { return }
+
         switch event {
         case .ready(let duration):
             self.duration = duration ?? self.duration
@@ -534,7 +610,7 @@ final class Player {
             errorMessage = nil
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
-            applyPendingResumeSeekIfNeeded()
+            applyPendingSeekIfNeeded()
 
         case .playing:
             isPlaying = true
@@ -555,10 +631,16 @@ final class Player {
             }
 
         case .progress(let currentTime, let duration):
-            self.currentTime = max(0, currentTime)
-            if let duration, duration > 0 {
+            if let duration, duration.isFinite, duration > 0 {
                 self.duration = duration
             }
+            guard currentTime.isFinite else { return }
+            let resolvedTime = max(0, currentTime)
+            if let handoffProgressFloor {
+                guard resolvedTime >= handoffProgressFloor else { return }
+                self.handoffProgressFloor = nil
+            }
+            self.currentTime = resolvedTime
             persistProgressIfNeeded()
 
         case .advancedStateChanged:
@@ -566,6 +648,7 @@ final class Player {
             applySavedPreferencesIfPossible()
 
         case .ended:
+            shouldAutoPlay = false
             isPlaying = false
             isBuffering = false
             isPlaybackComplete = true
@@ -643,32 +726,70 @@ final class Player {
     }
 
     private func applySavedPreferencesIfPossible() {
-        backend?.setPlaybackSpeed(playbackSpeed)
+        let effectiveSpeed = currentItem?.type == .live ? 1 : playbackSpeed
+        backend?.setPlaybackSpeed(effectiveSpeed)
         backend?.setAspectRatio(resolveAspectRatioMode(aspectRatioMode))
         backend?.setAudioDelay(milliseconds: audioDelayMilliseconds)
 
-        guard !didApplyTrackPreferencesForCurrentItem else { return }
-        didApplyTrackPreferencesForCurrentItem = true
-
-        if preferredAudioLanguageCode != nil,
-           let match = audioTracks.first {
-            selectedAudioTrackID = match.id
-            backend?.selectAudioTrack(id: match.id)
-        }
-
-        if subtitleEnabledByDefault {
-            if preferredSubtitleLanguageCode != nil,
-               let match = subtitleTracks.first {
-                selectedSubtitleTrackID = match.id
-                backend?.selectSubtitleTrack(id: match.id)
-            } else if let fallback = subtitleTracks.first {
-                selectedSubtitleTrackID = fallback.id
-                backend?.selectSubtitleTrack(id: fallback.id)
+        if !didApplyAudioPreferenceForCurrentItem {
+            if let preferredAudioLanguageCode {
+                if let match = preferredTrack(in: audioTracks, language: preferredAudioLanguageCode) {
+                    selectedAudioTrackID = match.id
+                    backend?.selectAudioTrack(id: match.id)
+                    didApplyAudioPreferenceForCurrentItem = true
+                }
+            } else {
+                didApplyAudioPreferenceForCurrentItem = true
             }
-        } else {
-            selectedSubtitleTrackID = MediaTrack.subtitleOffID
-            backend?.selectSubtitleTrack(id: MediaTrack.subtitleOffID)
         }
+
+        if !didApplySubtitlePreferenceForCurrentItem {
+            if subtitleEnabledByDefault {
+                if let preferredSubtitleLanguageCode {
+                    if let match = preferredTrack(in: subtitleTracks, language: preferredSubtitleLanguageCode) {
+                        selectedSubtitleTrackID = match.id
+                        backend?.selectSubtitleTrack(id: match.id)
+                        didApplySubtitlePreferenceForCurrentItem = true
+                    }
+                } else if let fallback = subtitleTracks.first(where: \.isDefault) ?? subtitleTracks.first {
+                    selectedSubtitleTrackID = fallback.id
+                    backend?.selectSubtitleTrack(id: fallback.id)
+                    didApplySubtitlePreferenceForCurrentItem = true
+                }
+            } else if !subtitleTracks.isEmpty {
+                selectedSubtitleTrackID = MediaTrack.subtitleOffID
+                backend?.selectSubtitleTrack(id: MediaTrack.subtitleOffID)
+                didApplySubtitlePreferenceForCurrentItem = true
+            }
+        }
+    }
+
+    private func preferredTrack(in tracks: [MediaTrack], language: String) -> MediaTrack? {
+        guard let preferred = normalizedLanguageIdentifier(language) else { return nil }
+        if let exact = tracks.first(where: {
+            normalizedLanguageIdentifier($0.languageCode) == preferred
+        }) {
+            return exact
+        }
+
+        let preferredParts = preferred.split(separator: "-", omittingEmptySubsequences: true)
+        guard preferredParts.count == 1, let primaryLanguage = preferredParts.first else {
+            return nil
+        }
+        return tracks.first {
+            normalizedLanguageIdentifier($0.languageCode)?
+                .split(separator: "-", omittingEmptySubsequences: true)
+                .first == primaryLanguage
+        }
+    }
+
+    private func normalizedLanguageIdentifier(_ rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let normalized = rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "_", with: "-")
+            .lowercased()
+        return normalized.isEmpty ? nil : normalized
     }
 
     private func unavailableReason(for feature: PlayerFeature) -> String? {
@@ -800,7 +921,15 @@ final class Player {
         controlMessage = "Sleep timer finished. Playback paused."
     }
 
-    private func applyPendingResumeSeekIfNeeded() {
+    private func applyPendingSeekIfNeeded() {
+        if let handoffTime = pendingHandoffTime {
+            pendingHandoffTime = nil
+            currentTime = handoffTime
+            handoffProgressFloor = handoffTime
+            backend?.seek(to: handoffTime)
+            return
+        }
+
         guard let resumeTime = pendingResumeTime else { return }
         pendingResumeTime = nil
 
@@ -829,14 +958,17 @@ final class Player {
         }
 
         didFallbackForCurrentItem = true
+        let handoffTime = currentTime.isFinite ? max(0, currentTime) : 0
+        let continuePlaying = shouldAutoPlay
+        pendingHandoffTime = handoffTime > 0 ? handoffTime : nil
+        handoffProgressFloor = handoffTime > 0 ? handoffTime : nil
         logger.info("Attempting automatic playback fallback to AV backend.")
 
         do {
             let url = try playbackURL(for: currentItem)
             try activateBackend(for: url, excluding: [.vlc])
-            refreshAdvancedStateFromBackend()
-            applySavedPreferencesIfPossible()
-            try backend?.load(url: url, autoplay: shouldAutoPlay)
+            try backend?.load(url: url, autoplay: continuePlaying)
+            isPlaying = false
             playbackState = .loading
             errorMessage = nil
         } catch {
@@ -853,64 +985,123 @@ final class Player {
         logger.error("Terminal playback failure: \(message, privacy: .public)")
     }
 
+    private func beginProgressWriteSession() {
+        let now = Date()
+        progressWriteSessionStartedAt = now > progressWriteSessionStartedAt
+            ? now
+            : progressWriteSessionStartedAt.addingTimeInterval(0.000_001)
+        progressWriteGeneration = 0
+
+        if let currentItem, let providerID = currentProviderID {
+            let key = progressKey(for: currentItem, providerID: providerID)
+            lastScheduledProgressByVideoKey[key] = nil
+            lastPersistedProgressByVideoKey[key] = nil
+        }
+    }
+
     private func persistProgressIfNeeded(force: Bool = false) {
         guard let currentItem, let providerID = currentProviderID else { return }
         guard currentItem.type == .movie || currentItem.type == .episode else { return }
+        guard currentTime.isFinite else { return }
 
-        let currentTime = self.currentTime
+        let currentTime = max(0, self.currentTime)
+        guard currentTime > 0 || isPlaybackComplete else { return }
         let duration = self.duration
         let fraction: Double = if let duration, duration > 0 {
             min(max(currentTime / duration, 0), 1)
         } else {
             0
         }
-        let key = "\(providerID):\(currentItem.type.rawValue):\(currentItem.sourceID)"
+        let key = progressKey(for: currentItem, providerID: providerID)
+        let latest = lastScheduledProgressByVideoKey[key] ?? lastPersistedProgressByVideoKey[key]
 
         if !force,
-           let persisted = lastPersistedProgressByVideoKey[key],
-           abs(currentTime - persisted.time) < 10,
-           abs(fraction - persisted.fraction) < 0.05 {
+           let latest,
+           abs(currentTime - latest.time) < 10,
+           abs(fraction - latest.fraction) < 0.05 {
             return
         }
 
-        lastPersistedProgressByVideoKey[key] = (currentTime, fraction)
-        let database = self.database
-
-        Task.detached(priority: .utility) {
-            await WatchActivityStore.recordProgress(
-                for: currentItem,
-                providerID: providerID,
-                currentTime: currentTime,
-                duration: duration,
-                completed: false,
-                database: database
-            )
-        }
+        enqueueProgressWrite(
+            for: currentItem,
+            providerID: providerID,
+            key: key,
+            currentTime: currentTime,
+            duration: duration,
+            completed: isPlaybackComplete,
+            fraction: fraction
+        )
     }
 
     private func markCurrentItemCompleted() {
         guard let currentItem, let providerID = currentProviderID else { return }
         guard currentItem.type == .movie || currentItem.type == .episode else { return }
 
-        let currentTime = max(self.currentTime, duration ?? self.currentTime)
-        let duration = self.duration
-        let key = "\(providerID):\(currentItem.type.rawValue):\(currentItem.sourceID)"
-        lastPersistedProgressByVideoKey[key] = (
-            currentTime,
-            duration.map { $0 > 0 ? min(max(currentTime / $0, 0), 1) : 0 } ?? 0
+        let completedTime = max(currentTime, duration ?? currentTime)
+        currentTime = completedTime
+        let fraction = duration.map { $0 > 0 ? min(max(completedTime / $0, 0), 1) : 0 } ?? 0
+        enqueueProgressWrite(
+            for: currentItem,
+            providerID: providerID,
+            key: progressKey(for: currentItem, providerID: providerID),
+            currentTime: completedTime,
+            duration: duration,
+            completed: true,
+            fraction: fraction
         )
+    }
+
+    private func enqueueProgressWrite(
+        for currentItem: Media,
+        providerID: Provider.ID,
+        key: String,
+        currentTime: Double,
+        duration: Double?,
+        completed: Bool,
+        fraction: Double
+    ) {
+        if progressWriteSessionStartedAt == .distantPast {
+            beginProgressWriteSession()
+        }
+        progressWriteGeneration &+= 1
+        let sessionStartedAt = progressWriteSessionStartedAt
+        let stamp = WatchActivityStore.WriteStamp(
+            sessionStartedAt: sessionStartedAt,
+            generation: progressWriteGeneration
+        )
+        let snapshot = (time: currentTime, fraction: fraction)
+        lastScheduledProgressByVideoKey[key] = snapshot
+        let previousWrite = progressWriteTask
         let database = self.database
 
-        Task.detached(priority: .utility) {
-            await WatchActivityStore.recordProgress(
+        progressWriteTask = Task.detached(priority: .utility) { [weak self] in
+            if let previousWrite {
+                await previousWrite.value
+            }
+            let committed = await WatchActivityStore.recordProgress(
                 for: currentItem,
                 providerID: providerID,
                 currentTime: currentTime,
                 duration: duration,
-                completed: true,
+                completed: completed,
+                writeStamp: stamp,
                 database: database
             )
+            await MainActor.run { [weak self] in
+                guard let self, self.progressWriteSessionStartedAt == sessionStartedAt else { return }
+                if committed {
+                    self.lastPersistedProgressByVideoKey[key] = snapshot
+                } else if let scheduled = self.lastScheduledProgressByVideoKey[key],
+                          scheduled.time == snapshot.time,
+                          scheduled.fraction == snapshot.fraction {
+                    self.lastScheduledProgressByVideoKey[key] = nil
+                }
+            }
         }
+    }
+
+    private func progressKey(for media: Media, providerID: Provider.ID) -> String {
+        "\(providerID):\(media.type.rawValue):\(media.sourceID)"
     }
 
     private static func formatTime(_ rawSeconds: Double) -> String {

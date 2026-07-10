@@ -19,7 +19,7 @@ struct SyncManagerTests {
             #expect(syncManager.seriesSync == .idle)
             #expect(syncManager.liveSync == .idle)
 
-            let result = await syncManager.sync(provider: Provider.ID())
+            let result = await syncManager.sync()
             
             #expect(result == .success)
             #expect(syncManager.initialSyncPhase == .succeeded)
@@ -46,7 +46,7 @@ struct SyncManagerTests {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let syncManager = try makeSyncManager(database: database)
-            let result = await syncManager.sync(provider: Provider.ID())
+            let result = await syncManager.sync()
             #expect(result == .success)
 
             let categories = try await database.read {
@@ -54,7 +54,7 @@ struct SyncManagerTests {
             }
             let movieCategory = try #require(categories.first { $0.sourceID == "100" && $0.type == .movie })
             let emptyMovieCategory = try #require(categories.first { $0.sourceID == "200" && $0.type == .movie })
-            let session = Session(syncManager: syncManager, providerID: Provider.ID(), database: database)
+            let session = Session(syncManager: syncManager, providerID: 1, providerPassword: "pass", database: database)
 
             #expect(session.hydrationState(for: movieCategory) == .unhydrated)
 
@@ -81,14 +81,14 @@ struct SyncManagerTests {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let syncManager = try makeSyncManager(database: database)
-            let result = await syncManager.sync(provider: Provider.ID())
+            let result = await syncManager.sync()
             #expect(result == .success)
 
             let liveCategory = try await database.read { db in
                 let category = try Category.where { $0.sourceID.eq("300").and($0.type.eq(MediaType.live)) }.fetchOne(db)
                 return try #require(category)
             }
-            let session = Session(syncManager: syncManager, providerID: Provider.ID(), database: database)
+            let session = Session(syncManager: syncManager, providerID: 1, providerPassword: "pass", database: database)
 
             #expect(session.hydrationState(for: liveCategory) == .unhydrated)
 
@@ -118,7 +118,7 @@ struct SyncManagerTests {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let syncManager = try makeSyncManager(database: database)
-            let result = await syncManager.sync(provider: Provider.ID())
+            let result = await syncManager.sync()
             #expect(result == .success)
 
             let categories = try await database.read {
@@ -144,7 +144,7 @@ struct SyncManagerTests {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let syncManager = try makeSyncManager(database: database)
-            let result = await syncManager.sync(provider: Provider.ID())
+            let result = await syncManager.sync()
             #expect(result == .success)
 
             let movieCategory = try await database.read { db in
@@ -187,7 +187,7 @@ struct SyncManagerTests {
         try await withTestDatabase { database in
             try resetDatabase(database)
             let syncManager = try makeSyncManager(database: database)
-            let result = await syncManager.sync(provider: Provider.ID())
+            let result = await syncManager.sync()
             #expect(result == .success)
 
             let seriesCategory = try await database.read { db in
@@ -260,22 +260,37 @@ struct SyncManagerTests {
                 username: "user",
                 password: "pass",
             ),
+            providerID: 1,
             database: database
         )
     }
 
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) async throws -> T) async throws -> T {
-        let database = try appDatabase()
+        let database = try testAppDatabase()
         return try await operation(database)
     }
     
     private func resetDatabase(_ database: any DatabaseWriter) throws {
+        let endpoint = try #require(URL(string: "https://example.com"))
         try database.write { db in
             try SeriesSeason.delete().execute(db)
             try CategoryPrefixVisibility.delete().execute(db)
             try Media.delete().execute(db)
             try Category.delete().execute(db)
             try Provider.delete().execute(db)
+            try Provider.insert {
+                Provider.Draft(
+                    id: 1,
+                    kind: .xtream,
+                    name: "Test Provider",
+                    username: "user",
+                    credentialReference: "sync-tests",
+                    endpoint: endpoint,
+                    allowsInsecureHTTP: false,
+                    isInitialized: true,
+                    isActive: true
+                )
+            }.execute(db)
         }
     }
     
