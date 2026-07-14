@@ -263,10 +263,12 @@ struct SearchScreen: View {
     }
 
     private func apply(_ state: LibraryFilterState) {
-        selectedCategoryID = state.selectedCategoryID
-        selectedGroupKeys = state.selectedGroupKeys
-        minimumRating = state.minimumRating
-        sort = state.sort
+        var normalizedState = state
+        normalizedState.retainSelections(availableIn: visibleCategories)
+        selectedCategoryID = normalizedState.selectedCategoryID
+        selectedGroupKeys = normalizedState.selectedGroupKeys
+        minimumRating = normalizedState.minimumRating
+        sort = normalizedState.sort
     }
 
 }
