@@ -4,7 +4,7 @@ import OSLog
 import SQLiteData
 
 /// Deterministic sort options supported by local catalog browse and search surfaces.
-enum BrowseSort: String, CaseIterable, Identifiable, Sendable {
+nonisolated enum BrowseSort: String, CaseIterable, Identifiable, Sendable {
     case title
     case newest
     case rating
@@ -42,7 +42,7 @@ enum BrowseSort: String, CaseIterable, Identifiable, Sendable {
 /// Provider-category grouping derived from the local category title.
 ///
 /// The raw category title is kept intact. The grouping key is a local display/indexing aid only.
-enum CategoryGrouping: Sendable {
+nonisolated enum CategoryGrouping: Sendable {
     static let ungroupedKey = "---"
 
     /// Extracts a provider prefix/group key from a category title.
@@ -68,7 +68,7 @@ enum CategoryGrouping: Sendable {
 ///
 /// Normalization intentionally stays simple and deterministic: trim, lowercase, fold
 /// diacritics/case/width, and collapse repeated whitespace.
-enum LibraryQueryNormalizer: Sendable {
+nonisolated enum LibraryQueryNormalizer: Sendable {
     static func normalized(_ value: String) -> String {
         value
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -92,7 +92,7 @@ enum LibraryQueryNormalizer: Sendable {
 /// Local, composable filters shared by browse and search surfaces.
 ///
 /// Semantics are AND across filter groups and OR within multi-select groups.
-struct LibraryFilterState: Hashable, Sendable {
+nonisolated struct LibraryFilterState: Hashable, Sendable {
     var selectedCategoryID: Category.ID?
     var selectedGroupKeys: Set<String>
     var minimumRating: Double?
@@ -129,14 +129,28 @@ struct LibraryFilterState: Hashable, Sendable {
     }
 
     mutating func retainSelections(availableIn categories: [Category]) {
-        let categoryIDs = Set(categories.map(\.id))
-        if let selectedCategoryID, !categoryIDs.contains(selectedCategoryID) {
-            self.selectedCategoryID = nil
-        }
-
         let groupKeys = Set(categories.map { CategoryGrouping.key(for: $0.title) })
         selectedGroupKeys.formIntersection(groupKeys)
+
+        guard let selectedCategoryID else { return }
+        guard let selectedCategory = categories.first(where: { $0.id == selectedCategoryID }) else {
+            self.selectedCategoryID = nil
+            return
+        }
+
+        let selectedCategoryGroupKey = CategoryGrouping.key(for: selectedCategory.title)
+        if !selectedGroupKeys.isEmpty, !selectedGroupKeys.contains(selectedCategoryGroupKey) {
+            self.selectedCategoryID = nil
+        }
     }
+}
+
+nonisolated struct LibraryFilterRequest: Hashable, Sendable {
+    let media: [Media]
+    let categories: [Category]
+    let state: LibraryFilterState
+    let hiddenGroupKeys: Set<String>
+    let query: String
 }
 
 enum LibraryEmptyCriteria: Equatable, Sendable {
@@ -186,6 +200,19 @@ struct LibraryCategoryProjection: Sendable {
         selectableCategoryIDs = Set(selectableCategories.map(\.id))
         selectableGroupKeys = Set(selectableCategories.map { CategoryGrouping.key(for: $0.title) })
     }
+}
+
+nonisolated enum LibraryCategoryFilterOptions: Sendable {
+    static func categories(
+        _ categories: [Category],
+        matchingGroupKeys: Set<String>
+    ) -> [Category] {
+        guard !matchingGroupKeys.isEmpty else { return categories }
+        return categories.filter {
+            matchingGroupKeys.contains(CategoryGrouping.key(for: $0.title))
+        }
+    }
+
 }
 
 enum LibrarySearchScope: String, CaseIterable, Identifiable, Sendable {
@@ -348,7 +375,7 @@ struct LibrarySearchIndexes: Sendable {
 }
 
 /// Pure local filtering and sorting helpers for catalog media.
-enum LibraryFilterEngine: Sendable {
+nonisolated enum LibraryFilterEngine: Sendable {
     /// Returns media that match all active filter groups, sorted with deterministic tie-breakers.
     static func filteredMedia(
         _ media: [Media],
@@ -362,6 +389,18 @@ enum LibraryFilterEngine: Sendable {
         return media
             .filter { matches($0, categoryByID: categoryByID, state: state, hiddenGroupKeys: hiddenGroupKeys, query: query) }
             .sorted { ordered($0, before: $1, by: state.sort) }
+    }
+
+    static func filteredMedia(inBackground request: LibraryFilterRequest) async -> [Media] {
+        await Task.detached(priority: .userInitiated) {
+            filteredMedia(
+                request.media,
+                categories: request.categories,
+                state: request.state,
+                hiddenGroupKeys: request.hiddenGroupKeys,
+                query: request.query
+            )
+        }.value
     }
 
     /// Evaluates AND-across-groups / OR-within-group filter semantics for one media row.

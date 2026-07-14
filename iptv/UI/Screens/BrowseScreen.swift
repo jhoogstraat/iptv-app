@@ -108,12 +108,7 @@ struct BrowseScreen: View {
                     categories: visibleCategories,
                     state: Binding(
                         get: { filterState },
-                        set: { nextState in
-                            selectedCategoryID = nextState.selectedCategoryID
-                            selectedGroupKeys = nextState.selectedGroupKeys
-                            minimumRating = nextState.minimumRating
-                            sort = nextState.sort
-                        }
+                        set: apply
                     ),
                     clearFilters: clearFilters
                 )
@@ -192,10 +187,12 @@ struct BrowseScreen: View {
     }
 
     private func apply(_ state: LibraryFilterState) {
-        selectedCategoryID = state.selectedCategoryID
-        selectedGroupKeys = state.selectedGroupKeys
-        minimumRating = state.minimumRating
-        sort = state.sort
+        var normalizedState = state
+        normalizedState.retainSelections(availableIn: visibleCategories)
+        selectedCategoryID = normalizedState.selectedCategoryID
+        selectedGroupKeys = normalizedState.selectedGroupKeys
+        minimumRating = normalizedState.minimumRating
+        sort = normalizedState.sort
     }
 
     private func hydrateSelectedCategoryIfNeeded() async {
@@ -233,6 +230,9 @@ struct CoverGridSection: View {
     @Environment(Session.self) private var session
     @FetchAll private var favorites: [Favorite]
     @FetchAll private var watchActivities: [WatchActivity]
+    @State private var displayedMedia: [Media] = []
+    @State private var hasCompletedInitialComputation = false
+    @State private var latestRequest: LibraryFilterRequest?
 
     init(
         type: MediaType,
@@ -262,9 +262,9 @@ struct CoverGridSection: View {
         self.retryHydration = retryHydration
     }
 
-    private var filteredMedia: [Media] {
-        LibraryFilterEngine.filteredMedia(
-            media,
+    private var request: LibraryFilterRequest {
+        LibraryFilterRequest(
+            media: media,
             categories: categories,
             state: filterState,
             hiddenGroupKeys: hiddenGroupKeys,
@@ -288,37 +288,49 @@ struct CoverGridSection: View {
         )
     }
 
-    @ViewBuilder
     var body: some View {
-        if let selectedCategory {
-            switch hydrationState {
-            case .unhydrated:
-                ContentUnavailableView {
-                    Label("Loading \(selectedCategory.title)", systemImage: "clock.arrow.circlepath")
-                } description: {
-                    Text("This category is being hydrated from the provider into the local database.")
+        Group {
+            if let selectedCategory {
+                switch hydrationState {
+                case .unhydrated:
+                    ContentUnavailableView {
+                        Label("Loading \(selectedCategory.title)", systemImage: "clock.arrow.circlepath")
+                    } description: {
+                        Text("This category is being hydrated from the provider into the local database.")
+                    }
+                case .loading:
+                    BrowseLoadingGrid()
+                case .empty:
+                    ContentUnavailableView {
+                        Label("No \(selectedCategory.title) items", systemImage: "tray")
+                    } description: {
+                        Text("The provider returned this category, but no streams were found for it.")
+                    }
+                case let .failed(message):
+                    ContentUnavailableView {
+                        Label("Couldn’t load \(selectedCategory.title)", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(message)
+                    } actions: {
+                        Button("Retry", action: retryHydration)
+                    }
+                case .populated:
+                    populatedGrid
                 }
-            case .loading:
-                BrowseLoadingGrid()
-            case .empty:
-                ContentUnavailableView {
-                    Label("No \(selectedCategory.title) items", systemImage: "tray")
-                } description: {
-                    Text("The provider returned this category, but no streams were found for it.")
-                }
-            case let .failed(message):
-                ContentUnavailableView {
-                    Label("Couldn’t load \(selectedCategory.title)", systemImage: "exclamationmark.triangle")
-                } description: {
-                    Text(message)
-                } actions: {
-                    Button("Retry", action: retryHydration)
-                }
-            case .populated:
+            } else {
                 populatedGrid
             }
-        } else {
-            populatedGrid
+        }
+        .task(id: request) {
+            let currentRequest = request
+            latestRequest = currentRequest
+            let result = await LibraryFilterEngine.filteredMedia(inBackground: currentRequest)
+            guard !Task.isCancelled, latestRequest == currentRequest else { return }
+
+            withAnimation {
+                displayedMedia = result
+                hasCompletedInitialComputation = true
+            }
         }
     }
 
@@ -327,16 +339,17 @@ struct CoverGridSection: View {
         VStack(alignment: .leading, spacing: 12) {
             coverageStatus
 
-            if filteredMedia.isEmpty {
+            if !hasCompletedInitialComputation {
+                BrowseLoadingGrid()
+            } else if displayedMedia.isEmpty {
                 emptyResults
             } else {
                 CoverGrid(
-                    media: filteredMedia,
+                    media: displayedMedia,
                     categories: categories,
                     favoriteContentKeys: favoriteContentKeys,
                     resumableContentKeys: resumableContentKeys
                 )
-                .id(filterState)
                 .transition(.scale(scale: 0.9).combined(with: .opacity))
             }
         }
@@ -394,7 +407,7 @@ struct CoverGridSection: View {
 
 private struct BrowseLoadingGrid: View {
     private let columns = [
-        GridItem(.adaptive(minimum: 150, maximum: 170), spacing: 16, alignment: .top)
+        GridItem(.adaptive(minimum: 150), spacing: 16, alignment: .top)
     ]
 
     var body: some View {
@@ -429,7 +442,6 @@ private struct BrowseLoadingGrid: View {
 
 private struct CoverGrid: View {
     private enum BrowseLayout {
-        static let standardPosterWidth: CGFloat = 170
         static let minimumPosterWidth: CGFloat = 150
         static let posterAspectRatio: CGFloat = 2 / 3
     }
@@ -464,10 +476,7 @@ private struct CoverGrid: View {
     private var gridColumns: [GridItem] {
         [
             GridItem(
-                .adaptive(
-                    minimum: BrowseLayout.minimumPosterWidth,
-                    maximum: BrowseLayout.standardPosterWidth
-                ),
+                .adaptive(minimum: BrowseLayout.minimumPosterWidth),
                 spacing: 16,
                 alignment: .top
             )
@@ -668,6 +677,25 @@ struct LibraryFilterBar: View {
         }
     }
 
+    private var categorySections: Array<(key: String, value: [Category])> {
+        let matchingCategories = LibraryCategoryFilterOptions.categories(
+            categories,
+            matchingGroupKeys: state.selectedGroupKeys
+        )
+        return Dictionary(grouping: matchingCategories) { category in
+            CategoryGrouping.key(for: category.title)
+        }
+        .map { key, value in
+            (
+                key,
+                value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            )
+        }
+        .sorted { lhs, rhs in
+            CategoryGrouping.title(for: lhs.key).localizedStandardCompare(CategoryGrouping.title(for: rhs.key)) == .orderedAscending
+        }
+    }
+
     private var selectedCategory: Category? {
         categories.first { $0.id == state.selectedCategoryID }
     }
@@ -687,54 +715,19 @@ struct LibraryFilterBar: View {
 
                     if state.hasActiveFilters {
                         Button(role: .destructive, action: clearFilters) {
-                            Label("Clear All Filters", systemImage: "xmark.circle")
+                            Label("Remove All", systemImage: "xmark.circle")
                         }
                     }
                 } label: {
                     FilterPill(
-                        title: "Filters",
-                        systemImage: "line.3.horizontal.decrease.circle",
+                        title: state.hasActiveFilters ? "" : "Filters",
+                        systemImage: state.hasActiveFilters ? "xmark.circle" : nil,
                         badgeCount: state.activeFilterCount,
                         isActive: state.hasActiveFilters,
-                        showsChevron: true
+                        showsChevron: !state.hasActiveFilters
                     )
                 }
-                .accessibilityLabel(state.hasActiveFilters ? "\(state.activeFilterCount) filters active" : "No filters active")
-
-                Menu {
-                    Button {
-                        state.selectedCategoryID = nil
-                    } label: {
-                        Label("All Categories", systemImage: state.selectedCategoryID == nil ? "checkmark" : "rectangle.grid.1x2")
-                    }
-
-                    ForEach(groupSections, id: \.key) { section in
-                        Section(CategoryGrouping.title(for: section.key)) {
-                            ForEach(section.value) { category in
-                                Button {
-                                    state.selectedCategoryID = category.id
-                                } label: {
-                                    Label(
-                                        category.title,
-                                        systemImage: state.selectedCategoryID == category.id ? "checkmark" : "folder"
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    FilterPill(
-                        title: selectedCategory?.title ?? "Category",
-                        systemImage: "folder",
-                        isActive: state.selectedCategoryID != nil,
-                        showsChevron: true
-                    )
-                }
-                .accessibilityLabel(
-                    state.selectedCategoryID == nil
-                    ? "Category filter inactive"
-                    : "Category filter active, \(selectedCategory?.title ?? "selected category")"
-                )
+                .accessibilityLabel(state.hasActiveFilters ? "Remove all filters" : "Filters")
 
                 Menu {
                     Button {
@@ -760,7 +753,6 @@ struct LibraryFilterBar: View {
                 } label: {
                     FilterPill(
                         title: state.selectedGroupKeys.isEmpty ? "Group" : activeGroupTitles,
-                        systemImage: "rectangle.3.group",
                         badgeCount: state.selectedGroupKeys.isEmpty ? 0 : state.selectedGroupKeys.count,
                         isActive: !state.selectedGroupKeys.isEmpty,
                         showsChevron: true
@@ -770,6 +762,40 @@ struct LibraryFilterBar: View {
                     state.selectedGroupKeys.isEmpty
                     ? "Group filter inactive"
                     : "Group filter active, \(state.selectedGroupKeys.count) selected"
+                )
+
+                Menu {
+                    Button {
+                        state.selectedCategoryID = nil
+                    } label: {
+                        Label("All Categories", systemImage: state.selectedCategoryID == nil ? "checkmark" : "rectangle.grid.1x2")
+                    }
+
+                    ForEach(categorySections, id: \.key) { section in
+                        Section(CategoryGrouping.title(for: section.key)) {
+                            ForEach(section.value) { category in
+                                Button {
+                                    state.selectedCategoryID = category.id
+                                } label: {
+                                    Label(
+                                        category.title,
+                                        systemImage: state.selectedCategoryID == category.id ? "checkmark" : "folder"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: selectedCategory?.title ?? "Category",
+                        isActive: state.selectedCategoryID != nil,
+                        showsChevron: true
+                    )
+                }
+                .accessibilityLabel(
+                    state.selectedCategoryID == nil
+                    ? "Category filter inactive"
+                    : "Category filter active, \(selectedCategory?.title ?? "selected category")"
                 )
 
                 Menu {
@@ -792,7 +818,6 @@ struct LibraryFilterBar: View {
                 } label: {
                     FilterPill(
                         title: state.minimumRating.map { "\($0.formatted())+ Rating" } ?? "Rating",
-                        systemImage: "star.fill",
                         isActive: state.minimumRating != nil,
                         showsChevron: true
                     )
@@ -815,7 +840,6 @@ struct LibraryFilterBar: View {
                 } label: {
                     FilterPill(
                         title: state.sort.compactTitle,
-                        systemImage: state.sort.systemImage,
                         isActive: state.sort != .title,
                         showsChevron: true
                     )
@@ -831,18 +855,22 @@ struct LibraryFilterBar: View {
 
 struct FilterPill: View {
     let title: String
-    let systemImage: String
+    var systemImage: String? = nil
     var badgeCount = 0
     let isActive: Bool
     let showsChevron: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: systemImage)
+            if let systemImage {
+                Image(systemName: systemImage)
+            }
 
-            Text(title)
-                .fontWeight(.semibold)
-                .lineLimit(1)
+            if !title.isEmpty {
+                Text(title)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+            }
 
             if badgeCount > 0 {
                 Text("\(badgeCount)")

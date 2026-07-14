@@ -80,6 +80,43 @@ struct LibraryFilterEngineTests {
         )
     }
 
+    @Test func backgroundFilteringPreservesSynchronousSemanticsAndOrder() async {
+        let categories = [
+            makeCategory(id: 1, title: "|EN| Action"),
+            makeCategory(id: 2, title: "|NL| Drama"),
+        ]
+        let media = [
+            makeMedia(id: 1, sourceID: 100, title: "Alpha", categoryID: 1, rating: 8.4),
+            makeMedia(id: 2, sourceID: 101, title: "Beta", categoryID: 2, rating: 9.5),
+            makeMedia(id: 3, sourceID: 102, title: "Bravo", categoryID: 1, rating: 9.0),
+            makeMedia(id: 4, sourceID: 103, title: "Charlie", categoryID: 1, rating: 7.9),
+        ]
+        let request = LibraryFilterRequest(
+            media: media,
+            categories: categories,
+            state: LibraryFilterState(
+                selectedCategoryID: 1,
+                selectedGroupKeys: ["EN"],
+                minimumRating: 8,
+                sort: .rating
+            ),
+            hiddenGroupKeys: ["NL"],
+            query: "a"
+        )
+
+        let backgroundResult = await LibraryFilterEngine.filteredMedia(inBackground: request)
+        let synchronousResult = LibraryFilterEngine.filteredMedia(
+            request.media,
+            categories: request.categories,
+            state: request.state,
+            hiddenGroupKeys: request.hiddenGroupKeys,
+            query: request.query
+        )
+
+        #expect(backgroundResult.map(\.id) == synchronousResult.map(\.id))
+        #expect(backgroundResult.map(\.sourceID) == [102, 100])
+    }
+
     @Test func hiddenCategoryRelationshipsRemainAvailableAcrossLibraryProjections() {
         for (offset, type) in [MediaType.movie, .series, .live].enumerated() {
             let base = offset * 10
@@ -152,6 +189,56 @@ struct LibraryFilterEngineTests {
         #expect(state.selectedCategoryID == nil)
         #expect(state.selectedGroupKeys.isEmpty)
         #expect(state.sort == .newest)
+    }
+
+    @Test func categorySelectionClearsWhenSelectedGroupsExcludeItsGroup() {
+        let categories = [
+            makeCategory(id: 1, title: "|EN| Action"),
+            makeCategory(id: 2, title: "|NL| Drama"),
+        ]
+        var state = LibraryFilterState(
+            selectedCategoryID: 1,
+            selectedGroupKeys: ["NL"]
+        )
+
+        state.retainSelections(availableIn: categories)
+
+        #expect(state.selectedCategoryID == nil)
+        #expect(state.selectedGroupKeys == ["NL"])
+    }
+
+    @Test func categorySelectionSurvivesWhenNoGroupIsSelected() {
+        let categories = [
+            makeCategory(id: 1, title: "|EN| Action"),
+            makeCategory(id: 2, title: "|NL| Drama"),
+        ]
+        var state = LibraryFilterState(selectedCategoryID: 1)
+
+        state.retainSelections(availableIn: categories)
+
+        #expect(state.selectedCategoryID == 1)
+        #expect(state.selectedGroupKeys.isEmpty)
+    }
+
+    @Test func categoryOptionsPreserveOrderAndIncludeExplicitUngroupedSelection() {
+        let categories = [
+            makeCategory(id: 1, title: "|EN| Action"),
+            makeCategory(id: 2, title: "|NL| Drama"),
+            makeCategory(id: 3, title: "Kids"),
+            makeCategory(id: 4, title: "|EN| Comedy"),
+        ]
+
+        let selectedOptions = LibraryCategoryFilterOptions.categories(
+            categories,
+            matchingGroupKeys: ["NL", CategoryGrouping.ungroupedKey]
+        )
+        let allOptions = LibraryCategoryFilterOptions.categories(
+            categories,
+            matchingGroupKeys: []
+        )
+
+        #expect(selectedOptions.map(\.id) == [2, 3])
+        #expect(allOptions.map(\.id) == [1, 2, 3, 4])
     }
 
     @Test func scopeVisibleCoverageRemainsPartialForNonemptyAndZeroMatchResults() {

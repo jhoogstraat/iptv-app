@@ -7,7 +7,7 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 ## Status
 
 - Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating is supported; genre, country/language, recency, audio language, and subtitle language remain metadata-backed expansion points that must not appear until populated local fields can support them honestly.
-- Implementation status (reviewed 2026-07-10): `BrowseScreen`, `SearchScreen`, and `LiveScreen` share local filter semantics for category, category group/prefix, minimum rating, normalized text, and deterministic title/newest/rating sorts. Hidden groups are applied consistently to Browse, Search, Live, and For You; full category relationships remain available for filter options even when groups are hidden. Search derivation uses prebuilt category/favorite/activity indexes instead of repeated linear lookups.
+- Implementation status (reviewed 2026-07-10): `BrowseScreen`, `SearchScreen`, and `LiveScreen` share local filter semantics for category, category group/prefix, minimum rating, normalized text, and deterministic title/newest/rating sorts. Group selection leads the filter bar and constrains the category picker to matching groups. Browse computes filtered/sorted results from Sendable local snapshots in a detached user-initiated task, retains the prior grid while a new request runs, rejects cancelled/stale results, and animates only the committed result. Hidden groups are applied consistently to Browse, Search, Live, and For You; full category relationships remain available even when groups are hidden.
 - Current schema limitation: rich metadata can be persisted during list/detail hydration, but filter UI remains limited to fields populated broadly enough to be truthful. Prefix visibility is stored in provider-scoped `CategoryPrefixVisibility` database rows; catalog category/media rows remain singleton active-provider state.
 
 ## User Experience
@@ -20,11 +20,11 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ### Browse Filter Bar UI
 
-- The existing top-left category selector in `BrowseScreen` should become the leading item in a horizontally scrolling filter bar that can host multiple filter buttons.
-- The visual model should follow the official GitHub iOS app filter style: compact rounded pills, dark neutral inactive state, blue active state, concise labels, and chevrons on buttons that open choices.
-- Active filters use a blue-tinted background and high-contrast foreground text. Inactive filters use the standard dark/secondary pill treatment and should remain visually available without competing with active filters.
-- The leftmost control is a filter summary button with a filter icon and numeric badge/count when one or more filters are active. Activating it opens a compact popover/menu that states how many filters are applied and offers a destructive `Clear All Filters` action.
-- The current category selector becomes one filter button in this bar. It should still support quick category selection, but the UI must allow additional sibling filters such as rating, release period, language, genre, audio language, and subtitle language.
+- The filter bar is horizontally scrolling and starts with a summary/remove-all pill, followed by Group, Category, Rating, and Sort pills.
+- Group is multi-select and appears before Category. When groups are selected, the Category menu lists only categories in those groups; clearing group selection restores every visible category.
+- Filter pills use concise text, badges, active colors, chevrons, and minimum touch targets without redundant leading icons. Menu rows retain their explanatory icons.
+- With no active filters, the summary is a text-only `Filters` pill. With active filters, it becomes an icon-only `xmark.circle` remove-all pill with the active count, no chevron, and the VoiceOver label `Remove all filters`; its menu reports the count and offers the destructive `Remove All` action.
+- Category remains a dedicated sibling filter; large future option sets may move to an adaptive searchable selector without changing the shared filter semantics.
 - Filter buttons may choose one of three presentation styles depending on filter shape and platform:
   - Small enum filters use a compact popover/menu with a short set of options, for example release period values such as `This Year`, `Last Year`, decade ranges, or `Custom`.
   - Large option sets use a modal sheet or full-screen selector with an optional search field, selectable rows, checkmarks, cancel/close affordance, and explicit apply/confirm affordance when selection is not committed immediately. Category and language filters should use this pattern when their option count is high.
@@ -38,6 +38,7 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 - Current filter state: `searchText`, selected category, selected category group/prefixes, and minimum rating in browse/search; provider-scoped hidden prefix visibility in Settings.
 - Current sort state: `BrowseSort.title`, `.newest`, and `.rating` are applied in memory with deterministic tie-breakers after local fetches.
 - Current usable fields for exposed filters: normalized `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Media.sourceID`, and `Category.title`.
+- Browse filtering/sorting receives already-fetched `Media` and `Category` snapshots and performs no SQLite or provider work in its detached task.
 - Planned fields for future filters: persisted `Media.genre`, `Media.releaseDate`, `Media.addedAt`, `Media.country`, and real audio/subtitle language metadata once population coverage and UI contracts are implemented.
 
 ## Key Files

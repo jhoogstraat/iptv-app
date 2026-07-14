@@ -7,22 +7,22 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Status
 
 - Target state: detected category prefixes are first-class local organization metadata that can group category pickers, hide/show category groups, and feed search/recommendation filters consistently.
-- Implementation status (reviewed 2026-07-05): Partial. `CategoryGrouping` extracts pipe-delimited prefixes from raw `Category.title`, browse/search filter bars expose category-group selection, `SettingsScreen` can hide detected groups per provider through `CategoryPrefixVisibilityStore`, and `LibraryFilterEngine` applies hidden/selected groups to local results.
-- Current limitation: grouping depends entirely on the raw provider category title; normalized category metadata, language source configuration, database-backed visibility rows, and recommendation consumption are not implemented.
+- Implementation status (reviewed 2026-07-10): `CategoryGrouping` extracts pipe-delimited prefixes from raw `Category.title`; Browse, Search, and Live expose group-first selection; the selected group set constrains category-picker rows; `SettingsScreen` hides detected groups per provider through `CategoryPrefixVisibilityStore`; and `LibraryFilterEngine` applies hidden/selected groups to local results.
+- Current limitation: grouping depends entirely on the raw provider category title; normalized category metadata, language source configuration, and recommendation-facing selected-group filters are not implemented.
 
 ## User Experience
 
-- Category selection should show groups in a predictable order.
+- Group selection appears before category selection in Browse, Search, and Live; selecting groups constrains the category picker to those groups.
 - Unprefixed categories should remain visible under a fallback group.
-- Users should eventually be able to choose visible prefixes so unwanted category groups are hidden across browse, search, and recommendations.
+- Users can hide provider prefix groups in Settings, and those provider-scoped choices apply across Browse, Search, Live, and For You.
 - Language grouping should be configurable separately from raw provider category names when enough metadata exists.
 
 ## Data and State
 
 - Current grouping source: `Category.title`.
 - Current parser: pipe-delimited title pattern, where the first pipe segment becomes the group key.
-- Current browse/search state: selected category and selected category-group keys narrow local `Media` results; Settings persists hidden prefix/group keys by provider ID.
-- Planned state: normalized prefix/group metadata columns or tables, language source configuration, and provider-scoped visibility preferences stored with the local database.
+- Current browse/search/live state: selected category and selected category-group keys narrow local `Media` results. A category is cleared if a later group selection excludes its group, while an empty group selection keeps any valid category.
+- Prefix visibility is persisted per provider in the local `category_prefix_visibility` table and invalidated through the revisioned `CategoryPrefixVisibilityStore` cache.
 
 ## Key Files
 
@@ -42,10 +42,8 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 
 ## Current Gaps / Planned Work
 
-- Prefix visibility persistence currently uses provider-scoped `UserDefaults`, not local database rows.
-- Search and browse consume prefix visibility; recommendation surfaces cannot until `ForYouScreen` is backed by local recommendation queries.
-- The database schema has no prefix/group visibility table or category metadata columns.
-- The current regex is narrow and should be treated as an implementation detail, not the final provider-agnostic parser.
+- Recommendation surfaces apply provider-hidden groups but do not expose interactive selected-group filters.
+- The current regex is intentionally narrow; normalized provider-agnostic grouping metadata and language-source configuration remain planned.
 
 ## Notes for Agents
 

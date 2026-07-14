@@ -97,8 +97,22 @@ struct LiveScreen: View {
                 if visibilitySnapshot != nil, !categories.isEmpty {
                     LiveFilterBar(
                         categories: visibleCategories,
-                        selectedCategoryID: $selectedCategoryID,
-                        selectedGroupKeys: $selectedGroupKeys,
+                        selectedCategoryID: Binding(
+                            get: { selectedCategoryID },
+                            set: { categoryID in
+                                var nextState = filterState
+                                nextState.selectedCategoryID = categoryID
+                                apply(nextState)
+                            }
+                        ),
+                        selectedGroupKeys: Binding(
+                            get: { selectedGroupKeys },
+                            set: { groupKeys in
+                                var nextState = filterState
+                                nextState.selectedGroupKeys = groupKeys
+                                apply(nextState)
+                            }
+                        ),
                         sort: $sort,
                         clearFilters: clearFilters
                     )
@@ -118,12 +132,7 @@ struct LiveScreen: View {
                 }
             }
             .onChange(of: categoryProjection.selectableCategoryIDs) { _, _ in
-                if let selectedCategoryID,
-                   !categoryProjection.selectableCategoryIDs.contains(selectedCategoryID) {
-                    self.selectedCategoryID = nil
-                }
-
-                selectedGroupKeys.formIntersection(categoryProjection.selectableGroupKeys)
+                apply(filterState)
             }
         }
     }
@@ -321,6 +330,14 @@ struct LiveScreen: View {
         sort = .title
     }
 
+    private func apply(_ state: LibraryFilterState) {
+        var normalizedState = state
+        normalizedState.retainSelections(availableIn: visibleCategories)
+        selectedCategoryID = normalizedState.selectedCategoryID
+        selectedGroupKeys = normalizedState.selectedGroupKeys
+        sort = normalizedState.sort
+    }
+
     private func clearFiltersAndSearch() {
         clearFilters()
         searchText = ""
@@ -372,6 +389,25 @@ private struct LiveFilterBar: View {
         }
     }
 
+    private var categorySections: Array<(key: String, value: [Category])> {
+        let matchingCategories = LibraryCategoryFilterOptions.categories(
+            categories,
+            matchingGroupKeys: selectedGroupKeys
+        )
+        return Dictionary(grouping: matchingCategories) { category in
+            CategoryGrouping.key(for: category.title)
+        }
+        .map { key, value in
+            (
+                key,
+                value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+            )
+        }
+        .sorted { lhs, rhs in
+            CategoryGrouping.title(for: lhs.key).localizedStandardCompare(CategoryGrouping.title(for: rhs.key)) == .orderedAscending
+        }
+    }
+
     private var selectedCategory: Category? {
         categories.first { $0.id == selectedCategoryID }
     }
@@ -399,48 +435,19 @@ private struct LiveFilterBar: View {
 
                     if activeFilterCount > 0 {
                         Button(role: .destructive, action: clearFilters) {
-                            Label("Clear All Filters", systemImage: "xmark.circle")
+                            Label("Remove All", systemImage: "xmark.circle")
                         }
                     }
                 } label: {
                     FilterPill(
-                        title: "Filters",
-                        systemImage: "line.3.horizontal.decrease.circle",
+                        title: activeFilterCount > 0 ? "" : "Filters",
+                        systemImage: activeFilterCount > 0 ? "xmark.circle" : nil,
                         badgeCount: activeFilterCount,
                         isActive: activeFilterCount > 0,
-                        showsChevron: true
+                        showsChevron: activeFilterCount == 0
                     )
                 }
-
-                Menu {
-                    Button {
-                        selectedCategoryID = nil
-                    } label: {
-                        Label("All Hydrated Categories", systemImage: selectedCategoryID == nil ? "checkmark" : "rectangle.grid.1x2")
-                    }
-
-                    ForEach(groupSections, id: \.key) { section in
-                        Section(CategoryGrouping.title(for: section.key)) {
-                            ForEach(section.value) { category in
-                                Button {
-                                    selectedCategoryID = category.id
-                                } label: {
-                                    Label(
-                                        category.title,
-                                        systemImage: selectedCategoryID == category.id ? "checkmark" : "folder"
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    FilterPill(
-                        title: selectedCategory?.title ?? "Category",
-                        systemImage: "folder",
-                        isActive: selectedCategoryID != nil,
-                        showsChevron: true
-                    )
-                }
+                .accessibilityLabel(activeFilterCount > 0 ? "Remove all filters" : "Filters")
 
                 Menu {
                     Button {
@@ -466,9 +473,37 @@ private struct LiveFilterBar: View {
                 } label: {
                     FilterPill(
                         title: selectedGroupKeys.isEmpty ? "Group" : activeGroupTitles,
-                        systemImage: "rectangle.3.group",
                         badgeCount: selectedGroupKeys.isEmpty ? 0 : selectedGroupKeys.count,
                         isActive: !selectedGroupKeys.isEmpty,
+                        showsChevron: true
+                    )
+                }
+
+                Menu {
+                    Button {
+                        selectedCategoryID = nil
+                    } label: {
+                        Label("All Hydrated Categories", systemImage: selectedCategoryID == nil ? "checkmark" : "rectangle.grid.1x2")
+                    }
+
+                    ForEach(categorySections, id: \.key) { section in
+                        Section(CategoryGrouping.title(for: section.key)) {
+                            ForEach(section.value) { category in
+                                Button {
+                                    selectedCategoryID = category.id
+                                } label: {
+                                    Label(
+                                        category.title,
+                                        systemImage: selectedCategoryID == category.id ? "checkmark" : "folder"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    FilterPill(
+                        title: selectedCategory?.title ?? "Category",
+                        isActive: selectedCategoryID != nil,
                         showsChevron: true
                     )
                 }
@@ -484,7 +519,6 @@ private struct LiveFilterBar: View {
                 } label: {
                     FilterPill(
                         title: sort.compactTitle,
-                        systemImage: sort.systemImage,
                         isActive: sort != .title,
                         showsChevron: true
                     )
