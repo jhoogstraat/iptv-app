@@ -63,59 +63,63 @@ struct ProviderCredentialSecurityTests {
         }
     }
 
-    @Test func plaintextMigrationMovesSecretThenDropsPasswordColumn() throws {
-        let credentials = TestProviderCredentialStore()
-        let database = try DatabaseQueue()
+    @Test func freshDatabaseCreatesCompleteSchema() throws {
+        let database = try testAppDatabase(credentialStore: TestProviderCredentialStore())
 
-        try database.write { db in
-            try #sql("""
-            CREATE TABLE "providers" (
-                "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-                "name" TEXT NOT NULL,
-                "username" TEXT NOT NULL,
-                "password" TEXT NOT NULL,
-                "endpoint" TEXT NOT NULL,
-                "kind" TEXT NOT NULL DEFAULT 'xtream',
-                "isInitialized" INTEGER NOT NULL DEFAULT 0,
-                "isActive" INTEGER NOT NULL DEFAULT 0,
-                "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            ) STRICT
-            """).execute(db)
-            try #sql("""
-            INSERT INTO "providers" (
-                "name", "username", "password", "endpoint", "kind", "isInitialized", "isActive"
-            ) VALUES (
-                'Legacy', 'legacy-user', 'legacy-secret', 'https://legacy.example.com', 'xtream', 1, 1
-            )
-            """).execute(db)
+        try database.read { db in
+            let expectedTables = [
+                "providers",
+                "categories",
+                "media",
+                "category_prefix_visibility",
+                "series_seasons",
+                "watch_activity",
+                "favorites",
+            ]
+            for table in expectedTables {
+                #expect(try db.tableExists(table))
+            }
+
+            let providerColumns = Set(try db.columns(in: "providers").map(\.name))
+            #expect(providerColumns.contains("credentialReference"))
+            #expect(!providerColumns.contains("password"))
+
+            let mediaColumns = Set(try db.columns(in: "media").map(\.name))
+            #expect(mediaColumns == [
+                "id",
+                "sourceID",
+                "type",
+                "title",
+                "categoryID",
+                "tmdbID",
+                "coverURL",
+                "rating",
+                "updatedAt",
+                "parentSeriesID",
+                "seasonNumber",
+                "episodeNumber",
+                "containerExtension",
+                "synopsis",
+                "releaseDate",
+                "runtimeSeconds",
+                "genre",
+                "cast",
+                "director",
+                "trailer",
+                "addedAt",
+                "backdropURL",
+                "country",
+            ])
+
+            let watchActivityColumns = Set(try db.columns(in: "watch_activity").map(\.name))
+            #expect(watchActivityColumns.contains("writeSessionStartedAt"))
+            #expect(watchActivityColumns.contains("writeGeneration"))
+
+            let watchActivityIndexes = Set(try db.indexes(on: "watch_activity").map(\.name))
+            #expect(watchActivityIndexes.contains("watch_activity_provider_last_watched_idx"))
+            let favoriteIndexes = Set(try db.indexes(on: "favorites").map(\.name))
+            #expect(favoriteIndexes.contains("favorites_provider_updated_idx"))
         }
-
-        try database.write { db in
-            try migrateProviderCredentials(in: db, credentialStore: credentials)
-        }
-
-        let migratedProvider = try database.read { db in
-            let provider = try Provider.where(\.isActive).fetchOne(db)
-            return try #require(provider)
-        }
-        let columns = try database.read { db in
-            try db.columns(in: "providers").map(\.name)
-        }
-
-        #expect(!columns.contains("password"))
-        #expect(migratedProvider.credentialReference == "provider-legacy-1")
-        #expect(migratedProvider.allowsInsecureHTTP == false)
-        #expect(migratedProvider.name == "Legacy")
-        #expect(migratedProvider.username == "legacy-user")
-        #expect(migratedProvider.endpoint.absoluteString == "https://legacy.example.com")
-        #expect(migratedProvider.isInitialized)
-        #expect(migratedProvider.isActive)
-        #expect(credentials.storedPassword(for: migratedProvider.credentialReference) == "legacy-secret")
-
-        let relaunchedManager = ProviderManager(database: database, credentialStore: credentials)
-        try relaunchedManager.loadActive()
-        #expect(relaunchedManager.accessState == .ready)
-        #expect(relaunchedManager.session?.providerID == migratedProvider.id)
     }
 
     @Test func missingOrInaccessibleCredentialIsRecoverableWithoutSending() async throws {
