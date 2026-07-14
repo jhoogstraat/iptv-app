@@ -431,7 +431,14 @@ final class ProviderManager {
                     password: password
                 )
         }
-        let syncManager = SyncManager(service: service, providerID: provider.id, database: database)
+        let syncManager = SyncManager(
+            service: service,
+            providerID: provider.id,
+            providerEndpoint: provider.endpoint,
+            username: provider.username,
+            password: password,
+            database: database
+        )
 
         session = Session(
             syncManager: syncManager,

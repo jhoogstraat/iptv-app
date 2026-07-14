@@ -7,7 +7,7 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 ## Status
 
 - Target state: first launch presents onboarding, captures a provider, runs initial sync, marks the provider initialized only after successful sync, and then routes into the main app shell.
-- Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. Source selection, credentials, syncing, failure/retry, field-level validation, compact-height scrolling, and cancellation-safe back navigation are implemented. Initial sync stops with actionable errors when the provider does not answer, a catalog request stops delivering data, or every required catalog family is empty. Xtream API is supported; M3U8 remains a disabled planned source.
+- Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. Source selection, credentials, syncing, failure/retry, field-level validation, compact-height scrolling, and cancellation-safe back navigation are implemented. Initial sync immediately rejects non-success provider response headers such as proxy HTTP 502, and stops with actionable errors when the provider never answers, a catalog request stops delivering data, or every required catalog family is empty. Xtream API is supported; M3U8 remains a disabled planned source.
 - Current sync scope: initial sync fetches movie, series, and live categories, then atomically replaces the local catalog only after all required category families succeed. Streams/media are hydrated lazily per category.
 - Implementation status (reviewed 2026-07-10): Xtream onboarding and retryable launch recovery are implemented. Successful sync alone marks the provider initialized. M3U8 remains planned.
 
@@ -51,6 +51,7 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 - Successful initial sync marks the provider initialized exactly once and exits onboarding.
 - Failed sync keeps the user in onboarding with an actionable retry path.
 - Initial sync fails within a bounded interval when the provider site cannot be reached or a later catalog response stalls.
+- A non-2xx response from the provider or network proxy fails onboarding as soon as its HTTP headers arrive; sync does not wait for the response body or fallback timeout.
 - A reachable provider must return at least one movie, series, or live category before onboarding can complete.
 - Provider credentials are never hardcoded.
 
