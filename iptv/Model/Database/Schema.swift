@@ -8,7 +8,6 @@
 import OSLog
 import Foundation
 import SQLiteData
-import xtream_swift
 
 func appDatabase(
     path: String? = nil,
@@ -54,7 +53,7 @@ func appDatabase(
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) STRICT
         """).execute(db)
-        
+
         try #sql("""
         CREATE TABLE "categories"(
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -77,6 +76,20 @@ func appDatabase(
             "coverURL" TEXT,
             "rating" REAL,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "parentSeriesID" INTEGER,
+            "seasonNumber" INTEGER,
+            "episodeNumber" INTEGER,
+            "containerExtension" TEXT,
+            "synopsis" TEXT,
+            "releaseDate" TEXT,
+            "runtimeSeconds" INTEGER,
+            "genre" TEXT,
+            "cast" TEXT,
+            "director" TEXT,
+            "trailer" TEXT,
+            "addedAt" TEXT,
+            "backdropURL" TEXT,
+            "country" TEXT,
             UNIQUE ("sourceID", "type"),
             FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
         ) STRICT
@@ -92,127 +105,6 @@ func appDatabase(
             UNIQUE ("providerID", "groupKey"),
             FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
         ) STRICT
-        """).execute(db)
-        
-    }
-    
-    migrator.registerMigration("Normalize provider base endpoints") { db in
-        let providers = try Provider.fetchAll(db)
-        for provider in providers {
-            guard let normalized = try? XtreamEndpoint.normalizeBaseURL(provider.endpoint.absoluteString),
-                  normalized != provider.endpoint
-            else { continue }
-
-            try Provider.find(provider.id).update { $0.endpoint = #bind(normalized) }.execute(db)
-        }
-    }
-
-    migrator.registerMigration("Scope catalog identity and prefix visibility") { db in
-        try #sql("""
-        CREATE TABLE "new_categories"(
-            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "sourceID" TEXT NOT NULL,
-            "type" INTEGER NOT NULL,
-            "title" TEXT NOT NULL,
-            "updatedAt" TEXT,
-            UNIQUE ("sourceID", "type")
-        ) STRICT
-        """).execute(db)
-
-        try #sql("""
-        INSERT INTO "new_categories" ("id", "sourceID", "type", "title", "updatedAt")
-        SELECT "id", "sourceID", "type", "title", "updatedAt" FROM "categories"
-        """).execute(db)
-
-        try #sql("""
-        CREATE TABLE "new_media" (
-            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "sourceID" INTEGER NOT NULL,
-            "type" INTEGER NOT NULL,
-            "title" TEXT NOT NULL,
-            "categoryID" INTEGER,
-            "tmdbID" TEXT,
-            "coverURL" TEXT,
-            "rating" REAL,
-            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE ("sourceID", "type"),
-            FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
-        ) STRICT
-        """).execute(db)
-
-        try #sql("""
-        INSERT INTO "new_media" ("id", "sourceID", "type", "title", "categoryID", "tmdbID", "coverURL", "rating", "updatedAt")
-        SELECT "id", "sourceID", "type", "title", "categoryID", "tmdbID", "coverURL", "rating", "updatedAt" FROM "media"
-        """).execute(db)
-
-        try #sql("""
-        DROP TABLE "media"
-        """).execute(db)
-        try #sql("""
-        DROP TABLE "categories"
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "new_categories" RENAME TO "categories"
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "new_media" RENAME TO "media"
-        """).execute(db)
-
-        try #sql("""
-        CREATE TABLE IF NOT EXISTS "category_prefix_visibility" (
-            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-            "providerID" INTEGER NOT NULL,
-            "groupKey" TEXT NOT NULL,
-            "isHidden" INTEGER NOT NULL DEFAULT 1,
-            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE ("providerID", "groupKey"),
-            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
-        ) STRICT
-        """).execute(db)
-    }
-
-    migrator.registerMigration("Persist media metadata and series episodes") { db in
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "parentSeriesID" INTEGER
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "seasonNumber" INTEGER
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "episodeNumber" INTEGER
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "containerExtension" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "synopsis" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "releaseDate" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "runtimeSeconds" INTEGER
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "genre" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "cast" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "director" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "trailer" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "addedAt" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "backdropURL" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "media" ADD COLUMN "country" TEXT
         """).execute(db)
 
         try #sql("""
@@ -230,9 +122,7 @@ func appDatabase(
             FOREIGN KEY ("seriesID") REFERENCES "media"("id") ON DELETE CASCADE
         ) STRICT
         """).execute(db)
-    }
 
-    migrator.registerMigration("Create provider scoped watch activity") { db in
         try #sql("""
         CREATE TABLE "watch_activity" (
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -247,6 +137,8 @@ func appDatabase(
             "completed" INTEGER NOT NULL DEFAULT 0,
             "lastWatchedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "writeSessionStartedAt" TEXT,
+            "writeGeneration" INTEGER NOT NULL DEFAULT 0,
             UNIQUE ("providerID", "mediaType", "sourceID"),
             FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
         ) STRICT
@@ -256,9 +148,7 @@ func appDatabase(
         CREATE INDEX "watch_activity_provider_last_watched_idx"
         ON "watch_activity" ("providerID", "completed", "lastWatchedAt" DESC)
         """).execute(db)
-    }
 
-    migrator.registerMigration("Create provider scoped favorites") { db in
         try #sql("""
         CREATE TABLE "favorites" (
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -282,21 +172,6 @@ func appDatabase(
         ON "favorites" ("providerID", "updatedAt" DESC)
         """).execute(db)
     }
-
-    migrator.registerMigration("Move provider credentials to Keychain") { db in
-        try migrateProviderCredentials(in: db, credentialStore: credentialStore)
-    }
-
-    migrator.registerMigration("Order watch activity writes") { db in
-        try #sql("""
-        ALTER TABLE "watch_activity"
-        ADD COLUMN "writeSessionStartedAt" TEXT
-        """).execute(db)
-        try #sql("""
-        ALTER TABLE "watch_activity"
-        ADD COLUMN "writeGeneration" INTEGER NOT NULL DEFAULT 0
-        """).execute(db)
-    }
     
     
     try migrator.migrate(database)
@@ -304,58 +179,6 @@ func appDatabase(
     return database
 }
 
-nonisolated func migrateProviderCredentials(
-    in db: Database,
-    credentialStore: any ProviderCredentialStoring
-) throws {
-    let columnNames = Set(try db.columns(in: "providers").map(\.name))
-    guard columnNames.contains("password") else { return }
-
-    let legacyCredentials = try LegacyProviderCredential.fetchAll(db)
-    for credential in legacyCredentials where !credential.password.isEmpty {
-        try credentialStore.setPassword(
-            credential.password,
-            for: ProviderCredentialReference.migrated(providerID: credential.id)
-        )
-    }
-
-    if !columnNames.contains("credentialReference") {
-        try #sql("""
-        ALTER TABLE "providers"
-        ADD COLUMN "credentialReference" TEXT NOT NULL DEFAULT ''
-        """).execute(db)
-    }
-
-    for credential in legacyCredentials {
-        let reference = ProviderCredentialReference.migrated(providerID: credential.id)
-        try #sql("""
-        UPDATE "providers"
-        SET "credentialReference" = \(reference)
-        WHERE "id" = \(credential.id)
-        """).execute(db)
-    }
-
-    if !columnNames.contains("allowsInsecureHTTP") {
-        try #sql("""
-        ALTER TABLE "providers"
-        ADD COLUMN "allowsInsecureHTTP" INTEGER NOT NULL DEFAULT 0
-        """).execute(db)
-    }
-
-    try #sql("""
-    UPDATE "providers" SET "password" = ''
-    """).execute(db)
-
-    try #sql("""
-    ALTER TABLE "providers" DROP COLUMN "password"
-    """).execute(db)
-}
-
-@Table("providers")
-private nonisolated struct LegacyProviderCredential: Sendable {
-    let id: Provider.ID
-    let password: String
-}
 
 enum ProviderSourceKind: String, CaseIterable, Identifiable, Sendable, QueryBindable {
     case xtream = "xtream"
@@ -380,7 +203,7 @@ nonisolated struct Provider: Hashable, Identifiable, Sendable {
 }
 
 @Table("media")
-struct Media: Hashable, Identifiable, Sendable {
+nonisolated struct Media: Hashable, Identifiable, Sendable {
     let id: Int
     let sourceID: Int
     let type: MediaType
