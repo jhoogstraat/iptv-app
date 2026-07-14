@@ -42,6 +42,62 @@ struct SyncManagerTests {
         }
     }
 
+    @Test func syncStopsWhenProviderSiteDoesNotRespond() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(
+                database: database,
+                protocolClass: UnresponsiveXtreamURLProtocol.self,
+                providerResponseTimeout: .milliseconds(20)
+            )
+
+            let result = await syncManager.sync()
+
+            #expect(result == .failure)
+            #expect(syncManager.initialSyncPhase == .failed)
+            #expect(syncManager.movieSync == .failure)
+            #expect(syncManager.lastErrorMessage == "The provider site did not respond. Check the URL and your connection, then try again.")
+        }
+    }
+
+    @Test func syncStopsWhenProviderStopsSendingCatalogData() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(
+                database: database,
+                protocolClass: StalledSeriesXtreamURLProtocol.self,
+                catalogResponseTimeout: .milliseconds(20)
+            )
+
+            let result = await syncManager.sync()
+
+            #expect(result == .failure)
+            #expect(syncManager.initialSyncPhase == .failed)
+            #expect(syncManager.movieSync == .success)
+            #expect(syncManager.seriesSync == .failure)
+            #expect(syncManager.lastErrorMessage == "The provider stopped sending data while syncing series categories. Try again or check the provider service.")
+        }
+    }
+
+    @Test func syncRejectsReachableProviderWithNoCatalogData() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(
+                database: database,
+                protocolClass: EmptyCatalogXtreamURLProtocol.self
+            )
+
+            let result = await syncManager.sync()
+
+            #expect(result == .failure)
+            #expect(syncManager.initialSyncPhase == .failed)
+            #expect(syncManager.movieSync == .failure)
+            #expect(syncManager.seriesSync == .failure)
+            #expect(syncManager.liveSync == .failure)
+            #expect(syncManager.lastErrorMessage == "The provider responded but returned no movie, series, or live categories. Check the credentials and subscription, then try again.")
+        }
+    }
+
     @Test func categoryHydrationStatesReflectLazyCoverage() async throws {
         try await withTestDatabase { database in
             try resetDatabase(database)
@@ -248,9 +304,14 @@ struct SyncManagerTests {
         }
     }
     
-    private func makeSyncManager(database: any DatabaseWriter) throws -> SyncManager {
+    private func makeSyncManager(
+        database: any DatabaseWriter,
+        protocolClass: AnyClass = StubXtreamURLProtocol.self,
+        providerResponseTimeout: Duration = .seconds(15),
+        catalogResponseTimeout: Duration = .seconds(30)
+    ) throws -> SyncManager {
         let urlConfiguration = URLSessionConfiguration.ephemeral
-        urlConfiguration.protocolClasses = [StubXtreamURLProtocol.self]
+        urlConfiguration.protocolClasses = [protocolClass]
         let http = HTTPClient(configuration: urlConfiguration)
 
         return SyncManager(
@@ -261,7 +322,9 @@ struct SyncManagerTests {
                 password: "pass",
             ),
             providerID: 1,
-            database: database
+            database: database,
+            providerResponseTimeout: providerResponseTimeout,
+            catalogResponseTimeout: catalogResponseTimeout
         )
     }
 
@@ -302,6 +365,54 @@ struct SyncManagerTests {
         components.month = month
         components.day = day
         return components.date!
+    }
+}
+
+private final class UnresponsiveXtreamURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {}
+    override func stopLoading() {}
+}
+
+private final class StalledSeriesXtreamURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard requestAction != "get_series_categories" else { return }
+        finish(with: [["category_id": "100", "category_name": "Available"]])
+    }
+
+    override func stopLoading() {}
+}
+
+private final class EmptyCatalogXtreamURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() { finish(with: []) }
+    override func stopLoading() {}
+}
+
+private extension URLProtocol {
+    var requestAction: String? {
+        URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "action" })?
+            .value
+    }
+
+    func finish(with payload: Any) {
+        let data = try! JSONSerialization.data(withJSONObject: payload)
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: data)
+        client?.urlProtocolDidFinishLoading(self)
     }
 }
 

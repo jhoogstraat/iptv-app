@@ -16,6 +16,9 @@ import GRDB
 @MainActor
 @Observable
 final class SyncManager {
+    private static let defaultProviderResponseTimeout = Duration.seconds(15)
+    private static let defaultCatalogResponseTimeout = Duration.seconds(30)
+
     nonisolated final class Ownership: @unchecked Sendable {
         private let lock = NSLock()
         private var current = true
@@ -66,6 +69,8 @@ final class SyncManager {
 
     private let service: XtreamService
     private let providerID: Provider.ID
+    private let providerResponseTimeout: Duration
+    private let catalogResponseTimeout: Duration
     @ObservationIgnored
     private nonisolated let ownership = Ownership()
 
@@ -91,12 +96,16 @@ final class SyncManager {
     init(
         service: XtreamService,
         providerID: Provider.ID,
-        database: (any DatabaseWriter)? = nil
+        database: (any DatabaseWriter)? = nil,
+        providerResponseTimeout: Duration = SyncManager.defaultProviderResponseTimeout,
+        catalogResponseTimeout: Duration = SyncManager.defaultCatalogResponseTimeout
     ) {
         @Dependency(\.defaultDatabase) var defaultDatabase
         self.service = service
         self.providerID = providerID
         self.database = database ?? defaultDatabase
+        self.providerResponseTimeout = providerResponseTimeout
+        self.catalogResponseTimeout = catalogResponseTimeout
     }
 
     func invalidate() {
@@ -148,18 +157,26 @@ final class SyncManager {
         movieSync = .active
         seriesSync = .idle
         liveSync = .idle
-        initialSyncPhase = .syncingMovies
+        initialSyncPhase = .checkingProvider
         categoryHydrationStates.removeAll()
 
         do {
             try checkCurrent(operation)
-            let movieCategories = try await service.getCategories(of: .vod)
+            let movieCategories = try await fetchInitialCategories(
+                of: .vod,
+                timeout: providerResponseTimeout,
+                timeoutError: .providerDidNotRespond
+            )
             try checkCurrent(operation)
             movieSync = .success
 
             seriesSync = .active
             initialSyncPhase = .syncingSeries
-            let seriesCategories = try await service.getCategories(of: .series)
+            let seriesCategories = try await fetchInitialCategories(
+                of: .series,
+                timeout: catalogResponseTimeout,
+                timeoutError: .catalogDataTimedOut(family: "series")
+            )
             try checkCurrent(operation)
             seriesSync = .success
 
@@ -167,9 +184,18 @@ final class SyncManager {
             // previous snapshot in place and fails the initial sync.
             liveSync = .active
             initialSyncPhase = .syncingLive
-            let liveCategories = try await service.getCategories(of: .live)
+            let liveCategories = try await fetchInitialCategories(
+                of: .live,
+                timeout: catalogResponseTimeout,
+                timeoutError: .catalogDataTimedOut(family: "live")
+            )
             try checkCurrent(operation)
             liveSync = .success
+
+            initialSyncPhase = .validatingCatalog
+            guard !movieCategories.isEmpty || !seriesCategories.isEmpty || !liveCategories.isEmpty else {
+                throw InitialSyncError.emptyCatalog
+            }
 
             initialSyncPhase = .replacingCatalog
             try await replaceCatalogCategories(
@@ -190,13 +216,48 @@ final class SyncManager {
             }
 
             guard ownership.isCurrent, operation.isCurrent else { return .idle }
-            if movieSync == .active { movieSync = .failure }
-            if seriesSync == .active { seriesSync = .failure }
-            if liveSync == .active { liveSync = .failure }
+            if error as? InitialSyncError == .emptyCatalog {
+                movieSync = .failure
+                seriesSync = .failure
+                liveSync = .failure
+            } else {
+                if movieSync == .active { movieSync = .failure }
+                if seriesSync == .active { seriesSync = .failure }
+                if liveSync == .active { liveSync = .failure }
+            }
             initialSyncPhase = .failed
             lastErrorMessage = error.localizedDescription
             logger.warning("Initial catalog sync failed: \(error.localizedDescription, privacy: .public)")
             return .failure
+        }
+    }
+
+    private func fetchInitialCategories(
+        of type: Xtream.ContentType,
+        timeout: Duration,
+        timeoutError: InitialSyncError
+    ) async throws -> [Xtream.Category] {
+        let service = service
+
+        do {
+            return try await withThrowingTaskGroup(of: [Xtream.Category].self) { group in
+                group.addTask {
+                    try await service.getCategories(of: type)
+                }
+                group.addTask {
+                    try await Task.sleep(for: timeout)
+                    throw timeoutError
+                }
+
+                defer { group.cancelAll() }
+                guard let categories = try await group.next() else {
+                    throw CancellationError()
+                }
+                return categories
+            }
+        } catch let error as XtreamError where timeoutError == .providerDidNotRespond
+            && (error == .requestFailed || error == .invalidResponse) {
+            throw InitialSyncError.providerDidNotRespond
         }
     }
 
@@ -857,12 +918,31 @@ extension SyncManager {
     enum InitialSyncPhase: Equatable {
         case idle
         case clearingLibrary
+        case checkingProvider
         case syncingMovies
         case syncingSeries
         case syncingLive
+        case validatingCatalog
         case replacingCatalog
         case succeeded
         case failed
+    }
+
+    enum InitialSyncError: Error, LocalizedError, Equatable, Sendable {
+        case providerDidNotRespond
+        case catalogDataTimedOut(family: String)
+        case emptyCatalog
+
+        var errorDescription: String? {
+            switch self {
+                case .providerDidNotRespond:
+                    "The provider site did not respond. Check the URL and your connection, then try again."
+                case .catalogDataTimedOut(let family):
+                    "The provider stopped sending data while syncing \(family) categories. Try again or check the provider service."
+                case .emptyCatalog:
+                    "The provider responded but returned no movie, series, or live categories. Check the credentials and subscription, then try again."
+            }
+        }
     }
 
     enum SyncError: Error {
