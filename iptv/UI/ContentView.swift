@@ -54,13 +54,13 @@ struct ContentView: View {
                     Tab(Tabs.movies.name, systemImage: Tabs.movies.symbol, value: Tabs.movies) {
                         NavigationStack {
                             BrowseScreen(type: .movie)
-                                .requireSessionOrElse {
-                                    ContentUnavailableView {
-                                        Label("Quite empty in here", systemImage: "tray")
-                                    } description: {
-                                        Text("Add a provider to start syncing your library and browse movies.")
-                                    }
-                                }
+                        }
+                        .requireSessionOrElse {
+                            ContentUnavailableView {
+                                Label("Quite empty in here", systemImage: "tray")
+                            } description: {
+                                Text("Add a provider to start syncing your library and browse movies.")
+                            }
                         }
                     }
                     .customizationID(Tabs.movies.customizationID)
@@ -68,13 +68,13 @@ struct ContentView: View {
                     Tab(Tabs.series.name, systemImage: Tabs.series.symbol, value: Tabs.series) {
                         NavigationStack {
                             BrowseScreen(type: .series)
-                                .requireSessionOrElse {
-                                    ContentUnavailableView {
-                                        Label("Quite empty in here", systemImage: "tray")
-                                    } description: {
-                                        Text("Add a provider to start syncing your library and browse series.")
-                                    }
-                                }
+                        }
+                        .requireSessionOrElse {
+                            ContentUnavailableView {
+                                Label("Quite empty in here", systemImage: "tray")
+                            } description: {
+                                Text("Add a provider to start syncing your library and browse series.")
+                            }
                         }
                     }
                     .customizationID(Tabs.series.customizationID)
