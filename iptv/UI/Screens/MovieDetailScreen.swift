@@ -509,10 +509,13 @@ struct SeriesDetailScreen: View {
         var id: String { rawValue }
     }
 
+    static let episodePlaybackPresentation: Presentation = .fullWindow
+
     let series: Media
     let categoryTitle: String?
 
     @Environment(Session.self) private var session
+    @Environment(Player.self) private var player
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FetchOne private var persistedSeries: Media?
@@ -522,6 +525,7 @@ struct SeriesDetailScreen: View {
     @State private var selectedTab: DetailTab = .episodes
     @State private var selectedSeasonNumber: Int?
     @State private var favoriteError: String?
+    @State private var episodePlaybackError: String?
     @State private var enrichmentState = DetailEnrichmentState.idle
     @State private var enrichmentRequestID = 0
     @State private var heroCollapseProgress: CGFloat = 0
@@ -747,6 +751,15 @@ struct SeriesDetailScreen: View {
                     .accessibilityLabel("Favorite error: \(favoriteError)")
                     .frame(maxWidth: 720, alignment: .leading)
             }
+
+            if let episodePlaybackError {
+                Text(episodePlaybackError)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("Playback error: \(episodePlaybackError)")
+                    .frame(maxWidth: 720, alignment: .leading)
+            }
         }
     }
 
@@ -768,8 +781,10 @@ struct SeriesDetailScreen: View {
             } else {
                 LazyVStack(spacing: DetailSpacing.sm) {
                     ForEach(filteredEpisodes) { episode in
-                        NavigationLink {
-                            EpisodeDetailTile(series: currentSeries, episode: episode)
+                        Button {
+                            episodePlaybackError = nil
+                            player.load(episode, presentation: Self.episodePlaybackPresentation)
+                            episodePlaybackError = player.errorMessage
                         } label: {
                             SeriesEpisodeRow(episode: episode)
                         }

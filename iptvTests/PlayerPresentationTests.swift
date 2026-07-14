@@ -8,6 +8,10 @@ struct PlayerPresentationTests {
         #expect(EpisodeDetailTile.playbackPresentation == .fullWindow)
     }
 
+    @Test func seriesEpisodeSelectionRequestsFullWindowPlayer() {
+        #expect(SeriesDetailScreen.episodePlaybackPresentation == .fullWindow)
+    }
+
     @Test func windowPresentationTransitionOpensAndDismissesPlayer() {
         #expect(PlayerWindowPresentationAction.action(from: .inline, to: .fullWindow) == .open)
         #expect(PlayerWindowPresentationAction.action(from: .fullWindow, to: .inline) == .dismiss)
