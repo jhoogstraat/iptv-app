@@ -7,7 +7,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Status
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
-- Implementation status (reviewed 2026-07-14): `SyncManager.sync()` single-flights initial sync, rejects non-2xx provider or proxy response headers before waiting for a body, bounds providers that never answer and later category responses that stall, requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Category hydration is single-flight and reconciles incoming movie/series/live rows by deleting stale rows and updating timestamps. Provider changes invalidate active sync/detail/hydration ownership so stale work cannot commit into a replacement catalog.
+- Implementation status (reviewed 2026-07-14): `SyncManager.sync()` single-flights initial sync, rejects non-2xx provider or proxy response headers before waiting for a body, bounds providers that never answer and later category responses that stall, requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Duplicate initial-sync, category-hydration, and detail-enrichment callers join the active operation instead of cancelling and restarting it. Category hydration reconciles incoming movie/series/live rows by deleting stale rows and updating timestamps. Provider changes invalidate active sync/detail/hydration ownership so stale work cannot commit into a replacement catalog.
 - Current schema: a fresh development database is created complete in one initial `Create tables` registration with provider, category, media, category-prefix-visibility, series-season, watch-activity, and favorites tables plus current indexes and metadata/write-order columns. Provider passwords live only in Keychain behind a database credential reference; `providers` has no plaintext password column. Before release, there is intentionally no compatibility migration chain for older development databases.
 
 ## User Experience
@@ -49,6 +49,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 - Hydrated category media is stored locally and reused by browse/search/detail/live surfaces.
 - Provider changes invalidate old work before clearing/replacing the singleton catalog, preventing stale commits or cross-provider leakage.
 - Sync failures preserve the last good catalog and expose meaningful retry copy.
+- A manual resync keeps an initialized provider in the app shell while work runs or fails; only a successful initial sync is required to enter the shell for a new or connection-edited provider.
 
 ## Current Gaps / Planned Work
 

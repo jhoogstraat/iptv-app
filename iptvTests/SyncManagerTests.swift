@@ -42,6 +42,46 @@ struct SyncManagerTests {
         }
     }
 
+    @Test func duplicateCallersJoinActiveSyncHydrationAndDetailWork() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(database: database)
+
+            async let firstSync = syncManager.sync()
+            async let secondSync = syncManager.sync()
+            let syncResults = await (firstSync, secondSync)
+            #expect(syncResults.0 == .success)
+            #expect(syncResults.1 == .success)
+
+            let movieCategory = try await database.read { db in
+                let category = try Category.where {
+                    $0.sourceID.eq("100").and($0.type.eq(MediaType.movie))
+                }.fetchOne(db)
+                return try #require(category)
+            }
+
+            async let firstHydration: Void = syncManager.updateMovies(in: movieCategory.id)
+            async let secondHydration: Void = syncManager.updateMovies(in: movieCategory.id)
+            _ = try await (firstHydration, secondHydration)
+
+            let movie = try await database.read { db in
+                let media = try Media.where {
+                    $0.sourceID.eq(1).and($0.type.eq(MediaType.movie))
+                }.fetchOne(db)
+                return try #require(media)
+            }
+
+            async let firstDetail: Void = syncManager.enrichDetails(for: movie.id)
+            async let secondDetail: Void = syncManager.enrichDetails(for: movie.id)
+            _ = try await (firstDetail, secondDetail)
+
+            let persistedMovie = try await database.read { db in
+                try Media.find(db, key: movie.id)
+            }
+            #expect(persistedMovie.title == "Detailed Movie")
+        }
+    }
+
     @Test func syncStopsWhenProviderSiteDoesNotRespond() async throws {
         try await withTestDatabase { database in
             try resetDatabase(database)
@@ -131,7 +171,7 @@ struct SyncManagerTests {
             }
             let movieCategory = try #require(categories.first { $0.sourceID == "100" && $0.type == .movie })
             let emptyMovieCategory = try #require(categories.first { $0.sourceID == "200" && $0.type == .movie })
-            let session = Session(syncManager: syncManager, providerID: 1, providerPassword: "pass", database: database)
+            let session = Session(syncManager: syncManager, providerID: 1, database: database)
 
             #expect(session.hydrationState(for: movieCategory) == .unhydrated)
 
@@ -165,7 +205,7 @@ struct SyncManagerTests {
                 let category = try Category.where { $0.sourceID.eq("300").and($0.type.eq(MediaType.live)) }.fetchOne(db)
                 return try #require(category)
             }
-            let session = Session(syncManager: syncManager, providerID: 1, providerPassword: "pass", database: database)
+            let session = Session(syncManager: syncManager, providerID: 1, database: database)
 
             #expect(session.hydrationState(for: liveCategory) == .unhydrated)
 

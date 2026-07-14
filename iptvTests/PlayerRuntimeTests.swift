@@ -184,6 +184,48 @@ struct PlayerRuntimeTests {
         }
     }
 
+    @Test func failedItemHandoffStopsPreviousPlaybackAndClearsPerItemState() async throws {
+        try await withRuntimeDatabase { database, credentials in
+            let backend = RuntimePlaybackBackend(id: .av)
+            backend.currentAudioTracks = [
+                MediaTrack(
+                    id: "english",
+                    kind: .audio,
+                    languageCode: "en",
+                    label: "English",
+                    isDefault: true,
+                    isForced: false
+                )
+            ]
+            let player = Player(
+                backendFactory: PlaybackBackendFactory(builders: [{ backend }]),
+                database: database,
+                playbackSourceResolver: RuntimePlaybackSourceResolver(),
+                credentialStore: credentials
+            )
+
+            player.load(makeMedia(sourceID: 106), presentation: .inline)
+            await Task.yield()
+            backend.send(.ready(duration: 600))
+            backend.send(.playing)
+            try await eventually {
+                player.isPlaying && player.capabilities.supportsAudioTracks
+            }
+
+            credentials.removePassword(for: "runtime-credential")
+            player.load(makeMedia(sourceID: 107), presentation: .inline)
+
+            #expect(backend.stopCount == 1)
+            #expect(player.currentItem?.sourceID == 107)
+            #expect(player.activeBackendID == nil)
+            #expect(!player.isPlaying)
+            #expect(player.audioTracks.isEmpty)
+            #expect(player.capabilities == .unsupported)
+            #expect(player.errorMessage == MediaPlaybackSourceResolutionError.providerCredentialsUnavailable.localizedDescription)
+            await player.closeAndFlush()
+        }
+    }
+
     @Test func avAudioSessionActivationIsInjectedIdempotentAndDeactivatedOnStop() throws {
         let audioSession = RuntimeAudioSessionCoordinator()
         let backend = AVPlaybackBackend(audioSessionCoordinator: audioSession)
@@ -313,6 +355,7 @@ private final class RuntimePlaybackBackend: PlaybackBackend {
     private(set) var playbackSpeeds: [Double] = []
     private(set) var selectedAudioTrackIDs: [String] = []
     private(set) var selectedSubtitleTrackIDs: [String] = []
+    private(set) var stopCount = 0
     var operations: [Operation] = []
 
     init(id: PlaybackBackendID) {
@@ -337,7 +380,9 @@ private final class RuntimePlaybackBackend: PlaybackBackend {
     }
 
     func togglePlayback() {}
-    func stop() {}
+    func stop() {
+        stopCount += 1
+    }
 
     func seek(to seconds: Double) {
         seekTimes.append(seconds)
