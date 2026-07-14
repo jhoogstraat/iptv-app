@@ -60,6 +60,27 @@ struct SyncManagerTests {
         }
     }
 
+    @Test func syncStopsAsSoonAsProxyReturnsBadGateway() async throws {
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let clock = ContinuousClock()
+            let startedAt = clock.now
+            let syncManager = try makeSyncManager(
+                database: database,
+                protocolClass: BadGatewayXtreamURLProtocol.self,
+                providerResponseTimeout: .seconds(5)
+            )
+
+            let result = await syncManager.sync()
+
+            #expect(result == .failure)
+            #expect(clock.now - startedAt < .seconds(1))
+            #expect(syncManager.initialSyncPhase == .failed)
+            #expect(syncManager.movieSync == .failure)
+            #expect(syncManager.lastErrorMessage == "The provider site could not be reached (HTTP 502). Check the URL and provider availability, then try again.")
+        }
+    }
+
     @Test func syncStopsWhenProviderStopsSendingCatalogData() async throws {
         try await withTestDatabase { database in
             try resetDatabase(database)
@@ -322,7 +343,11 @@ struct SyncManagerTests {
                 password: "pass",
             ),
             providerID: 1,
+            providerEndpoint: try #require(URL(string: "https://example.com")),
+            username: "user",
+            password: "pass",
             database: database,
+            providerProbeConfiguration: urlConfiguration,
             providerResponseTimeout: providerResponseTimeout,
             catalogResponseTimeout: catalogResponseTimeout
         )
@@ -366,6 +391,24 @@ struct SyncManagerTests {
         components.day = day
         return components.date!
     }
+}
+
+private final class BadGatewayXtreamURLProtocol: URLProtocol {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 502,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "text/plain"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
 }
 
 private final class UnresponsiveXtreamURLProtocol: URLProtocol {

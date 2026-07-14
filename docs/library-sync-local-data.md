@@ -7,7 +7,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Status
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
-- Implementation status (reviewed 2026-07-14): `SyncManager.sync()` single-flights initial sync, bounds the provider's first response and each subsequent category response, requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Category hydration is single-flight and reconciles incoming movie/series/live rows by deleting stale rows and updating timestamps. Provider changes invalidate active sync/detail/hydration ownership so stale work cannot commit into a replacement catalog.
+- Implementation status (reviewed 2026-07-14): `SyncManager.sync()` single-flights initial sync, rejects non-2xx provider or proxy response headers before waiting for a body, bounds providers that never answer and later category responses that stall, requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Category hydration is single-flight and reconciles incoming movie/series/live rows by deleting stale rows and updating timestamps. Provider changes invalidate active sync/detail/hydration ownership so stale work cannot commit into a replacement catalog.
 - Current schema: a fresh development database is created complete in one initial `Create tables` registration with provider, category, media, category-prefix-visibility, series-season, watch-activity, and favorites tables plus current indexes and metadata/write-order columns. Provider passwords live only in Keychain behind a database credential reference; `providers` has no plaintext password column. Before release, there is intentionally no compatibility migration chain for older development databases.
 
 ## User Experience
@@ -43,7 +43,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Target Acceptance Criteria
 
 - Initial sync preserves the last good catalog until movie, series, and live category fetches all succeed, then replaces catalog rows atomically.
-- Initial sync terminates with actionable failures when the provider does not answer, a later response stalls, or all three category payloads are empty.
+- Initial sync terminates with actionable failures immediately on non-2xx provider/proxy response headers, or after bounded waits when the provider does not answer, a later response stalls, or all three category payloads are empty.
 - Movie, series, and live category sync state is visible to onboarding.
 - Lazy category hydration fetches streams/channels only when needed, reconciles stale children, and stamps `Category.updatedAt` on success.
 - Hydrated category media is stored locally and reused by browse/search/detail/live surfaces.

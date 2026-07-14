@@ -68,6 +68,7 @@ final class SyncManager {
     }
 
     private let service: XtreamService
+    private let providerProbe: ProviderEndpointProbe
     private let providerID: Provider.ID
     private let providerResponseTimeout: Duration
     private let catalogResponseTimeout: Duration
@@ -96,12 +97,22 @@ final class SyncManager {
     init(
         service: XtreamService,
         providerID: Provider.ID,
+        providerEndpoint: URL,
+        username: String,
+        password: String,
         database: (any DatabaseWriter)? = nil,
+        providerProbeConfiguration: URLSessionConfiguration = .ephemeral,
         providerResponseTimeout: Duration = SyncManager.defaultProviderResponseTimeout,
         catalogResponseTimeout: Duration = SyncManager.defaultCatalogResponseTimeout
     ) {
         @Dependency(\.defaultDatabase) var defaultDatabase
         self.service = service
+        self.providerProbe = ProviderEndpointProbe(
+            endpoint: providerEndpoint,
+            username: username,
+            password: password,
+            configuration: providerProbeConfiguration
+        )
         self.providerID = providerID
         self.database = database ?? defaultDatabase
         self.providerResponseTimeout = providerResponseTimeout
@@ -162,10 +173,14 @@ final class SyncManager {
 
         do {
             try checkCurrent(operation)
+            try await checkProviderEndpoint()
+            try checkCurrent(operation)
+
+            initialSyncPhase = .syncingMovies
             let movieCategories = try await fetchInitialCategories(
                 of: .vod,
-                timeout: providerResponseTimeout,
-                timeoutError: .providerDidNotRespond
+                timeout: catalogResponseTimeout,
+                timeoutError: .catalogDataTimedOut(family: "movie")
             )
             try checkCurrent(operation)
             movieSync = .success
@@ -232,6 +247,28 @@ final class SyncManager {
         }
     }
 
+    private func checkProviderEndpoint() async throws {
+        let providerProbe = providerProbe
+        let timeout = providerResponseTimeout
+
+        do {
+            try await withThrowingTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    try await providerProbe.check()
+                }
+                group.addTask {
+                    try await Task.sleep(for: timeout)
+                    throw InitialSyncError.providerDidNotRespond
+                }
+
+                defer { group.cancelAll() }
+                _ = try await group.next()
+            }
+        } catch let error as URLError where error.code != .cancelled {
+            throw InitialSyncError.providerDidNotRespond
+        }
+    }
+
     private func fetchInitialCategories(
         of type: Xtream.ContentType,
         timeout: Duration,
@@ -239,25 +276,20 @@ final class SyncManager {
     ) async throws -> [Xtream.Category] {
         let service = service
 
-        do {
-            return try await withThrowingTaskGroup(of: [Xtream.Category].self) { group in
-                group.addTask {
-                    try await service.getCategories(of: type)
-                }
-                group.addTask {
-                    try await Task.sleep(for: timeout)
-                    throw timeoutError
-                }
-
-                defer { group.cancelAll() }
-                guard let categories = try await group.next() else {
-                    throw CancellationError()
-                }
-                return categories
+        return try await withThrowingTaskGroup(of: [Xtream.Category].self) { group in
+            group.addTask {
+                try await service.getCategories(of: type)
             }
-        } catch let error as XtreamError where timeoutError == .providerDidNotRespond
-            && (error == .requestFailed || error == .invalidResponse) {
-            throw InitialSyncError.providerDidNotRespond
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw timeoutError
+            }
+
+            defer { group.cancelAll() }
+            guard let categories = try await group.next() else {
+                throw CancellationError()
+            }
+            return categories
         }
     }
 
@@ -930,6 +962,7 @@ extension SyncManager {
 
     enum InitialSyncError: Error, LocalizedError, Equatable, Sendable {
         case providerDidNotRespond
+        case providerHTTPError(statusCode: Int)
         case catalogDataTimedOut(family: String)
         case emptyCatalog
 
@@ -937,6 +970,10 @@ extension SyncManager {
             switch self {
                 case .providerDidNotRespond:
                     "The provider site did not respond. Check the URL and your connection, then try again."
+                case .providerHTTPError(let statusCode) where [502, 503, 504].contains(statusCode):
+                    "The provider site could not be reached (HTTP \(statusCode)). Check the URL and provider availability, then try again."
+                case .providerHTTPError(let statusCode):
+                    "The provider rejected the initial request (HTTP \(statusCode)). Check the URL and credentials, then try again."
                 case .catalogDataTimedOut(let family):
                     "The provider stopped sending data while syncing \(family) categories. Try again or check the provider service."
                 case .emptyCatalog:
@@ -947,6 +984,138 @@ extension SyncManager {
 
     enum SyncError: Error {
         case noSourceIDFound(Category.ID)
+    }
+}
+
+private struct ProviderEndpointProbe: Sendable {
+    private let request: URLRequest
+    private let configuration: URLSessionConfiguration
+
+    init(
+        endpoint: URL,
+        username: String,
+        password: String,
+        configuration: URLSessionConfiguration
+    ) {
+        var components = URLComponents(
+            url: XtreamEndpoint.playerAPIURL(from: endpoint),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [
+            URLQueryItem(name: "username", value: username),
+            URLQueryItem(name: "password", value: password),
+            URLQueryItem(name: "action", value: "get_vod_categories"),
+        ]
+        self.request = URLRequest(url: components.url!)
+
+        let configuration = (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        configuration.waitsForConnectivity = false
+        self.configuration = configuration
+    }
+
+    func check() async throws {
+        let response = try await ProviderResponseHeaderRequest(
+            request: request,
+            configuration: configuration
+        ).response()
+        guard (200..<300).contains(response.statusCode) else {
+            throw SyncManager.InitialSyncError.providerHTTPError(
+                statusCode: response.statusCode
+            )
+        }
+    }
+}
+
+private final class ProviderResponseHeaderRequest: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let request: URLRequest
+    private let configuration: URLSessionConfiguration
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<HTTPURLResponse, Error>?
+    private var session: URLSession?
+    private var task: URLSessionDataTask?
+    private var isCancelled = false
+
+    init(request: URLRequest, configuration: URLSessionConfiguration) {
+        self.request = request
+        self.configuration = configuration
+    }
+
+    func response() async throws -> HTTPURLResponse {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                guard !isCancelled else {
+                    lock.unlock()
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+
+                self.continuation = continuation
+                let session = URLSession(
+                    configuration: configuration,
+                    delegate: self,
+                    delegateQueue: nil
+                )
+                let task = session.dataTask(with: request)
+                self.session = session
+                self.task = task
+                lock.unlock()
+                task.resume()
+            }
+        } onCancel: {
+            self.cancel()
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
+    ) {
+        completionHandler(.cancel)
+        guard let response = response as? HTTPURLResponse else {
+            finish(.failure(SyncManager.InitialSyncError.providerDidNotRespond))
+            return
+        }
+        finish(.success(response))
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: (any Error)?
+    ) {
+        guard let error else {
+            finish(.failure(SyncManager.InitialSyncError.providerDidNotRespond))
+            return
+        }
+        finish(.failure(error))
+    }
+
+    private func cancel() {
+        lock.lock()
+        isCancelled = true
+        lock.unlock()
+        finish(.failure(CancellationError()))
+    }
+
+    private func finish(_ result: Result<HTTPURLResponse, Error>) {
+        lock.lock()
+        guard let continuation else {
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        let task = task
+        self.task = nil
+        let session = session
+        self.session = nil
+        lock.unlock()
+
+        task?.cancel()
+        session?.invalidateAndCancel()
+        continuation.resume(with: result)
     }
 }
 
