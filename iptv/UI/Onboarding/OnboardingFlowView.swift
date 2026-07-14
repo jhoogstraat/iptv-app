@@ -261,6 +261,8 @@ struct OnboardingFlowView: View {
                 "Preparing your library…"
             case .clearingLibrary:
                 "Preparing local storage…"
+            case .checkingProvider:
+                "Contacting your provider…"
             case .replacingCatalog:
                 "Replacing the local catalog…"
             case .syncingMovies:
@@ -269,6 +271,8 @@ struct OnboardingFlowView: View {
                 "Syncing series categories…"
             case .syncingLive:
                 "Syncing live categories…"
+            case .validatingCatalog:
+                "Checking received catalog data…"
             case .succeeded:
                 "Catalog synced."
             case .failed:
@@ -368,4 +372,3 @@ struct OnboardingFlowView: View {
         }
     }
 }
-

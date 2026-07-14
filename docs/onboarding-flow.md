@@ -7,7 +7,7 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 ## Status
 
 - Target state: first launch presents onboarding, captures a provider, runs initial sync, marks the provider initialized only after successful sync, and then routes into the main app shell.
-- Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. Source selection, credentials, syncing, failure/retry, field-level validation, compact-height scrolling, and cancellation-safe back navigation are implemented. Xtream API is supported; M3U8 remains a disabled planned source.
+- Current implementation: `AppRootView` shows `OnboardingFlowView` whenever `ProviderManager.requiresOnboarding` is true. Source selection, credentials, syncing, failure/retry, field-level validation, compact-height scrolling, and cancellation-safe back navigation are implemented. Initial sync stops with actionable errors when the provider does not answer, a catalog request stops delivering data, or every required catalog family is empty. Xtream API is supported; M3U8 remains a disabled planned source.
 - Current sync scope: initial sync fetches movie, series, and live categories, then atomically replaces the local catalog only after all required category families succeed. Streams/media are hydrated lazily per category.
 - Implementation status (reviewed 2026-07-10): Xtream onboarding and retryable launch recovery are implemented. Successful sync alone marks the provider initialized. M3U8 remains planned.
 
@@ -26,7 +26,7 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 - `ProviderManager.initialize(_:)` inserts a new active provider.
 - `ProviderManager.update(provider:)` upserts credentials, marks the provider uninitialized, and rebuilds the active session.
 - `ProviderManager.runInitialSyncForActiveProvider()` delegates to `Session.runInitialSync()` and sets `Provider.isInitialized = true` only on success.
-- `SyncManager.InitialSyncPhase` drives onboarding phase copy.
+- `SyncManager.InitialSyncPhase` drives onboarding phase copy, including provider contact and received-data validation.
 - `SyncManager.SyncStatus` drives per-media-type progress icons.
 - `ProviderFields` validates name, username, password, and normalized Xtream endpoint.
 
@@ -50,6 +50,8 @@ Onboarding gets the user from a fresh install or uninitialized provider to a loc
 - Incomplete or invalid provider fields do not create or update a provider.
 - Successful initial sync marks the provider initialized exactly once and exits onboarding.
 - Failed sync keeps the user in onboarding with an actionable retry path.
+- Initial sync fails within a bounded interval when the provider site cannot be reached or a later catalog response stalls.
+- A reachable provider must return at least one movie, series, or live category before onboarding can complete.
 - Provider credentials are never hardcoded.
 
 ## Current Gaps / Planned Work
