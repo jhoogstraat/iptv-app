@@ -261,9 +261,17 @@ final class ProviderManager {
         let provider = try database.read {
             try Provider.find($0, key: activeProviderID)
         }
-        let password = provider.credentialReference.isEmpty
-            ? ""
-            : try credentialStore.password(for: provider.credentialReference) ?? ""
+        let password: String
+        if provider.credentialReference.isEmpty {
+            password = ""
+        } else {
+            do {
+                password = try credentialStore.password(for: provider.credentialReference) ?? ""
+            } catch {
+                password = ""
+                logger.warning("Provider password is unavailable while preparing editable configuration: \(error.localizedDescription, privacy: .public)")
+            }
+        }
 
         return ProviderConfiguration(
             id: provider.id,
@@ -278,8 +286,17 @@ final class ProviderManager {
 
     @discardableResult
     func runInitialSyncForActiveProvider() async -> SyncManager.SyncStatus {
+        await synchronizeActiveProvider(force: false)
+    }
+
+    @discardableResult
+    func resyncActiveProvider() async -> SyncManager.SyncStatus {
+        await synchronizeActiveProvider(force: true)
+    }
+
+    private func synchronizeActiveProvider(force: Bool) async -> SyncManager.SyncStatus {
         guard accessState == .ready, let capturedSession = session else { return .failure }
-        guard !activeProviderIsInitialized else { return .success }
+        guard force || !activeProviderIsInitialized else { return .success }
 
         let providerID = capturedSession.providerID
         let result = await capturedSession.runInitialSync()
@@ -303,34 +320,7 @@ final class ProviderManager {
         } catch is CancellationError {
             return .idle
         } catch {
-            logger.warning("Failed to mark provider initialized: \(error.localizedDescription, privacy: .public)")
-            return .failure
-        }
-    }
-
-    @discardableResult
-    func resyncActiveProvider() async -> SyncManager.SyncStatus {
-        guard accessState == .ready, let capturedSession = session else { return .failure }
-        let providerID = capturedSession.providerID
-        guard session === capturedSession, capturedSession.isCurrent else { return .idle }
-
-        do {
-            let prepared = try await database.write { db in
-                guard try Provider.where(\.isActive).fetchOne(db)?.id == providerID else {
-                    return false
-                }
-                try Provider.find(providerID).update { $0.isInitialized = false }.execute(db)
-                return true
-            }
-            guard prepared, session === capturedSession, capturedSession.isCurrent else {
-                return .idle
-            }
-            activeProviderIsInitialized = false
-            return await runInitialSyncForActiveProvider()
-        } catch is CancellationError {
-            return .idle
-        } catch {
-            logger.warning("Failed to prepare provider resync: \(error.localizedDescription, privacy: .public)")
+            logger.warning("Failed to commit provider sync: \(error.localizedDescription, privacy: .public)")
             return .failure
         }
     }
@@ -443,7 +433,6 @@ final class ProviderManager {
         session = Session(
             syncManager: syncManager,
             providerID: provider.id,
-            providerPassword: password,
             database: database
         )
         accessState = .ready

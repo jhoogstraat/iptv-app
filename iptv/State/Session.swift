@@ -19,22 +19,19 @@ final class Session {
    
     @ObservationIgnored
     private nonisolated let syncManager: SyncManager
-    private let providerPassword: String
     
     // MARK: - State
-    var providerID: Provider.ID
+    let providerID: Provider.ID
     
    // MARK: - Init
     init(
         syncManager: SyncManager,
         providerID: Provider.ID,
-        providerPassword: String,
         database: (any DatabaseWriter)? = nil
     ) {
         @Dependency(\.defaultDatabase) var defaultDatabase
         self.syncManager = syncManager
         self.providerID = providerID
-        self.providerPassword = providerPassword
         self.database = database ?? defaultDatabase
     }
     

@@ -16,8 +16,8 @@ import GRDB
 @MainActor
 @Observable
 final class SyncManager {
-    private static let defaultProviderResponseTimeout = Duration.seconds(15)
-    private static let defaultCatalogResponseTimeout = Duration.seconds(30)
+    nonisolated private static let defaultProviderResponseTimeout = Duration.seconds(15)
+    nonisolated private static let defaultCatalogResponseTimeout = Duration.seconds(30)
 
     nonisolated final class Ownership: @unchecked Sendable {
         private let lock = NSLock()
@@ -139,8 +139,10 @@ final class SyncManager {
     }
 
     func sync() async -> SyncStatus {
-        initialFlight?.ownership.invalidate()
-        initialFlight?.task.cancel()
+        if let initialFlight {
+            return await initialFlight.task.value
+        }
+
         cancelHydrationFlights()
 
         let operation = Ownership()
@@ -150,12 +152,7 @@ final class SyncManager {
         }
         initialFlight = InitialFlight(ownership: operation, task: task)
 
-        let result = await withTaskCancellationHandler {
-            await task.value
-        } onCancel: {
-            operation.invalidate()
-            task.cancel()
-        }
+        let result = await task.value
 
         if initialFlight?.ownership === operation {
             initialFlight = nil
@@ -401,8 +398,8 @@ final class SyncManager {
     ) async throws {
         let key = HydrationKey(categoryID: category, type: type)
         if let existing = hydrationFlights[key] {
-            existing.ownership.invalidate()
-            existing.task.cancel()
+            try await finishHydration(existing, for: key)
+            return
         }
 
         let previousState = categoryHydrationStates[category]
@@ -417,24 +414,25 @@ final class SyncManager {
             previousState: previousState
         )
 
-        do {
-            let count = try await withTaskCancellationHandler {
-                try await task.value
-            } onCancel: {
-                operation.invalidate()
-                task.cancel()
-            }
+        try await finishHydration(
+            HydrationFlight(ownership: operation, task: task, previousState: previousState),
+            for: key
+        )
+    }
 
-            if hydrationFlights[key]?.ownership === operation {
-                categoryHydrationStates[category] = count == 0 ? .empty : .populated(count)
+    private func finishHydration(_ flight: HydrationFlight, for key: HydrationKey) async throws {
+        do {
+            let count = try await flight.task.value
+            if hydrationFlights[key]?.ownership === flight.ownership {
+                categoryHydrationStates[key.categoryID] = count == 0 ? .empty : .populated(count)
                 hydrationFlights[key] = nil
             }
         } catch {
-            if hydrationFlights[key]?.ownership === operation {
-                if isCancellation(error, operation: operation) {
-                    categoryHydrationStates[category] = previousState
+            if hydrationFlights[key]?.ownership === flight.ownership {
+                if isCancellation(error, operation: flight.ownership) {
+                    categoryHydrationStates[key.categoryID] = flight.previousState
                 } else {
-                    categoryHydrationStates[category] = .failed(error.localizedDescription)
+                    categoryHydrationStates[key.categoryID] = .failed(error.localizedDescription)
                 }
                 hydrationFlights[key] = nil
             }
@@ -650,8 +648,8 @@ final class SyncManager {
 
     func enrichDetails(for mediaID: Media.ID) async throws {
         if let existing = detailFlights[mediaID] {
-            existing.ownership.invalidate()
-            existing.task.cancel()
+            try await finishDetailEnrichment(existing, for: mediaID)
+            return
         }
 
         let operation = Ownership()
@@ -661,18 +659,20 @@ final class SyncManager {
         }
         detailFlights[mediaID] = DetailFlight(ownership: operation, task: task)
 
+        try await finishDetailEnrichment(
+            DetailFlight(ownership: operation, task: task),
+            for: mediaID
+        )
+    }
+
+    private func finishDetailEnrichment(_ flight: DetailFlight, for mediaID: Media.ID) async throws {
         do {
-            try await withTaskCancellationHandler {
-                try await task.value
-            } onCancel: {
-                operation.invalidate()
-                task.cancel()
-            }
-            if detailFlights[mediaID]?.ownership === operation {
+            try await flight.task.value
+            if detailFlights[mediaID]?.ownership === flight.ownership {
                 detailFlights[mediaID] = nil
             }
         } catch {
-            if detailFlights[mediaID]?.ownership === operation {
+            if detailFlights[mediaID]?.ownership === flight.ownership {
                 detailFlights[mediaID] = nil
             }
             throw error
@@ -731,7 +731,7 @@ final class SyncManager {
                 $0.synopsis = XtreamMapper.text(details.info.plot)
                     ?? XtreamMapper.text(details.info.description)
                     ?? movie.synopsis
-                $0.releaseDate = details.info.releaseDate ?? movie.releaseDate
+                $0.releaseDate = #bind(details.info.releaseDate)
                 $0.runtimeSeconds = XtreamMapper.runtimeSeconds(
                     from: details.info.durationSecs,
                     minutes: details.info.runtime,
@@ -780,7 +780,7 @@ final class SyncManager {
                 $0.coverURL = XtreamMapper.url(details.info.cover) ?? series.coverURL
                 $0.rating = Double(details.info.rating) ?? series.rating
                 $0.synopsis = XtreamMapper.text(details.info.plot) ?? series.synopsis
-                $0.releaseDate = details.info.releaseDate ?? series.releaseDate
+                $0.releaseDate = #bind(details.info.releaseDate)
                 $0.runtimeSeconds = XtreamMapper.runtimeSeconds(
                     fromRuntime: details.info.episodeRuntime
                 ) ?? series.runtimeSeconds
@@ -949,7 +949,6 @@ extension SyncManager {
 
     enum InitialSyncPhase: Equatable {
         case idle
-        case clearingLibrary
         case checkingProvider
         case syncingMovies
         case syncingSeries

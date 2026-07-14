@@ -359,11 +359,11 @@ struct ForYouSnapshot {
         media.type == .movie || media.type == .episode
     }
 
-    private static func ratingOrdered(_ lhs: Media, _ rhs: Media) -> Bool {
+    nonisolated private static func ratingOrdered(_ lhs: Media, _ rhs: Media) -> Bool {
         LibraryFilterEngine.ordered(lhs, before: rhs, by: .rating)
     }
 
-    private static func newestOrdered(_ lhs: Media, _ rhs: Media) -> Bool {
+    nonisolated private static func newestOrdered(_ lhs: Media, _ rhs: Media) -> Bool {
         LibraryFilterEngine.ordered(lhs, before: rhs, by: .newest)
     }
 

@@ -174,12 +174,15 @@ final class Player {
     /// Loads a stream for playback in the requested presentation.
     func load(_ media: Media, presentation: Presentation, autoplay: Bool = true) {
         persistProgressIfNeeded(force: true)
+        deactivateBackend()
         currentItem = media
         currentProviderID = nil
         pendingResumeTime = nil
         shouldAutoPlay = autoplay
         didFallbackForCurrentItem = false
         isPlaybackComplete = false
+        isPlaying = false
+        isBuffering = false
         errorMessage = nil
         controlMessage = nil
         canRetryEpisodeSwitch = false
@@ -192,6 +195,17 @@ final class Player {
         didApplySubtitlePreferenceForCurrentItem = false
         pendingHandoffTime = nil
         handoffProgressFloor = nil
+        capabilities = .unsupported
+        audioTracks = []
+        subtitleTracks = []
+        qualityVariants = [QualityVariant.auto]
+        chapterMarkers = []
+        outputRoutes = []
+        selectedAudioTrackID = nil
+        selectedSubtitleTrackID = MediaTrack.subtitleOffID
+        selectedQualityVariantID = QualityVariant.auto.id
+        selectedOutputRouteID = nil
+        supportedAspectRatioModes = [.fit]
 
         loadSavedPreferencesForCurrentProfile()
         if media.type == .live {
@@ -219,18 +233,13 @@ final class Player {
     /// Clears any loaded media and resets the player model to its default state.
     func reset() {
         persistProgressIfNeeded(force: true)
-        eventTask?.cancel()
-        eventTask = nil
 
         sleepTimerTask?.cancel()
         sleepTimerTask = nil
         sleepTimerOption = .off
         sleepTimerEndsAt = nil
 
-        backend?.stop()
-        backend = nil
-        activeBackendID = nil
-        rendererRevision += 1
+        deactivateBackend()
 
         currentItem = nil
         currentProviderID = nil
@@ -588,6 +597,17 @@ final class Player {
         bindEvents(for: selected)
     }
 
+    private func deactivateBackend() {
+        eventTask?.cancel()
+        eventTask = nil
+
+        guard backend != nil || activeBackendID != nil else { return }
+        backend?.stop()
+        backend = nil
+        activeBackendID = nil
+        rendererRevision += 1
+    }
+
     private func bindEvents(for backend: any PlaybackBackend) {
         let backendID = backend.id
         eventTask = Task { @MainActor [weak self] in
@@ -730,6 +750,10 @@ final class Player {
         backend?.setPlaybackSpeed(effectiveSpeed)
         backend?.setAspectRatio(resolveAspectRatioMode(aspectRatioMode))
         backend?.setAudioDelay(milliseconds: audioDelayMilliseconds)
+        backend?.setVolume(volume)
+        if capabilities.supportsBrightness {
+            backend?.setBrightness(brightness)
+        }
 
         if !didApplyAudioPreferenceForCurrentItem {
             if let preferredAudioLanguageCode {
@@ -977,6 +1001,7 @@ final class Player {
     }
 
     private func processTerminalFailure(_ error: Error) {
+        deactivateBackend()
         isPlaying = false
         isBuffering = false
         let message = error.localizedDescription

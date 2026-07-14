@@ -157,6 +157,14 @@ struct ProviderCredentialSecurityTests {
         try inaccessibleCredentialManager.loadActive()
         #expect(inaccessibleCredentialManager.accessState == .credentialsUnavailable)
         #expect(inaccessibleCredentialManager.session == nil)
+
+        let configuration = try inaccessibleCredentialManager.activeProviderConfiguration()
+        let editableConfiguration = try #require(configuration)
+        #expect(editableConfiguration.id == provider.id)
+        #expect(editableConfiguration.name == "Primary")
+        #expect(editableConfiguration.username == "user")
+        #expect(editableConfiguration.endpoint == provider.endpoint)
+        #expect(editableConfiguration.password.isEmpty)
     }
 
     @Test func schemeLessDefaultsToHTTPSAndHTTPRequiresPersistedApproval() throws {

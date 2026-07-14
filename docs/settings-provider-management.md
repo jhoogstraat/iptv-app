@@ -7,7 +7,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Status
 
 - Target state: Settings is the durable management surface for provider configuration, library organization, playback defaults, and app information.
-- Implementation status (reviewed 2026-07-10): `SettingsScreen` has Provider, Library, Playback, and About destinations. Provider removal is explicitly named and confirmed; resync preserves provider configuration, favorites, and watch history; unchanged and name-only saves preserve initialization/catalog state; connection changes require onboarding sync. Prefix visibility is database-backed per provider. Playback and About help/legal remain explicit placeholders.
+- Implementation status (reviewed 2026-07-14): `SettingsScreen` has Provider, Library, Playback, and About destinations. Provider removal is explicitly named and confirmed; resync preserves provider configuration, favorites, watch history, and the initialized app-shell state when refresh fails; unchanged and name-only saves preserve initialization/catalog state; connection changes require onboarding sync. If Keychain reads fail, editable configuration still retains the provider name, URL, username, and transport approval while leaving only the password blank for recovery. Prefix visibility is database-backed per provider. Playback and About help/legal remain explicit placeholders.
 - Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, password, or insecure-transport changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation.
 
 ## User Experience

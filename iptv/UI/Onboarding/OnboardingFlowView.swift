@@ -259,8 +259,6 @@ struct OnboardingFlowView: View {
         switch providerManager.session?.initialSyncPhase ?? .idle {
             case .idle:
                 "Preparing your library…"
-            case .clearingLibrary:
-                "Preparing local storage…"
             case .checkingProvider:
                 "Contacting your provider…"
             case .replacingCatalog:
