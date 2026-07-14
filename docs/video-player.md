@@ -7,7 +7,7 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-10): `Player`, VLC/AV backends, stable renderer container, root presentation, and one-time VLC-to-AV fallback are active. AV accepts extensionless HTTP(S) Xtream streams; runtime fallback carries position and play/pause intent; track preferences apply after metadata arrives; live playback rejects seek/rate mutations at the player boundary; ordered watch writes prevent stale progress regression. Episode playback uses the same full-window path as movies, macOS windows dismiss cleanly, visionOS uses its own player window, and tvOS back/focus behavior is explicit.
+- Implementation status (reviewed 2026-07-10): `Player`, VLC/AV backends, stable renderer container, root presentation, and one-time VLC-to-AV fallback are active. AV accepts extensionless HTTP(S) Xtream streams; runtime fallback carries position and play/pause intent; track preferences apply after metadata arrives; live playback rejects seek/rate mutations at the player boundary; ordered watch writes prevent stale progress regression. Selecting a concrete episode row in series detail loads that episode directly into the shared full-window player, while standalone episode detail routes retain their full-window play action. macOS windows dismiss cleanly, visionOS uses its own player window, and tvOS back/focus behavior is explicit.
 - Current gaps: offline playback, profile-scoped preferences, episode quick switching, and richer EPG/catch-up/DVR live controls remain deferred.
 
 ## User Experience
@@ -53,13 +53,13 @@ The video player provides stable playback controls and renderer switching across
 - Renderer swaps do not reset the shared controls shell.
 - Progress events update timeline UI and persisted watch progress policy.
 - Advanced controls reflect backend capabilities and recover gracefully from unsupported operations.
-- Playback can be launched from movie detail, persisted episode detail rows, and Live channel rows after URL resolution; series collection rows are intentionally rejected as non-playable.
+- Playback can be launched from movie detail, standalone persisted episode detail, concrete episode rows in series detail, and Live channel rows after URL resolution; series collection rows are intentionally rejected as non-playable.
 
 ## Current Gaps / Planned Work
 
 - Favorite toggle in `PlayerView` reads and writes the provider-scoped local `FavoriteStore` for the current media item.
 - Some advanced preferences are learned or stored device-globally in `UserDefaults` rather than exposed through profile-scoped Settings persistence.
-- Episode quick switching is not active; persisted episode rows launch through the shared player path from series detail.
+- Episode quick switching is not active; selecting a persisted episode row in series detail launches the shared full-window player directly without routing through an intermediate detail screen.
 - Live playback is channel-only: EPG/catch-up timelines, zapping controls, and DVR behavior are planned but not implemented.
 - Offline playback integration is planned but not implemented.
 
