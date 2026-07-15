@@ -640,7 +640,13 @@ final class Player {
     }
 
     private func activateBackend(for url: URL, excluding excluded: Set<PlaybackBackendID> = []) throws {
-        guard let selected = backendFactory.selectBackend(for: url, excluding: excluded) else {
+        let preferredBackendID = defaults.string(forKey: "preferredPlaybackBackend")
+            .flatMap(PlaybackBackendID.init(rawValue:))
+        guard let selected = backendFactory.selectBackend(
+            for: url,
+            excluding: excluded,
+            preferred: preferredBackendID
+        ) else {
             throw PlaybackRuntimeError.noRendererAvailable
         }
 
