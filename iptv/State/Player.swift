@@ -47,6 +47,7 @@ final class Player {
     private(set) var activeBackendID: PlaybackBackendID?
     private(set) var rendererRevision = 0
     private(set) var shouldAutoPlay = true
+    private(set) var isCatchupPlayback = false
 
     private(set) var capabilities: PlaybackCapabilities = .unsupported
     private(set) var audioTracks: [MediaTrack] = []
@@ -72,6 +73,7 @@ final class Player {
 
     private(set) var controlMessage: String?
     private(set) var canRetryEpisodeSwitch = false
+    private(set) var liveChannelQueue: [Media] = []
 
     var progressFraction: Double {
         guard let duration, duration > 0 else { return 0 }
@@ -172,10 +174,16 @@ final class Player {
     }
 
     /// Loads a stream for playback in the requested presentation.
-    func load(_ media: Media, presentation: Presentation, autoplay: Bool = true) {
+    func load(
+        _ media: Media,
+        presentation: Presentation,
+        autoplay: Bool = true,
+        sourceURL: URL? = nil
+    ) {
         persistProgressIfNeeded(force: true)
         deactivateBackend()
         currentItem = media
+        isCatchupPlayback = sourceURL != nil && media.type == .live
         currentProviderID = nil
         pendingResumeTime = nil
         shouldAutoPlay = autoplay
@@ -222,7 +230,9 @@ final class Player {
                 database: database
             )
             let url: URL
-            if let localURL = DownloadStore.localPlaybackURL(
+            if let sourceURL {
+                url = sourceURL
+            } else if let localURL = DownloadStore.localPlaybackURL(
                 for: media,
                 providerID: provider.id,
                 database: database
@@ -248,6 +258,25 @@ final class Player {
             remoteURL: remoteURL,
             database: database
         )
+    }
+
+    func loadLiveChannel(_ channel: Media, channels: [Media], presentation: Presentation = .fullWindow) {
+        liveChannelQueue = channels.filter { $0.type == .live }
+        load(channel, presentation: presentation)
+    }
+
+    func zapLiveChannel(by offset: Int) {
+        guard let currentItem,
+              currentItem.type == .live,
+              liveChannelQueue.count > 1,
+              let index = liveChannelQueue.firstIndex(where: { $0.id == currentItem.id })
+        else {
+            controlMessage = "No other channel is available in this list."
+            return
+        }
+        let count = liveChannelQueue.count
+        let nextIndex = (index + offset % count + count) % count
+        load(liveChannelQueue[nextIndex], presentation: presentation)
     }
 
     /// Clears any loaded media and resets the player model to its default state.

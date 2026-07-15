@@ -589,6 +589,9 @@ final class SyncManager {
                     $0.coverURL = XtreamMapper.url(stream.streamIcon)
                     $0.genre = XtreamMapper.text(stream.streamType)
                     $0.addedAt = XtreamMapper.date(from: stream.added)
+                    $0.epgChannelID = XtreamMapper.text(stream.epgChannelId)
+                    $0.supportsCatchup = stream.tvArchive == 1
+                    $0.catchupDays = #bind(stream.tvArchiveDuration)
                     $0.updatedAt = now
                 }.execute(db)
             }

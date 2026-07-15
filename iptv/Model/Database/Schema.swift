@@ -91,6 +91,9 @@ func appDatabase(
             "addedAt" TEXT,
             "backdropURL" TEXT,
             "country" TEXT,
+            "epgChannelID" TEXT,
+            "supportsCatchup" INTEGER NOT NULL DEFAULT 0,
+            "catchupDays" INTEGER,
             UNIQUE ("sourceID", "type"),
             FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
         ) STRICT
@@ -271,6 +274,9 @@ nonisolated struct Media: Hashable, Identifiable, Sendable {
     var addedAt: Date? = nil
     var backdropURL: URL? = nil
     var country: String? = nil
+    var epgChannelID: String? = nil
+    var supportsCatchup = false
+    var catchupDays: Int? = nil
     var updatedAt: Date = .now
 }
 

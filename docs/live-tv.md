@@ -6,9 +6,9 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 ## Status
 
-- Target state: Live is a first-class watch surface backed by local live category/channel data, with channel playback through the shared player and future EPG/catch-up support.
-- Implementation status (reviewed 2026-07-10): Basic channel-only Live is implemented. Initial sync includes live categories; `LiveScreen` reads local rows, lazily reconciles selected-category channels, applies shared normalized search/filter/sort and hidden-prefix visibility, and launches the shared player with an Xtream live URL. Empty/loading/failure states reflect local coverage honestly. EPG, catch-up, zapping, DVR, guide caching, downloads, profiles, and global Live search remain deferred.
-- Existing planning: `docs/live-epg-catchup-spec.md` contains the deferred guide/catch-up roadmap.
+- Live is backed by local category/channel data, with playback through the shared player.
+- Channel rows persist EPG identity and provider catch-up capability. The guide button requests short EPG data on demand, presents loading/empty/error/success states, and exposes Play from Start only when both the channel and programme advertise archive support.
+- Previous/next player controls zap within the filtered local channel list. DVR and persistent guide caching remain deferred.
 
 ## User Experience
 
@@ -22,8 +22,8 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 - Target local state: live categories, channel rows in `media` with `MediaType.live`, stream identifiers, titles, logos, category/group metadata, available stream type/added-date metadata, and future provider-scoped EPG/catch-up refresh state.
 - Current `MediaType` includes `.live`; live channels reuse the existing `Media` table and `Category` table rather than a separate live-channel table.
-- Current schema does not include EPG program, catch-up window, guide cache, DVR, or zapping tables.
-- Player resolves `.live` rows through `XtreamMediaPlaybackSourceResolver` to the provider `/live/{username}/{password}/{sourceID}` path. Live mode hides seeking/timeline controls and shows copy that EPG, catch-up, zapping, DVR, and guide rows are unavailable.
+- EPG programmes are requested on demand rather than persisted. Channel rows store `epgChannelID`, `supportsCatchup`, and `catchupDays`.
+- Player resolves live rows through the provider live path. Catch-up uses the provider timeshift path and is treated as seekable archived playback; live mode hides timeline controls and exposes zapping.
 
 ## Key Files
 
@@ -45,9 +45,8 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 ## Current Gaps / Planned Work
 
-- EPG/current-next program data is not implemented.
-- Catch-up playback and catch-up URL resolution are not implemented.
-- Channel zapping, DVR/recording, guide caching, downloads/offline, profiles, and global Live search are deferred.
+- EPG data is not cached locally and depends on provider short-EPG compatibility.
+- Background guide refresh, DVR/recording, and full grid guide navigation remain deferred.
 - Live channel rows are hydrated lazily by selected category; initial sync intentionally does not prefetch every channel.
 
 ## Notes for Agents

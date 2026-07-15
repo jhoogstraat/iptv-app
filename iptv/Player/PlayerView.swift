@@ -152,7 +152,7 @@ struct PlayerView: View {
     }
 
     private var isLiveStream: Bool {
-        player.currentItem?.type == .live
+        player.currentItem?.type == .live && !player.isCatchupPlayback
     }
 
     private var primaryTransportTitle: String {
@@ -442,10 +442,27 @@ struct PlayerView: View {
     private var timelineControls: some View {
         VStack(spacing: 8) {
             if isLiveStream {
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    Button {
+                        player.zapLiveChannel(by: -1)
+                    } label: {
+                        Label("Previous Channel", systemImage: "backward.end.fill")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(player.liveChannelQueue.count < 2)
+
                     Label("Live", systemImage: "dot.radiowaves.left.and.right")
                         .font(.footnote.weight(.semibold))
                         .foregroundStyle(.red)
+
+                    Button {
+                        player.zapLiveChannel(by: 1)
+                    } label: {
+                        Label("Next Channel", systemImage: "forward.end.fill")
+                            .labelStyle(.iconOnly)
+                    }
+                    .disabled(player.liveChannelQueue.count < 2)
+
                     Spacer()
                     Text("Timeline, seeking, catch-up, and DVR are unavailable for live channels.")
                         .font(.footnote)
@@ -562,7 +579,7 @@ struct PlayerView: View {
             }
 
             if isLiveStream {
-                Text("Live channel mode: EPG, catch-up, zapping, DVR, and seeking are unavailable in this release.")
+                Text("Use Previous/Next to zap within the selected channel list. EPG, catch-up, DVR, and seeking are unavailable.")
                     .font(.subheadline)
                     .foregroundStyle(.yellow)
             }
