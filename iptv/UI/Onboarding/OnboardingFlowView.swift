@@ -45,6 +45,12 @@ struct OnboardingFlowView: View {
                 }
             }
         }
+#if !os(macOS) && !os(tvOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.black, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbarColorScheme(.dark, for: .navigationBar)
+#endif
         .task(id: providerManager.revision) {
             await reactToProviderRevision()
         }
