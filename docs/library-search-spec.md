@@ -1,108 +1,41 @@
-# Library and Search Spec
+# Feature: Library and Search
+
+## Purpose
+
+Provide fast local discovery across the synchronized movie and series catalog without routine remote queries.
 
 ## Status
-- Version: v1
-- Date: 2026-02-24
-- Priority: P1 (next milestone after advanced player)
-- Implementation status (reviewed 2026-07-05): Partial. The Search placeholder has been replaced by a local `SearchScreen`, and scoped Movies/Series search is available through `BrowseScreen.searchable`. The specified search-index architecture (`SearchIndexStore`, `SearchOrchestrator`, `SearchScreenViewModel`, indexing progress, provider fingerprint scoping, relevance ranking, favorites/continue-watching search, and genre/language/recency filters) is not implemented.
 
-## Objective
-Deliver a usable library and discovery experience with scoped and global search across VOD and series.
+Implemented for local movie/series title and metadata search, scope selection, category/group/rating filters, deterministic sorts, hidden-prefix rules, favorites/resume indicators, partial-hydration disclosure, and detail navigation. Filtering runs from Sendable snapshots in a cancellable background task.
 
-## In Scope
-- Replace Search placeholder tab with functional Search screen.
-- Scoped search inside Movies and Series screens.
-- Global search across Movies + Series.
-- Filter and sort controls in Global Search:
-  - Scope (`All`, `Movies`, `Series`)
-  - Rating range
-  - Genre
-  - Language
-  - Added recency window
-  - Sort (`Relevance`, `Newest`, `Rating`, `Title`).
-- Search indexing progress indicator.
-- Library surfaces:
-  - Favorites list.
-  - Continue watching list (read from watch activity).
+## User Experience
 
-## Out of Scope
-- Live TV search.
-- Semantic/vector search.
-- Server-side query APIs beyond existing provider endpoints.
+The Search tab starts with a prompt, shows truthful empty and partial-coverage states, and updates results after a short typing debounce. Existing results remain visible while a replacement computation runs. Users can switch between All, Movies, and Series and clear query/filter combinations independently.
 
-## UX Requirements
-- Empty query in scoped search keeps existing category rails visible.
-- Non-empty query shows ranked result section above category rails.
-- Global search always provides a clear provider-scoped status:
-  - fully indexed
-  - indexing in progress
-  - partial results.
+## Data and State
 
-## Architecture
+Search operates on locally persisted `Media` and `Category` rows. `LibraryFilterRequest` is a Hashable, Sendable snapshot; `LibraryFilterEngine.filteredMedia(inBackground:)` performs normalization, matching, filtering, and sorting off the main actor. `LibrarySearchIndexes` provides category, active-profile favorite, and resume lookups.
 
-## New modules
-- `iptv/Model/Search/SearchIndexStore.swift`
-- `iptv/Model/Search/SearchOrchestrator.swift`
+## Key Files
+
 - `iptv/UI/Screens/SearchScreen.swift`
-- `iptv/UI/Screens/SearchScreenViewModel.swift`
+- `iptv/Model/LibraryFilters.swift`
+- `iptv/Model/Database/Schema.swift`
 
-## Core contracts
-- `SearchQuery`
-  - text, scope, filters, sort.
-- `SearchResultItem`
-  - video reference, scope, score, matched fields.
-- `SearchIndexProgress`
-  - indexed categories, total categories, scope.
+## Target Acceptance Criteria
 
-## Catalog integration
-- Index updates triggered after successful catalog stream fetches.
-- Index scoped by provider fingerprint.
-- Index reset on provider config change.
+- Search remains responsive for large local catalogs.
+- Stale/cancelled computations never replace newer results.
+- Movies and series respect the same hidden categories and filter semantics as Browse.
+- Favorites and resume badges use only the active provider/profile.
+- Partial local hydration is disclosed instead of implying complete results.
 
-## Ranking and Matching
-- Normalize query: lowercase, trim, collapse whitespace, fold diacritics.
-- Match fields:
-  - title prefix
-  - title contains
-  - category name
-  - language
-  - genre.
-- Tie-break order:
-  - score desc
-  - rating desc
-  - added date desc
-  - title asc
-  - id asc.
+## Current Gaps / Planned Work
 
-## Favorites Integration
-- Favorites must appear in Library and be searchable.
-- Favorite state changes should update search results without requiring app restart.
+- Relevance ranking is deterministic title/metadata matching rather than a persisted FTS index.
+- Episode search is reached through series details; Live has its own local search surface.
+- Add an FTS table only if measured catalog sizes exceed snapshot-filter performance.
 
-## Failure Handling
-- Indexing errors are non-fatal.
-- Search still returns indexed subset with status indicating partial coverage.
-- Query errors should not clear last successful results.
+## Notes for Agents
 
-## Testing
-
-## Unit
-- Search normalization and matching logic.
-- Filter semantics (AND across groups, OR within groups).
-- Provider isolation in index store.
-- Sorting and tie-break correctness.
-
-## Integration
-- Catalog fetch updates search index.
-- Provider change clears and rebuilds index.
-- Favorite add/remove updates index visibility.
-
-## UI
-- Scoped search behavior in Movies and Series.
-- Global filter panel interactions.
-- Progress state rendering during indexing.
-
-## Acceptance Criteria
-- Search tab returns results for Movies and Series with filters and sorting.
-- Scoped search works in each content screen.
-- Favorites and continue watching are visible library entities and discoverable through search.
-
+Do not introduce a remote request per keystroke. Keep `LibraryFilterRequest` Sendable and commit results only after cancellation checks. Any future persisted search history must be profile scoped.
