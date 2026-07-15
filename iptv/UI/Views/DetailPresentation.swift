@@ -23,6 +23,10 @@ nonisolated enum DetailEnrichmentState: Equatable, Sendable {
     case success
     case failure(String)
 
+    var isAwaitingDetails: Bool {
+        self == .idle || self == .loading
+    }
+
     mutating func transition(_ event: DetailEnrichmentEvent) {
         switch (self, event) {
         case (.idle, .request):
@@ -172,6 +176,7 @@ struct DetailActionStyle: ButtonStyle {
 
 struct DetailEnrichmentStatus: View {
     let state: DetailEnrichmentState
+    var showsLoading = true
     let retry: () -> Void
 
     @ViewBuilder
@@ -180,16 +185,18 @@ struct DetailEnrichmentStatus: View {
         case .idle:
             EmptyView()
         case .loading:
-            Label {
-                Text("Refreshing details…")
-            } icon: {
-                ProgressView()
-                    .controlSize(.small)
+            if showsLoading {
+                Label {
+                    Text("Refreshing details…")
+                } icon: {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Refreshing details")
             }
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.secondary)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Refreshing details")
         case .success:
             EmptyView()
         case .failure(let message):

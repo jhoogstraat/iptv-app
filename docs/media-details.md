@@ -7,7 +7,7 @@ Media Details provides the focused destination for a selected movie or series it
 ## Status
 
 - Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume/download for playable rows, and bridges to the shared player; favorite and download controls persist through profile/provider-scoped stores.
-- Implementation status: `MediaDetailDestination` routes movies, series, episodes, and live states explicitly from Browse, Search, Favorites, and For You. Movie and series screens share adaptive hero/backdrop presentation, failure/retry enrichment state, profile-scoped favorite/resume state, working trailer links, source selection, downloads, and shared full-window playback entry. Each screen presents its synopsis once in the hero and omits redundant media-type and episode-selection actions.
+- Implementation status: `MediaDetailDestination` routes movies, series, episodes, and live states explicitly from Browse, Search, Favorites, and For You. Movie and series screens share adaptive hero/backdrop presentation, visible failure/retry enrichment state, profile-scoped favorite/resume state, working trailer links, source selection, downloads, native navigation chrome, and shared full-window playback entry. Each screen presents its synopsis once in the hero and omits redundant media-type and episode-selection actions. Movie actions use a content-fitting horizontal layout with a vertical fallback for compact widths, localization, and larger text.
 - Series detail keeps its own Episodes/Details content and season selection. Selecting a concrete episode row calls the shared player directly with full-window presentation and surfaces terminal resolution/backend errors in the series detail; standalone `EpisodeDetailTile` routes remain available from other surfaces. `SyncManager.enrichDetails` single-flights detail requests, rejects stale provider ownership, reconciles seasons/episodes, and preserves the last good local snapshot when enrichment fails.
 
 ## User Experience
@@ -17,6 +17,8 @@ Media Details provides the focused destination for a selected movie or series it
 - Details should expose Play/Resume, Favorite, Download, and related metadata when implemented.
 - Failed artwork loads should degrade gracefully.
 - Playback errors from a detail play action should be visible and recoverable.
+- Detail enrichment failures remain visible above saved metadata and provide a Retry action.
+- While initial detail enrichment is running, the metadata card contains a progress indicator instead of placeholder values. The card expands with an animated reveal when metadata becomes available.
 
 ### UI Direction
 
@@ -40,7 +42,11 @@ Media Details provides the focused destination for a selected movie or series it
 ## Key Files
 
 - `iptv/UI/Screens/MovieDetailScreen.swift`
+- `iptv/UI/Screens/SeriesDetailScreen.swift`
+- `iptv/UI/Screens/MediaDetailDestination.swift`
 - `iptv/UI/Views/EpisodeDetailTile.swift`
+- `iptv/UI/Views/MediaDetailSupport.swift`
+- `iptv/UI/Views/DetailPresentation.swift`
 - `iptv/UI/Screens/BrowseScreen.swift`
 - `iptv/UI/Screens/SearchScreen.swift`
 - `iptv/State/Player.swift`

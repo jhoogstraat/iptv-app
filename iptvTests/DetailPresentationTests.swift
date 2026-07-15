@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 import Testing
 
 @testable import iptv
@@ -45,5 +46,24 @@ struct DetailPresentationTests {
     @Test func collapsedHeaderAccessibilitySwitchesAtOneStableThreshold() {
         #expect(!DetailHeroCollapse.collapsedHeaderIsAccessible(progress: 0.49))
         #expect(DetailHeroCollapse.collapsedHeaderIsAccessible(progress: 0.5))
+    }
+
+    @Test func metadataRowsNormalizeMissingValues() {
+        #expect(DetailMetadataRow(label: "Genre", value: nil).displayValue == "Not available")
+        #expect(DetailMetadataRow(label: "Genre", value: "  \n ").displayValue == "Not available")
+        #expect(DetailMetadataRow(label: "Genre", value: " Drama ").displayValue == "Drama")
+    }
+
+    @Test func trailerResolverAcceptsURLsAndYouTubeIdentifiers() {
+        #expect(TrailerURLResolver.url(from: nil) == nil)
+        #expect(TrailerURLResolver.url(from: "https://example.com/trailer")?.absoluteString == "https://example.com/trailer")
+        #expect(TrailerURLResolver.url(from: "abc123")?.absoluteString == "https://www.youtube.com/watch?v=abc123")
+    }
+
+    @Test func enrichmentStateWaitsForDetailsUntilTheRequestFinishes() {
+        #expect(DetailEnrichmentState.idle.isAwaitingDetails)
+        #expect(DetailEnrichmentState.loading.isAwaitingDetails)
+        #expect(!DetailEnrichmentState.success.isAwaitingDetails)
+        #expect(!DetailEnrichmentState.failure("Unavailable").isAwaitingDetails)
     }
 }
