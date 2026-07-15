@@ -44,6 +44,44 @@ struct DownloadsScreen: View {
     }
 
     private func downloadRow(_ item: DownloadItem) -> some View {
+        let playableMedia = item.status == .completed ? mediaItem(for: item) : nil
+
+        return HStack(spacing: 12) {
+            downloadContent(for: item, playableMedia: playableMedia)
+
+            Menu {
+                actions(for: item, playableMedia: playableMedia)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .frame(minWidth: 44, minHeight: 44)
+            }
+            .accessibilityLabel("Actions for \(item.title)")
+        }
+    }
+
+    @ViewBuilder
+    private func downloadContent(for item: DownloadItem, playableMedia: Media?) -> some View {
+        if let playableMedia {
+            let button = Button {
+                player.load(playableMedia, presentation: .fullWindow)
+            } label: {
+                downloadLabel(for: item)
+            }
+            .accessibilityLabel("Play \(item.title)")
+            .accessibilityHint("Starts offline playback")
+
+            #if os(tvOS)
+            button
+            #else
+            button.buttonStyle(.plain)
+            #endif
+        } else {
+            downloadLabel(for: item)
+                .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func downloadLabel(for item: DownloadItem) -> some View {
         HStack(spacing: 12) {
             Image(systemName: statusSymbol(for: item.status))
                 .foregroundStyle(item.status == .failed ? .red : .secondary)
@@ -62,24 +100,12 @@ struct DownloadsScreen: View {
                 }
             }
             Spacer()
-            Menu {
-                actions(for: item)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .frame(minWidth: 44, minHeight: 44)
-            }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard item.status == .completed,
-                  let media = mediaItem(for: item)
-            else { return }
-            player.load(media, presentation: .fullWindow)
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
-    private func actions(for item: DownloadItem) -> some View {
+    private func actions(for item: DownloadItem, playableMedia: Media?) -> some View {
         switch item.status {
         case .queued, .downloading:
             Button("Pause", systemImage: "pause") {
@@ -90,9 +116,9 @@ struct DownloadsScreen: View {
                 DownloadCoordinator.shared.resume(item, database: database)
             }
         case .completed:
-            if let media = mediaItem(for: item) {
+            if let playableMedia {
                 Button("Play Offline", systemImage: "play.fill") {
-                    player.load(media, presentation: .fullWindow)
+                    player.load(playableMedia, presentation: .fullWindow)
                 }
             }
         }

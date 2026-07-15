@@ -1,5 +1,15 @@
 import SwiftUI
 
+struct ProviderRefreshEligibility: Equatable {
+    let isSceneActive: Bool
+    let isConnected: Bool
+    let requiresOnboarding: Bool
+
+    var shouldRefresh: Bool {
+        isSceneActive && isConnected && !requiresOnboarding
+    }
+}
+
 @MainActor
 @Observable
 final class RecoverableBootstrap<Value> {
@@ -47,6 +57,14 @@ struct AppRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var connectionMonitor = InternetConnectionMonitor.shared
 
+    private var refreshEligibility: ProviderRefreshEligibility {
+        ProviderRefreshEligibility(
+            isSceneActive: scenePhase == .active,
+            isConnected: connectionMonitor.isConnected,
+            requiresOnboarding: providerManager.requiresOnboarding
+        )
+    }
+
     var body: some View {
         Group {
             if providerManager.requiresOnboarding {
@@ -66,18 +84,8 @@ struct AppRootView: View {
                     .accessibilityIdentifier("connectivity.offline")
             }
         }
-        .task(id: scenePhase) {
-            guard scenePhase == .active,
-                  connectionMonitor.isConnected,
-                  !providerManager.requiresOnboarding
-            else { return }
-            await providerManager.refreshActiveProviderIfStale()
-        }
-        .task(id: connectionMonitor.isConnected) {
-            guard connectionMonitor.isConnected,
-                  scenePhase == .active,
-                  !providerManager.requiresOnboarding
-            else { return }
+        .task(id: refreshEligibility) {
+            guard refreshEligibility.shouldRefresh else { return }
             await providerManager.refreshActiveProviderIfStale()
         }
     }
