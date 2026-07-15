@@ -61,6 +61,7 @@ func appDatabase(
             "sourceID" TEXT NOT NULL,
             "type" INTEGER NOT NULL,
             "title" TEXT NOT NULL,
+            "groupKey" TEXT NOT NULL DEFAULT '---',
             "updatedAt" TEXT,
             UNIQUE ("sourceID", "type")
         ) STRICT
@@ -97,6 +98,26 @@ func appDatabase(
             UNIQUE ("sourceID", "type"),
             FOREIGN KEY ("categoryID") REFERENCES "categories"("id")
         ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "categories_type_idx"
+        ON "categories" ("type")
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "categories_type_group_idx"
+        ON "categories" ("type", "groupKey")
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "media_type_idx"
+        ON "media" ("type")
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "media_category_idx"
+        ON "media" ("categoryID")
         """).execute(db)
 
         try #sql("""
@@ -299,6 +320,7 @@ nonisolated struct Category: Hashable, Identifiable, Sendable {
     let sourceID: String
     let type: MediaType
     let title: String
+    var groupKey: String = CategoryGrouping.ungroupedKey
     var updatedAt: Date?
 }
 

@@ -433,7 +433,14 @@ struct WatchActivityStoreTests {
         var categoryID: iptv.Category.ID?
         try database.write { db in
             let category = try iptv.Category.insert {
-                iptv.Category.Draft(id: nil, sourceID: title, type: .movie, title: title, updatedAt: Date())
+                iptv.Category.Draft(
+                    id: nil,
+                    sourceID: title,
+                    type: .movie,
+                    title: title,
+                    groupKey: CategoryGrouping.key(for: title),
+                    updatedAt: Date()
+                )
             }
             .returning(\.self)
             .fetchOne(db)!

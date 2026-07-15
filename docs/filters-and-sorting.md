@@ -7,7 +7,7 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 ## Status
 
 - Target state: filters are local, composable, provider-scoped, and consistent across feature surfaces. Group/prefix filtering is implemented first; rating is supported; genre, country/language, recency, audio language, and subtitle language remain metadata-backed expansion points that must not appear until populated local fields can support them honestly.
-- Implementation status (reviewed 2026-07-10): `BrowseScreen`, `SearchScreen`, and `LiveScreen` share local filter semantics for category, category group/prefix, minimum rating, normalized text, and deterministic title/newest/rating sorts. Group selection leads the filter bar and constrains the category picker to matching groups. Browse computes filtered/sorted results from Sendable local snapshots in a detached user-initiated task, retains the prior grid while a new request runs, rejects cancelled/stale results, and animates only the committed result. Hidden groups are applied consistently to Browse, Search, Live, and For You; full category relationships remain available even when groups are hidden.
+- Implementation status (reviewed 2026-07-15): Category is navigation context in Movies, Series, and Live, not a filter. Their landing screens own category Group/search state; native category destinations own separate media filters and search state. Movie/series destinations expose rating and title/newest/rating sorting, while Live destinations expose title/newest sorting. Global Search retains Category and Group as result-refinement filters. Stored results are computed off the main actor from Sendable snapshots, text input is debounced, cancellation propagates into the worker, and cancelled results are rejected. Compact task identities contain criteria and a catalog revision rather than complete row arrays. Bulk result replacement is not animated. Hidden groups are applied consistently to Browse, Search, Live, and For You; full category relationships remain available even when groups are hidden.
 - Current schema limitation: rich metadata can be persisted during list/detail hydration, but filter UI remains limited to fields populated broadly enough to be truthful. Prefix visibility is stored in provider-scoped `CategoryPrefixVisibility` database rows; catalog category/media rows remain singleton active-provider state.
 
 ## User Experience
@@ -20,11 +20,11 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ### Browse Filter Bar UI
 
-- The filter bar is horizontally scrolling and starts with a summary/remove-all pill, followed by Group, Category, Rating, and Sort pills.
-- Group is multi-select and appears before Category. When groups are selected, the Category menu lists only categories in those groups; clearing group selection restores every visible category.
+- Category landing bars are horizontally scrolling and expose summary/remove-all plus Group. Movie/series destinations use a separate summary/remove-all, Rating, and Sort bar. Live destinations expose Sort. No category destination shows Category or Group as active media filters.
+- Search additionally retains a Category pill. When groups are selected there, the Category menu lists only categories in those groups; clearing group selection restores every visible category.
 - Filter pills use concise text, badges, active colors, chevrons, and minimum touch targets without redundant leading icons. Menu rows retain their explanatory icons.
 - With no active filters, the summary is a text-only `Filters` pill. With active filters, it becomes an icon-only `xmark.circle` remove-all pill with the active count, no chevron, and the VoiceOver label `Remove all filters`; its menu reports the count and offers the destructive `Remove All` action.
-- Category remains a dedicated sibling filter; large future option sets may move to an adaptive searchable selector without changing the shared filter semantics.
+- Category remains a dedicated sibling filter only in global Search; the media tabs use their sectioned landing lists for category navigation.
 - Filter buttons may choose one of three presentation styles depending on filter shape and platform:
   - Small enum filters use a compact popover/menu with a short set of options, for example release period values such as `This Year`, `Last Year`, decade ranges, or `Custom`.
   - Large option sets use a modal sheet or full-screen selector with an optional search field, selectable rows, checkmarks, cancel/close affordance, and explicit apply/confirm affordance when selection is not committed immediately. Category and language filters should use this pattern when their option count is high.
@@ -35,10 +35,11 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 ## Data and State
 
-- Current filter state: `searchText`, selected category, selected category group/prefixes, and minimum rating in browse/search; provider-scoped hidden prefix visibility in Settings.
+- Current filter state is surface-specific: category landing search plus selected group/prefixes; media destination search plus rating/sort for movies and series or search/sort for Live; global Search retains selected category, groups, rating, and scope. Provider-scoped hidden prefix visibility remains in Settings.
 - Current sort state: `BrowseSort.title`, `.newest`, and `.rating` are applied in memory with deterministic tie-breakers after local fetches.
-- Current usable fields for exposed filters: normalized `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Media.sourceID`, and `Category.title`.
-- Browse filtering/sorting receives already-fetched `Media` and `Category` snapshots and performs no SQLite or provider work in its detached task.
+- Current usable fields for exposed filters: normalized `Media.title`, `Media.rating`, `Media.updatedAt`, `Media.categoryID`, `Media.sourceID`, `Category.title`, and persisted `Category.groupKey`.
+- Browse/Search/Live filtering and sorting receive already-fetched `Media` and `Category` snapshots and perform no provider work in their worker tasks. Category-prefix derivation occurs only when category rows are written; workers use the persisted group key, normalize each query once, and check cancellation while scanning and before/after sorting.
+- Hydration counts come from a compact grouped database observation. Browse and Live scope their row observations to the selected category, so category commits do not reduce or equality-compare the complete catalog on the main actor.
 - Planned fields for future filters: persisted `Media.genre`, `Media.releaseDate`, `Media.addedAt`, `Media.country`, and real audio/subtitle language metadata once population coverage and UI contracts are implemented.
 
 ## Key Files
@@ -60,13 +61,14 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 - Language filters state whether they use catalog metadata, inferred category prefix, audio track metadata, subtitle track metadata, or user preferences.
 - Sort order has deterministic tie-breakers, such as title and source ID.
 - Filter state is provider-scoped when persisted.
+- Rapid query/filter changes cancel obsolete work and never commit stale results.
 
 ## Current Gaps / Planned Work
 
 - Audio/subtitle language filters require metadata not currently stored in the library schema.
 - Genre, release-period, country/language, and added-date values can now be persisted during detail enrichment, but filter UI is intentionally deferred until those fields are populated broadly enough to avoid misleading empty filters.
 - Prefix visibility is persisted per provider in local database rows and invalidated through a revisioned visibility cache.
-- For You applies the same hidden-prefix relationships to every catalog-derived hero and rail.
+- For You applies hidden-prefix relationships in its observed database projection and fetches only bounded rail candidates rather than scanning the complete media catalog.
 
 ## Notes for Agents
 

@@ -67,16 +67,17 @@ final class SyncManager {
         let task: Task<Void, Error>
     }
 
-    private let service: XtreamService
+    private nonisolated let service: XtreamService
     private let providerProbe: ProviderEndpointProbe
-    private let providerID: Provider.ID
+    private nonisolated let catalogClient: ProviderCatalogClient
+    private nonisolated let providerID: Provider.ID
     private let providerResponseTimeout: Duration
     private let catalogResponseTimeout: Duration
     @ObservationIgnored
     private nonisolated let ownership = Ownership()
 
     @ObservationIgnored
-    private let database: any DatabaseWriter
+    private nonisolated let database: any DatabaseWriter
 
     var movieSync = SyncStatus.idle
     var seriesSync = SyncStatus.idle
@@ -108,6 +109,12 @@ final class SyncManager {
         @Dependency(\.defaultDatabase) var defaultDatabase
         self.service = service
         self.providerProbe = ProviderEndpointProbe(
+            endpoint: providerEndpoint,
+            username: username,
+            password: password,
+            configuration: providerProbeConfiguration
+        )
+        self.catalogClient = ProviderCatalogClient(
             endpoint: providerEndpoint,
             username: username,
             password: password,
@@ -270,12 +277,12 @@ final class SyncManager {
         of type: Xtream.ContentType,
         timeout: Duration,
         timeoutError: InitialSyncError
-    ) async throws -> [Xtream.Category] {
-        let service = service
+    ) async throws -> [ProviderCatalogCategory] {
+        let catalogClient = catalogClient
 
-        return try await withThrowingTaskGroup(of: [Xtream.Category].self) { group in
+        return try await withThrowingTaskGroup(of: [ProviderCatalogCategory].self) { group in
             group.addTask {
-                try await service.getCategories(of: type)
+                try await catalogClient.categories(of: type)
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
@@ -291,9 +298,9 @@ final class SyncManager {
     }
 
     private func replaceCatalogCategories(
-        movie: [Xtream.Category],
-        series: [Xtream.Category],
-        live: [Xtream.Category],
+        movie: [ProviderCatalogCategory],
+        series: [ProviderCatalogCategory],
+        live: [ProviderCatalogCategory],
         operation: Ownership
     ) async throws {
         let lifetime = ownership
@@ -328,16 +335,22 @@ final class SyncManager {
     }
 
     private nonisolated static func upsertCategory(
-        _ category: Xtream.Category,
+        _ category: ProviderCatalogCategory,
         type: Xtream.ContentType,
         in db: Database
     ) throws {
         try Category.insert {
-            Category.Draft(from: category, type: type)
+            Category.Draft(
+                sourceID: category.id,
+                type: .from(type),
+                title: category.name,
+                groupKey: CategoryGrouping.key(for: category.name)
+            )
         } onConflict: {
             ($0.sourceID, $0.type)
         } doUpdate: {
             $0.title = category.name
+            $0.groupKey = CategoryGrouping.key(for: category.name)
         }.execute(db)
     }
 
@@ -394,7 +407,7 @@ final class SyncManager {
     private func hydrate(
         category: Category.ID,
         type: MediaType,
-        operation perform: @escaping @MainActor (Ownership) async throws -> Int
+        operation perform: @escaping @Sendable (Ownership) async throws -> Int
     ) async throws {
         let key = HydrationKey(categoryID: category, type: type)
         if let existing = hydrationFlights[key] {
@@ -405,7 +418,10 @@ final class SyncManager {
         let previousState = categoryHydrationStates[category]
         categoryHydrationStates[category] = .loading
         let operation = Ownership()
-        let task = Task {
+        // Provider responses can contain thousands of rows. A detached task keeps
+        // response decoding and preparation off the main actor; observable state
+        // is published only before and after the one transactional database write.
+        let task = Task.detached(priority: .userInitiated) {
             try await perform(operation)
         }
         hydrationFlights[key] = HydrationFlight(
@@ -440,13 +456,13 @@ final class SyncManager {
         }
     }
 
-    private func performMovieHydration(
+    private nonisolated func performMovieHydration(
         in category: Category.ID,
         operation: Ownership
     ) async throws -> Int {
         let sourceID = try await categorySourceID(category, type: .movie, operation: operation)
         let streams = try await service.getVodStreams(in: sourceID)
-        try checkCurrent(operation)
+        try Self.checkCurrent(lifetime: ownership, operation: operation)
 
         let lifetime = ownership
         let providerID = providerID
@@ -496,13 +512,13 @@ final class SyncManager {
         }
     }
 
-    private func performSeriesHydration(
+    private nonisolated func performSeriesHydration(
         in category: Category.ID,
         operation: Ownership
     ) async throws -> Int {
         let sourceID = try await categorySourceID(category, type: .series, operation: operation)
         let streams = try await service.getSeriesStreams(in: sourceID)
-        try checkCurrent(operation)
+        try Self.checkCurrent(lifetime: ownership, operation: operation)
 
         let lifetime = ownership
         let providerID = providerID
@@ -555,13 +571,13 @@ final class SyncManager {
         }
     }
 
-    private func performLiveHydration(
+    private nonisolated func performLiveHydration(
         in category: Category.ID,
         operation: Ownership
     ) async throws -> Int {
         let sourceID = try await categorySourceID(category, type: .live, operation: operation)
         let streams = try await service.getLiveStreams(in: sourceID)
-        try checkCurrent(operation)
+        try Self.checkCurrent(lifetime: ownership, operation: operation)
 
         let lifetime = ownership
         let providerID = providerID
@@ -611,18 +627,18 @@ final class SyncManager {
         }
     }
 
-    private func categorySourceID(
+    private nonisolated func categorySourceID(
         _ category: Category.ID,
         type: MediaType,
         operation: Ownership
     ) async throws -> String {
-        try checkCurrent(operation)
+        try Self.checkCurrent(lifetime: ownership, operation: operation)
         let sourceID = try await database.read { db in
             try Category.select(\.sourceID)
                 .where { $0.id.eq(category).and($0.type.eq(type)) }
                 .fetchOne(db)
         }
-        try checkCurrent(operation)
+        try Self.checkCurrent(lifetime: ownership, operation: operation)
 
         guard let sourceID else {
             throw SyncError.noSourceIDFound(category)
@@ -966,6 +982,7 @@ extension SyncManager {
         case providerDidNotRespond
         case providerHTTPError(statusCode: Int)
         case catalogDataTimedOut(family: String)
+        case catalogDecodingFailed(family: String)
         case emptyCatalog
 
         var errorDescription: String? {
@@ -978,6 +995,8 @@ extension SyncManager {
                     "The provider rejected the initial request (HTTP \(statusCode)). Check the URL and credentials, then try again."
                 case .catalogDataTimedOut(let family):
                     "The provider stopped sending data while syncing \(family) categories. Try again or check the provider service."
+                case .catalogDecodingFailed(let family):
+                    "The provider returned malformed \(family) categories. Try again or check whether the provider supports the Xtream API."
                 case .emptyCatalog:
                     "The provider responded but returned no movie, series, or live categories. Check the credentials and subscription, then try again."
             }
@@ -986,6 +1005,134 @@ extension SyncManager {
 
     enum SyncError: Error {
         case noSourceIDFound(Category.ID)
+    }
+}
+
+private struct ProviderCatalogCategory: Decodable, Hashable, Sendable {
+    let id: String
+    let name: String
+
+    fileprivate enum CodingKeys: String, CodingKey {
+        case categoryID = "category_id"
+        case categoryName = "category_name"
+        case id
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        guard let id = try container.string(for: .categoryID) ?? container.string(for: .id),
+              !id.isEmpty
+        else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .categoryID,
+                in: container,
+                debugDescription: "A category must contain category_id or id."
+            )
+        }
+
+        self.id = id
+        self.name = try container.string(for: .categoryName)
+            ?? container.string(for: .name)
+            ?? "Category \(id)"
+    }
+}
+
+private extension KeyedDecodingContainer where Key == ProviderCatalogCategory.CodingKeys {
+    func string(for key: Key) throws -> String? {
+        if let value = try? decode(String.self, forKey: key) {
+            return value
+        }
+        if let value = try? decode(Int.self, forKey: key) {
+            return String(value)
+        }
+        return nil
+    }
+}
+
+private struct ProviderCatalogClient: Sendable {
+    private let endpoint: URL
+    private let username: String
+    private let password: String
+    private let configuration: URLSessionConfiguration
+
+    init(
+        endpoint: URL,
+        username: String,
+        password: String,
+        configuration: URLSessionConfiguration
+    ) {
+        self.endpoint = XtreamEndpoint.playerAPIURL(from: endpoint)
+        self.username = username
+        self.password = password
+        let configuration = (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        configuration.waitsForConnectivity = false
+        self.configuration = configuration
+    }
+
+    func categories(of type: Xtream.ContentType) async throws -> [ProviderCatalogCategory] {
+        let data = try await categoryData(of: type, cachePolicy: .useProtocolCachePolicy)
+
+        do {
+            return try JSONDecoder().decode([ProviderCatalogCategory].self, from: data)
+        } catch {
+            logger.warning("Could not decode \(type.catalogFamilyName, privacy: .public) categories (\(data.count, privacy: .public) bytes): \(String(reflecting: error), privacy: .public). Retrying without cached data.")
+        }
+
+        let retryData = try await categoryData(
+            of: type,
+            cachePolicy: .reloadIgnoringLocalCacheData
+        )
+        do {
+            return try JSONDecoder().decode([ProviderCatalogCategory].self, from: retryData)
+        } catch {
+            logger.warning("Could not decode uncached \(type.catalogFamilyName, privacy: .public) categories (\(retryData.count, privacy: .public) bytes): \(String(reflecting: error), privacy: .public)")
+            throw SyncManager.InitialSyncError.catalogDecodingFailed(family: type.catalogFamilyName)
+        }
+    }
+
+    private func categoryData(
+        of type: Xtream.ContentType,
+        cachePolicy: URLRequest.CachePolicy
+    ) async throws -> Data {
+        var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "username", value: username),
+            URLQueryItem(name: "password", value: password),
+            URLQueryItem(name: "action", value: "get_\(type)_categories"),
+        ]
+        var request = URLRequest(url: components.url!)
+        request.cachePolicy = cachePolicy
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession(configuration: configuration)
+                .data(for: request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as URLError where error.code == .cancelled {
+            throw CancellationError()
+        } catch {
+            throw SyncManager.InitialSyncError.providerDidNotRespond
+        }
+
+        guard let response = response as? HTTPURLResponse else {
+            throw SyncManager.InitialSyncError.providerDidNotRespond
+        }
+        guard (200..<300).contains(response.statusCode) else {
+            throw SyncManager.InitialSyncError.providerHTTPError(statusCode: response.statusCode)
+        }
+        return data
+    }
+}
+
+private extension Xtream.ContentType {
+    var catalogFamilyName: String {
+        switch self {
+            case .vod: "movie"
+            case .series: "series"
+            case .live: "live"
+        }
     }
 }
 

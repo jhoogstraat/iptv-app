@@ -1,5 +1,18 @@
 import SwiftUI
 
+struct OnboardingProviderRevisionState {
+    private(set) var hasObservedRevision = false
+
+    mutating func observeMissingProvider() -> Bool {
+        defer { hasObservedRevision = true }
+        return hasObservedRevision
+    }
+
+    mutating func observeProvider() {
+        hasObservedRevision = true
+    }
+}
+
 struct OnboardingFlowView: View {
     private enum Route: Hashable {
         case credentials
@@ -16,6 +29,7 @@ struct OnboardingFlowView: View {
     @State private var syncingRevision: Int?
     @State private var isSyncPresented = false
     @State private var hasSyncFailed = false
+    @State private var providerRevisionState = OnboardingProviderRevisionState()
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -288,6 +302,10 @@ struct OnboardingFlowView: View {
     private func reactToProviderRevision() async {
         do {
             guard let configuration = try providerManager.activeProviderConfiguration() else {
+                // The initial revision task can run after the user has started editing.
+                // Preserve that unsaved draft; only a later missing-provider revision
+                // represents a real removal that should reset onboarding.
+                guard providerRevisionState.observeMissingProvider() else { return }
                 providerFields = ProviderFields(name: "", endpoint: "", username: "", password: "")
                 selectedKind = .xtream
                 showsValidationErrors = false
@@ -297,6 +315,7 @@ struct OnboardingFlowView: View {
                 return
             }
 
+            providerRevisionState.observeProvider()
             providerFields = ProviderFields(
                 name: configuration.name,
                 endpoint: configuration.endpoint.absoluteString,

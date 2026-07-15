@@ -7,21 +7,22 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 ## Status
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
-- Implementation status (reviewed 2026-07-15): `SyncManager.sync()` single-flights initial sync, rejects non-2xx provider or proxy response headers before waiting for a body, bounds providers that never answer and later category responses that stall, requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Successful sync timestamps are persisted on the provider; an initialized catalog older than six hours refreshes when the app becomes active. Duplicate initial-sync, category-hydration, and detail-enrichment callers join active work. Category hydration reconciles incoming rows, and provider changes invalidate stale ownership before it can commit.
-- Current schema: because the app is not yet live, the complete current schema is intentionally consolidated into the single initial `Create tables` migration. It creates provider, category, media, category-prefix-visibility, series-season, watch-activity, and favorites tables plus current indexes and metadata/write-order columns. Provider passwords live only in Keychain behind a database credential reference; `providers` has no plaintext password column.
+- Implementation status (reviewed 2026-07-15): `SyncManager.sync()` single-flights initial sync, rejects non-2xx provider or proxy response headers before waiting for a body, bounds providers that never answer and later category responses that stall, and decodes standard Xtream `category_id`/`category_name` payloads locally while accepting `id`/`name` compatibility payloads. A malformed category response is retried once without cached data; diagnostics record only the decoding path and byte count. It requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Successful sync timestamps are persisted on the provider; an initialized catalog older than six hours refreshes when the app becomes active. Duplicate initial-sync, category-hydration, and detail-enrichment callers join active work. Category hydration fetches and decodes provider payloads in a detached user-initiated task, reconciles every incoming row in one database transaction, and publishes only loading plus the final success/failure state. Provider changes invalidate stale ownership before it can commit.
+- Current schema: because the app is not yet live, the complete current schema is intentionally consolidated into the single initial `Create tables` migration. It creates provider, category, media, category-prefix-visibility, series-season, watch-activity, and favorites tables plus current indexes and metadata/write-order columns. Categories persist their derived group key and index `(type, groupKey)`; media type/category indexes support local observations and category hydration paths. Provider passwords live only in Keychain behind a database credential reference; `providers` has no plaintext password column.
 
 ## User Experience
 
 - During onboarding, the user sees initial sync phases for Movies, Series, and Live.
 - After sync, Movies, Series, and Live can show category lists immediately.
 - Opening a category for the first time may trigger stream/channel hydration for that category.
+- Category hydration keeps the UI responsive and displays shimmer placeholders until the single transactional result is available.
 - Once hydrated, category content should render from local `Media` rows.
 - Sync errors should be recoverable without losing provider configuration unnecessarily.
 
 ## Data and State
 
 - `providers`: provider identity, HTTP(S) endpoint, explicit insecure-HTTP approval, Keychain credential reference, source kind, active flag, and initialized flag. Scheme-less endpoints default to HTTPS.
-- `categories`: source category ID, media type, display title, and hydration timestamp.
+- `categories`: source category ID, media type, display title, persisted provider-prefix group key, and hydration timestamp. Sync recomputes the group key whenever an inserted or renamed provider category is upserted.
 - `media`: source stream ID, media type, title, category ID, rich detail metadata, episode/series linkage, container extension where available, and update timestamp. Live rows persist available channel metadata without inventing EPG data.
 - `SyncManager.InitialSyncPhase`: idle, checking provider, syncing movies, syncing series, syncing live, validating received data, replacing catalog, succeeded, failed.
 - `SyncManager.SyncStatus`: idle, active, success, failure.
@@ -44,8 +45,10 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 
 - Initial sync preserves the last good catalog until movie, series, and live category fetches all succeed, then replaces catalog rows atomically.
 - Initial sync terminates with actionable failures immediately on non-2xx provider/proxy response headers, or after bounded waits when the provider does not answer, a later response stalls, or all three category payloads are empty.
+- Initial category decoding accepts standard Xtream category keys and reports the malformed movie, series, or live family explicitly instead of exposing a generic dependency decoding error.
 - Movie, series, and live category sync state is visible to onboarding.
 - Lazy category hydration fetches streams/channels only when needed, reconciles stale children, and stamps `Category.updatedAt` on success.
+- Provider fetch/decoding and database reconciliation do not execute on the main actor; SwiftUI observes the committed category result rather than incremental rows.
 - Hydrated category media is stored locally and reused by browse/search/detail/live surfaces.
 - Provider changes invalidate old work before clearing/replacing the singleton catalog, preventing stale commits or cross-provider leakage.
 - Sync failures preserve the last good catalog and expose meaningful retry copy.

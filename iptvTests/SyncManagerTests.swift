@@ -35,6 +35,7 @@ struct SyncManagerTests {
             let liveCategories = categories.filter { $0.type == .live }.sorted { $0.sourceID < $1.sourceID }
             
             #expect(movieCategories.map(\.sourceID) == ["100", "200"])
+            #expect(movieCategories.map(\.groupKey) == ["EN", CategoryGrouping.ungroupedKey])
             #expect(seriesCategories.map(\.sourceID) == ["100"])
             #expect(liveCategories.map(\.sourceID) == ["300", "400"])
             #expect(liveCategories.map(\.title) == ["Live News", "Sports Live"])
@@ -156,6 +157,23 @@ struct SyncManagerTests {
             #expect(syncManager.seriesSync == .failure)
             #expect(syncManager.liveSync == .failure)
             #expect(syncManager.lastErrorMessage == "The provider responded but returned no movie, series, or live categories. Check the credentials and subscription, then try again.")
+        }
+    }
+
+    @Test func syncRetriesTransientMalformedCategoryResponseWithoutCachedData() async throws {
+        TransientMalformedCatalogXtreamURLProtocol.reset()
+        try await withTestDatabase { database in
+            try resetDatabase(database)
+            let syncManager = try makeSyncManager(
+                database: database,
+                protocolClass: TransientMalformedCatalogXtreamURLProtocol.self
+            )
+
+            let result = await syncManager.sync()
+
+            #expect(result == .success)
+            #expect(syncManager.initialSyncPhase == .succeeded)
+            #expect(TransientMalformedCatalogXtreamURLProtocol.movieRequestCount == 3)
         }
     }
 
@@ -476,6 +494,45 @@ private final class EmptyCatalogXtreamURLProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
+private final class TransientMalformedCatalogXtreamURLProtocol: URLProtocol {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var _movieRequestCount = 0
+
+    static var movieRequestCount: Int {
+        lock.withLock { _movieRequestCount }
+    }
+
+    static func reset() {
+        lock.withLock { _movieRequestCount = 0 }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        switch requestAction {
+            case "get_vod_categories":
+                let requestCount = Self.lock.withLock {
+                    Self._movieRequestCount += 1
+                    return Self._movieRequestCount
+                }
+                if requestCount == 2 {
+                    finish(with: ["unexpected": "response"])
+                } else {
+                    finish(with: [["category_id": "100", "category_name": "Movies"]])
+                }
+            case "get_series_categories":
+                finish(with: [["category_id": "200", "category_name": "Series"]])
+            case "get_live_categories":
+                finish(with: [["category_id": "300", "category_name": "Live"]])
+            default:
+                finish(with: [])
+        }
+    }
+
+    override func stopLoading() {}
+}
+
 private extension URLProtocol {
     var requestAction: String? {
         URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
@@ -518,7 +575,7 @@ private final class StubXtreamURLProtocol: URLProtocol {
         switch action {
         case "get_vod_categories":
             payload = [
-                ["category_id": "100", "category_name": "Action"],
+                ["category_id": "100", "category_name": "|EN| Action"],
                 ["category_id": "200", "category_name": "Drama"],
             ]
         case "get_vod_streams":
@@ -572,7 +629,7 @@ private final class StubXtreamURLProtocol: URLProtocol {
             }
         case "get_series_categories":
             payload = [
-                ["category_id": "100", "category_name": "Sci-Fi"],
+                ["category_id": 100, "category_name": "Sci-Fi"],
             ]
         case "get_series":
             payload = [

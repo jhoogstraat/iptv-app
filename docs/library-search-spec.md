@@ -14,7 +14,7 @@ The Search tab starts with a prompt, shows truthful empty and partial-coverage s
 
 ## Data and State
 
-Search operates on locally persisted `Media` and `Category` rows. `LibraryFilterRequest` is a Hashable, Sendable snapshot; `LibraryFilterEngine.filteredMedia(inBackground:)` performs normalization, matching, filtering, and sorting off the main actor. `LibrarySearchIndexes` provides category, active-profile favorite, and resume lookups.
+Search operates on locally persisted `Media` and `Category` rows. `LibraryFilterRequest` is a Sendable worker snapshot; the separate compact `LibraryFilterTaskID` contains normalized criteria, included media types, and a catalog revision without complete row arrays. `LibraryFilterEngine.filteredMedia(inBackground:)` performs normalization, scope matching, filtering, and sorting off the main actor and propagates cancellation to its detached worker. `LibrarySearchIndexes` provides category, active-profile favorite, and resume lookups. Search skips result computation while no query or filter is active.
 
 ## Key Files
 
@@ -38,4 +38,4 @@ Search operates on locally persisted `Media` and `Category` rows. `LibraryFilter
 
 ## Notes for Agents
 
-Do not introduce a remote request per keystroke. Keep `LibraryFilterRequest` Sendable and commit results only after cancellation checks. Any future persisted search history must be profile scoped.
+Do not introduce a remote request per keystroke. Keep `LibraryFilterRequest` Sendable, keep row arrays out of SwiftUI task identity, and commit results only after cancellation checks. Any future persisted search history must be profile scoped.
