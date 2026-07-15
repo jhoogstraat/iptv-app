@@ -990,6 +990,14 @@ struct PlayerView: View {
                         }
                     }
 
+                    Section("Quality") {
+                        qualityListRows
+                    }
+
+                    Section("Chapters") {
+                        chapterListRows
+                    }
+
                     Section("Output") {
                         outputRouteRow
                     }
