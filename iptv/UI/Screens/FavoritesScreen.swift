@@ -27,6 +27,7 @@ enum FavoritesFocusProjection {
 }
 
 struct FavoritesScreen: View {
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     private enum FavoriteScope: String, CaseIterable, Identifiable {
         case all
         case movies
@@ -110,7 +111,7 @@ struct FavoritesScreen: View {
         )
 
         return favorites
-            .filter { $0.providerID == session.providerID && scope.includes($0.mediaType) }
+            .filter { $0.profileID == session.activeProfileID && $0.providerID == session.providerID && scope.includes($0.mediaType) }
             .sorted(by: FavoriteStore.favoriteOrdering)
             .map { favorite in
                 let localMedia = mediaByKey[
@@ -213,7 +214,7 @@ struct FavoritesScreen: View {
 
     @ViewBuilder
     private var content: some View {
-        if favorites.filter({ $0.providerID == session.providerID }).isEmpty {
+        if favorites.filter({ $0.profileID == session.activeProfileID && $0.providerID == session.providerID }).isEmpty {
             ContentUnavailableView {
                 Label("No favorites yet", systemImage: "heart")
             } description: {

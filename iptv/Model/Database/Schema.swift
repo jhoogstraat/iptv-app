@@ -125,8 +125,22 @@ func appDatabase(
         """).execute(db)
 
         try #sql("""
+        CREATE TABLE "user_profiles" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "name" TEXT NOT NULL,
+            "createdAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        INSERT INTO "user_profiles" ("id", "name") VALUES (1, 'Primary')
+        """).execute(db)
+
+        try #sql("""
         CREATE TABLE "watch_activity" (
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "profileID" INTEGER NOT NULL DEFAULT 1,
             "providerID" INTEGER NOT NULL,
             "mediaType" INTEGER NOT NULL,
             "sourceID" INTEGER NOT NULL,
@@ -140,19 +154,21 @@ func appDatabase(
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             "writeSessionStartedAt" TEXT,
             "writeGeneration" INTEGER NOT NULL DEFAULT 0,
-            UNIQUE ("providerID", "mediaType", "sourceID"),
+            UNIQUE ("profileID", "providerID", "mediaType", "sourceID"),
+            FOREIGN KEY ("profileID") REFERENCES "user_profiles"("id") ON DELETE CASCADE,
             FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
         ) STRICT
         """).execute(db)
 
         try #sql("""
         CREATE INDEX "watch_activity_provider_last_watched_idx"
-        ON "watch_activity" ("providerID", "completed", "lastWatchedAt" DESC)
+        ON "watch_activity" ("profileID", "providerID", "completed", "lastWatchedAt" DESC)
         """).execute(db)
 
         try #sql("""
         CREATE TABLE "favorites" (
             "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "profileID" INTEGER NOT NULL DEFAULT 1,
             "providerID" INTEGER NOT NULL,
             "mediaType" INTEGER NOT NULL,
             "sourceID" INTEGER NOT NULL,
@@ -162,7 +178,8 @@ func appDatabase(
             "categoryTitle" TEXT,
             "createdAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE ("providerID", "mediaType", "sourceID"),
+            UNIQUE ("profileID", "providerID", "mediaType", "sourceID"),
+            FOREIGN KEY ("profileID") REFERENCES "user_profiles"("id") ON DELETE CASCADE,
             FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE,
             FOREIGN KEY ("categoryID") REFERENCES "categories"("id") ON DELETE SET NULL
         ) STRICT
@@ -170,7 +187,7 @@ func appDatabase(
 
         try #sql("""
         CREATE INDEX "favorites_provider_updated_idx"
-        ON "favorites" ("providerID", "updatedAt" DESC)
+        ON "favorites" ("profileID", "providerID", "updatedAt" DESC)
         """).execute(db)
     }
     
@@ -262,9 +279,108 @@ nonisolated struct CategoryPrefixVisibility: Hashable, Identifiable, Sendable {
     var updatedAt: Date = .now
 }
 
+@Table("user_profiles")
+nonisolated struct UserProfile: Hashable, Identifiable, Sendable {
+    let id: Int
+    var name: String
+    var createdAt: Date = .now
+    var updatedAt: Date = .now
+}
+
+enum UserProfileStore: Sendable {
+    nonisolated static let primaryProfileID = 1
+    nonisolated static let activeProfileIDKey = "userProfile.activeID"
+    nonisolated static let revisionKey = "userProfile.revision"
+
+    nonisolated static func activeProfileID(defaults: UserDefaults = .standard) -> UserProfile.ID {
+        let storedID = defaults.integer(forKey: activeProfileIDKey)
+        return storedID > 0 ? storedID : primaryProfileID
+    }
+
+    static func create(
+        name rawName: String,
+        database: any DatabaseWriter,
+        defaults: UserDefaults = .standard
+    ) throws -> UserProfile {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw ProfileError.emptyName }
+        let now = Date()
+        let profile = try database.write { db in
+            try UserProfile.insert {
+                UserProfile.Draft(id: nil, name: name, createdAt: now, updatedAt: now)
+            }.execute(db)
+            return try UserProfile.order { $0.id.desc() }.fetchOne(db)
+        }
+        guard let profile else { throw ProfileError.creationFailed }
+        setActive(profile.id, defaults: defaults)
+        return profile
+    }
+
+    static func rename(
+        _ profile: UserProfile,
+        to rawName: String,
+        database: any DatabaseWriter,
+        defaults: UserDefaults = .standard
+    ) throws {
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw ProfileError.emptyName }
+        try database.write { db in
+            try UserProfile.find(profile.id).update {
+                $0.name = name
+                $0.updatedAt = Date()
+            }.execute(db)
+        }
+        bumpRevision(defaults: defaults)
+    }
+
+    static func delete(
+        _ profile: UserProfile,
+        database: any DatabaseWriter,
+        defaults: UserDefaults = .standard
+    ) throws {
+        try database.write { db in
+            guard try UserProfile.fetchCount(db) > 1 else { throw ProfileError.lastProfile }
+            try UserProfile.find(profile.id).delete().execute(db)
+            if activeProfileID(defaults: defaults) == profile.id,
+               let replacement = try UserProfile.order { $0.id.asc() }.fetchOne(db) {
+                defaults.set(replacement.id, forKey: activeProfileIDKey)
+            }
+        }
+        bumpRevision(defaults: defaults)
+    }
+
+    nonisolated static func setActive(
+        _ profileID: UserProfile.ID,
+        defaults: UserDefaults = .standard
+    ) {
+        defaults.set(profileID, forKey: activeProfileIDKey)
+        bumpRevision(defaults: defaults)
+        FavoriteStore.bumpRevision(defaults: defaults)
+    }
+
+    nonisolated private static func bumpRevision(defaults: UserDefaults) {
+        defaults.set(defaults.integer(forKey: revisionKey) &+ 1, forKey: revisionKey)
+    }
+
+    enum ProfileError: LocalizedError {
+        case emptyName
+        case lastProfile
+        case creationFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .emptyName: "Enter a profile name."
+            case .lastProfile: "At least one profile is required."
+            case .creationFailed: "The profile could not be created."
+            }
+        }
+    }
+}
+
 @Table("watch_activity")
 nonisolated struct WatchActivity: Hashable, Identifiable, Sendable {
     let id: Int
+    let profileID: UserProfile.ID
     let providerID: Provider.ID
     let mediaType: MediaType
     let sourceID: Int
@@ -301,6 +417,7 @@ nonisolated struct WatchActivity: Hashable, Identifiable, Sendable {
 @Table("favorites")
 nonisolated struct Favorite: Hashable, Identifiable, Sendable {
     let id: Int
+    let profileID: UserProfile.ID
     let providerID: Provider.ID
     let mediaType: MediaType
     let sourceID: Int
@@ -395,12 +512,14 @@ enum WatchActivityStore: Sendable {
     ) -> WatchActivity? {
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
+        let profileID = UserProfileStore.activeProfileID()
 
         do {
             return try database.read { db in
                 try WatchActivity
                     .where {
-                        $0.providerID.eq(providerID)
+                        $0.profileID.eq(profileID)
+                            .and($0.providerID.eq(providerID))
                             .and($0.mediaType.eq(media.type))
                             .and($0.sourceID.eq(media.sourceID))
                     }
@@ -419,11 +538,16 @@ enum WatchActivityStore: Sendable {
     ) -> [WatchActivity] {
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
+        let profileID = UserProfileStore.activeProfileID()
 
         do {
             let activities = try database.read { db in
                 try WatchActivity
-                    .where { $0.providerID.eq(providerID).and($0.completed.eq(false)) }
+                    .where {
+                        $0.profileID.eq(profileID)
+                            .and($0.providerID.eq(providerID))
+                            .and($0.completed.eq(false))
+                    }
                     .fetchAll(db)
             }
 
@@ -479,12 +603,14 @@ enum WatchActivityStore: Sendable {
         let storedCurrentTime = completed ? Swift.max(currentTime, duration ?? currentTime) : currentTime
         let writeGeneration = Int64(writeStamp.generation)
         let now = Date()
+        let profileID = UserProfileStore.activeProfileID()
 
         do {
             return try await database.write { db in
                 let existing = try WatchActivity
                     .where {
-                        $0.providerID.eq(providerID)
+                        $0.profileID.eq(profileID)
+                            .and($0.providerID.eq(providerID))
                             .and($0.mediaType.eq(media.type))
                             .and($0.sourceID.eq(media.sourceID))
                     }
@@ -522,6 +648,7 @@ enum WatchActivityStore: Sendable {
                     try WatchActivity.insert {
                         WatchActivity.Draft(
                             id: nil,
+                            profileID: profileID,
                             providerID: providerID,
                             mediaType: media.type,
                             sourceID: media.sourceID,
@@ -621,12 +748,14 @@ enum FavoriteStore: Sendable {
         guard let providerID else { return nil }
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
+        let profileID = UserProfileStore.activeProfileID()
 
         do {
             return try database.read { db in
                 try Favorite
                     .where {
-                        $0.providerID.eq(providerID)
+                        $0.profileID.eq(profileID)
+                            .and($0.providerID.eq(providerID))
                             .and($0.mediaType.eq(media.type))
                             .and($0.sourceID.eq(media.sourceID))
                     }
@@ -645,11 +774,12 @@ enum FavoriteStore: Sendable {
         guard let providerID else { return [] }
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
+        let profileID = UserProfileStore.activeProfileID()
 
         do {
             return try database.read { db in
                 let favorites = try Favorite
-                    .where { $0.providerID.eq(providerID) }
+                    .where { $0.profileID.eq(profileID).and($0.providerID.eq(providerID)) }
                     .fetchAll(db)
                     .sorted(by: favoriteOrdering)
 
@@ -690,11 +820,13 @@ enum FavoriteStore: Sendable {
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
         let now = Date()
+        let profileID = UserProfileStore.activeProfileID(defaults: defaults)
 
         let result = try database.write { db in
             let existing = try Favorite
                 .where {
-                    $0.providerID.eq(providerID)
+                    $0.profileID.eq(profileID)
+                        .and($0.providerID.eq(providerID))
                         .and($0.mediaType.eq(media.type))
                         .and($0.sourceID.eq(media.sourceID))
                 }
@@ -707,6 +839,7 @@ enum FavoriteStore: Sendable {
 
             try insert(
                 media,
+                profileID: profileID,
                 providerID: providerID,
                 categoryTitle: suppliedCategoryTitle,
                 now: now,
@@ -730,10 +863,12 @@ enum FavoriteStore: Sendable {
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
         let now = Date()
+        let profileID = UserProfileStore.activeProfileID(defaults: defaults)
 
         try database.write { db in
             try insert(
                 media,
+                profileID: profileID,
                 providerID: providerID,
                 categoryTitle: suppliedCategoryTitle,
                 now: now,
@@ -754,11 +889,13 @@ enum FavoriteStore: Sendable {
         guard let providerID else { throw MutationError.missingProvider }
         @Dependency(\.defaultDatabase) var defaultDatabase
         let database = suppliedDatabase ?? defaultDatabase
+        let profileID = UserProfileStore.activeProfileID(defaults: defaults)
 
         try database.write { db in
             try Favorite
                 .where {
-                    $0.providerID.eq(providerID)
+                    $0.profileID.eq(profileID)
+                        .and($0.providerID.eq(providerID))
                         .and($0.mediaType.eq(media.type))
                         .and($0.sourceID.eq(media.sourceID))
                 }
@@ -816,6 +953,7 @@ enum FavoriteStore: Sendable {
 
     nonisolated private static func insert(
         _ media: Media,
+        profileID: UserProfile.ID,
         providerID: Provider.ID,
         categoryTitle suppliedCategoryTitle: String?,
         now: Date,
@@ -827,6 +965,7 @@ enum FavoriteStore: Sendable {
         try Favorite.insert {
             Favorite.Draft(
                 id: nil,
+                profileID: profileID,
                 providerID: providerID,
                 mediaType: media.type,
                 sourceID: media.sourceID,
@@ -838,7 +977,7 @@ enum FavoriteStore: Sendable {
                 updatedAt: now
             )
         } onConflict: {
-            ($0.providerID, $0.mediaType, $0.sourceID)
+            ($0.profileID, $0.providerID, $0.mediaType, $0.sourceID)
         } doUpdate: {
             $0.title = media.title
             $0.artworkURL = #bind(artworkURL)
@@ -848,7 +987,7 @@ enum FavoriteStore: Sendable {
         }.execute(db)
     }
 
-    nonisolated private static func bumpRevision(defaults: UserDefaults) {
+    nonisolated static func bumpRevision(defaults: UserDefaults) {
         defaults.set(defaults.integer(forKey: revisionKey) + 1, forKey: revisionKey)
     }
 

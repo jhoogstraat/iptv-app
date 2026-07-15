@@ -340,6 +340,7 @@ struct LibrarySearchIndexes: Sendable {
 
     init(
         providerID: Provider.ID,
+        profileID: UserProfile.ID = UserProfileStore.primaryProfileID,
         categories: [Category],
         favorites: [Favorite],
         watchActivities: [WatchActivity]
@@ -347,12 +348,15 @@ struct LibrarySearchIndexes: Sendable {
         categoryByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
         favoriteContentKeys = Set(
             favorites.lazy
-                .filter { $0.providerID == providerID }
+                .filter { $0.profileID == profileID && $0.providerID == providerID }
                 .map { LibraryContentKey(mediaType: $0.mediaType, sourceID: $0.sourceID) }
         )
 
         resumableActivityByContentKey = watchActivities.reduce(into: [:]) { index, activity in
-            guard activity.providerID == providerID, activity.isResumeEligible else { return }
+            guard activity.profileID == profileID,
+                  activity.providerID == providerID,
+                  activity.isResumeEligible
+            else { return }
             let key = LibraryContentKey(mediaType: activity.mediaType, sourceID: activity.sourceID)
             if let existing = index[key], existing.lastWatchedAt >= activity.lastWatchedAt {
                 return

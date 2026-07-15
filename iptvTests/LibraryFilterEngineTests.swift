@@ -337,6 +337,7 @@ struct LibraryFilterEngineTests {
         let media = makeMedia(id: 1, sourceID: 100, title: "Alpha", categoryID: category.id)
         let favorite = Favorite(
             id: 1,
+            profileID: UserProfileStore.primaryProfileID,
             providerID: providerID,
             mediaType: .movie,
             sourceID: media.sourceID,
@@ -347,6 +348,7 @@ struct LibraryFilterEngineTests {
         )
         let activity = WatchActivity(
             id: 1,
+            profileID: UserProfileStore.primaryProfileID,
             providerID: providerID,
             mediaType: .movie,
             sourceID: media.sourceID,

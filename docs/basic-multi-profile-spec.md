@@ -1,94 +1,41 @@
-# Basic Multi-Profile Spec
+# Feature: Basic Multi-Profile
+
+## Purpose
+
+Let household members keep independent favorites and watch progress while sharing the local provider catalog.
 
 ## Status
-- Version: v1
-- Date: 2026-02-24
-- Priority: P2 after provider-scoped user state
-- Implementation status (reviewed 2026-07-06): Deliberately deferred. Provider-scoped favorites and watch activity now exist, but there is still no `UserProfile`, `ProfileStore`, profile picker, profile management UI, migration, or profile-scoped playback preferences/search/download metadata. Do not add dormant profile services until a migration can create one active local profile named `Primary` and real consumers can read profile IDs.
 
-## Objective
-Add basic household profiles with isolated user state so each user has independent favorites, watch history, and playback preferences.
+Implemented for local profile CRUD, active-profile switching, favorites, watch activity, browse badges, search indexes, details, and For You. The pre-release initial schema creates a `Primary` profile and keys persisted user state by profile and provider.
 
-## In Scope
-- Create profile.
-- Switch active profile.
-- Rename profile.
-- Delete profile (with confirmation).
-- Profile-scoped isolation for:
-  - watch activity
-  - favorites
-  - playback preferences
-  - search recents and filters
-  - downloads metadata.
+## User Experience
 
-## Out of Scope
-- Profile PIN lock.
-- Parental ratings restrictions.
-- Cloud sync across devices.
+Settings contains a Profiles destination where users can create, select, rename, and delete profiles. Switching profiles refreshes profile-sensitive screens through a persisted revision signal. At least one profile must remain.
 
-## UX Requirements
-- Profile picker appears on app startup if more than one profile exists.
-- Current profile is always visible in Settings and Library.
-- Profile switch updates all visible data without app restart.
+## Data and State
 
-## Domain and Storage
+`user_profiles` stores profile identity. `favorites` and `watch_activity` use `profileID + providerID + mediaType + sourceID` uniqueness. The active profile ID is device-local in `UserDefaults`; missing state falls back to profile ID 1 (`Primary`).
 
-## New model
-- `UserProfile`
-  - `id`, `name`, `avatar`, `createdAt`, `isActive`.
+## Key Files
 
-## Required keying changes
-- Extend state keys from:
-  - `providerFingerprint + contentType + videoID`
-- to:
-  - `profileID + providerFingerprint + contentType + videoID`.
+- `iptv/Model/Database/Schema.swift`: initial schema, `UserProfile`, stores, and scoped state.
+- `iptv/UI/Screens/SettingsScreen.swift`: profile management.
+- `iptv/State/Session.swift`: active profile projection.
+- Browse, Search, Favorites, For You, and detail screens: profile-filtered presentation.
 
-## Migration
-- First rollout step:
-  - create one active local profile named `Primary`.
-  - migrate existing provider-scoped watch activity and favorites into `Primary` without changing visible user data.
-  - only after that migration, widen persisted user-state keys from provider-scoped to `profileID + providerFingerprint + contentType + videoID`.
+## Target Acceptance Criteria
 
-## Interfaces
-- `ProfileStore` service:
-  - `listProfiles()`
-  - `createProfile(name:)`
-  - `setActiveProfile(id:)`
-  - `renameProfile(id:name:)`
-  - `deleteProfile(id:)`
-  - `activeProfile()`.
+- Profiles can be created, selected, renamed, and deleted without deleting the final profile.
+- Favorites and watch progress never leak between profiles on the same provider.
+- Switching profile refreshes visible profile-sensitive content without restarting the app.
+- A new database always contains the `Primary` profile.
 
-## Integration points
-- `Player` should load and persist preferences for the active profile only after profile migration exists.
-- `WatchActivityStore` should widen existing provider-scoped rows to active-profile scope during migration.
-- `FavoriteStore` should widen existing provider-scoped rows to active-profile scope during migration.
-- Search recents and filters should be scoped by active profile once recents persistence exists.
-- Downloads metadata must not be introduced until the profile migration and download queue state machine exist.
+## Current Gaps / Planned Work
 
-## Failure Handling
-- If profile data fails to load, app falls back to `Primary` profile and logs a recoverable error.
-- Deleting active profile should atomically switch to another profile before finishing deletion.
+- Startup profile picker, avatars, PINs, and parental restrictions are not part of the basic implementation.
+- Playback defaults, downloads, and search-recents become profile-scoped when those persisted features are implemented.
+- Add broader UI automation after stable accessibility flows exist.
 
-## Testing
+## Notes for Agents
 
-## Unit
-- Profile CRUD.
-- Isolation between two profiles on same provider.
-- Migration from legacy single-profile data.
-- Active profile switch propagation.
-
-## Integration
-- Continue watching changes immediately after profile switch.
-- Favorites and search recents are isolated by profile.
-- Player preferences apply per profile.
-
-## UI
-- Profile picker flows.
-- Delete confirmation and fallback profile activation.
-- Settings profile management actions.
-
-## Acceptance Criteria
-- Two profiles can coexist with no data leakage between them.
-- Existing single-profile users retain prior data under the migrated `Primary` profile.
-- Active profile switch updates UI state consistently across tabs.
-
+The product is not live, so profile columns belong in the single `Create tables` migration. Add compatibility migrations only after the first production schema ships. Any new user-owned persisted state must include `profileID` from the start.

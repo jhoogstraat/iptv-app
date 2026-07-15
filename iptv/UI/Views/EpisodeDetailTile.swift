@@ -9,6 +9,7 @@ import SwiftUI
 import SQLiteData
 
 struct EpisodeDetailTile: View {
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     static let playbackPresentation: Presentation = .fullWindow
     let series: Media?
     let episode: Media
@@ -148,7 +149,8 @@ struct EpisodeDetailTile: View {
 
     private var currentWatchActivity: WatchActivity? {
         watchActivities.first {
-            $0.providerID == session.providerID
+            $0.profileID == session.activeProfileID
+                && $0.providerID == session.providerID
                 && $0.mediaType == episode.type
                 && $0.sourceID == episode.sourceID
         }
@@ -156,7 +158,8 @@ struct EpisodeDetailTile: View {
 
     private var currentFavorite: Favorite? {
         favorites.first {
-            $0.providerID == session.providerID
+            $0.profileID == session.activeProfileID
+                && $0.providerID == session.providerID
                 && $0.mediaType == episode.type
                 && $0.sourceID == episode.sourceID
         }

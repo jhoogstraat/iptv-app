@@ -275,6 +275,7 @@ struct ForYouSnapshotTests {
     ) -> WatchActivity {
         WatchActivity(
             id: id,
+            profileID: UserProfileStore.primaryProfileID,
             providerID: providerID,
             mediaType: media.type,
             sourceID: media.sourceID,
@@ -292,6 +293,7 @@ struct ForYouSnapshotTests {
     private func makeFavorite(id: Favorite.ID, media: Media) -> Favorite {
         Favorite(
             id: id,
+            profileID: UserProfileStore.primaryProfileID,
             providerID: providerID,
             mediaType: media.type,
             sourceID: media.sourceID,

@@ -215,6 +215,7 @@ struct BrowseScreen: View {
 }
 
 struct CoverGridSection: View {
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     let type: MediaType
     let filterState: LibraryFilterState
     let filter: String
@@ -275,7 +276,7 @@ struct CoverGridSection: View {
     private var favoriteContentKeys: Set<String> {
         Set(
             favorites
-                .filter { $0.providerID == session.providerID }
+                .filter { $0.profileID == session.activeProfileID && $0.providerID == session.providerID }
                 .map { FavoriteStore.contentKey(mediaType: $0.mediaType, sourceID: $0.sourceID) }
         )
     }
@@ -283,7 +284,7 @@ struct CoverGridSection: View {
     private var resumableContentKeys: Set<String> {
         Set(
             watchActivities
-                .filter { $0.providerID == session.providerID && $0.isResumeEligible }
+                .filter { $0.profileID == session.activeProfileID && $0.providerID == session.providerID && $0.isResumeEligible }
                 .map { FavoriteStore.contentKey(mediaType: $0.mediaType, sourceID: $0.sourceID) }
         )
     }

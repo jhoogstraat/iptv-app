@@ -35,6 +35,7 @@ struct MediaDetailDestination: View {
 }
 
 struct MovieDetailScreen: View {
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     let movie: Media
     let categoryTitle: String?
 
@@ -70,7 +71,8 @@ struct MovieDetailScreen: View {
 
     private var currentWatchActivity: WatchActivity? {
         watchActivities.first {
-            $0.providerID == session.providerID
+            $0.profileID == session.activeProfileID
+                && $0.providerID == session.providerID
                 && $0.mediaType == currentMovie.type
                 && $0.sourceID == currentMovie.sourceID
         }
@@ -78,7 +80,8 @@ struct MovieDetailScreen: View {
 
     private var currentFavorite: Favorite? {
         favorites.first {
-            $0.providerID == session.providerID
+            $0.profileID == session.activeProfileID
+                && $0.providerID == session.providerID
                 && $0.mediaType == currentMovie.type
                 && $0.sourceID == currentMovie.sourceID
         }
@@ -502,6 +505,7 @@ struct MovieDetailScreen: View {
 }
 
 struct SeriesDetailScreen: View {
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     private enum DetailTab: String, CaseIterable, Identifiable {
         case episodes = "Episodes"
         case details = "Details"
@@ -550,7 +554,8 @@ struct SeriesDetailScreen: View {
 
     private var currentFavorite: Favorite? {
         favorites.first {
-            $0.providerID == session.providerID
+            $0.profileID == session.activeProfileID
+                && $0.providerID == session.providerID
                 && $0.mediaType == currentSeries.type
                 && $0.sourceID == currentSeries.sourceID
         }
