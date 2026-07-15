@@ -7,6 +7,12 @@ import Testing
 @MainActor
 @Suite("Player runtime", .serialized)
 struct PlayerRuntimeTests {
+    @Test func onlyLocalOutputOverridesAreDirectlySelectable() {
+        #expect(SystemOutputRouteID.supportsDirectSelection(SystemOutputRouteID.automatic))
+        #expect(SystemOutputRouteID.supportsDirectSelection(SystemOutputRouteID.speaker))
+        #expect(!SystemOutputRouteID.supportsDirectSelection("avroute:airplay-device"))
+    }
+
     @Test func avBackendAcceptsExtensionlessHTTPStreamsAndRejectsUnsupportedSchemes() throws {
         let backend = AVPlaybackBackend(audioSessionCoordinator: RuntimeAudioSessionCoordinator())
 

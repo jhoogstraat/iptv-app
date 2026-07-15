@@ -54,12 +54,22 @@ struct PlayerView: View {
 
     private var outputRouteSelectionBinding: Binding<String> {
         Binding(
-            get: { player.selectedOutputRouteID ?? player.outputRoutes.first?.id ?? "" },
+            get: {
+                if let selectedOutputRouteID = player.selectedOutputRouteID,
+                   SystemOutputRouteID.supportsDirectSelection(selectedOutputRouteID) {
+                    return selectedOutputRouteID
+                }
+                return directlySelectableOutputRoutes.first?.id ?? ""
+            },
             set: { newID in
                 guard !newID.isEmpty else { return }
                 player.selectOutputRoute(id: newID)
             }
         )
+    }
+
+    private var directlySelectableOutputRoutes: [OutputRoute] {
+        player.outputRoutes.filter { SystemOutputRouteID.supportsDirectSelection($0.id) }
     }
 
     private var isPanelPresented: Bool {
@@ -1292,15 +1302,16 @@ struct PlayerView: View {
             HStack {
                 Text("Output Device")
                 Spacer()
-                if player.capabilities.supportsOutputRouteSelection, !player.outputRoutes.isEmpty {
-                    Picker("Route", selection: outputRouteSelectionBinding) {
-                        ForEach(player.outputRoutes) { route in
+                if player.capabilities.supportsOutputRouteSelection, !directlySelectableOutputRoutes.isEmpty {
+                    Picker("Local Output", selection: outputRouteSelectionBinding) {
+                        ForEach(directlySelectableOutputRoutes) { route in
                             Text(menuLabel(route.name, selected: route.id == player.selectedOutputRouteID || route.isActive))
                                 .tag(route.id)
                         }
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
+                    .accessibilityLabel("Local audio output")
                     .accessibilityIdentifier("player.outputRouteSelection")
                 }
 

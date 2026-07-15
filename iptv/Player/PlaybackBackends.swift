@@ -58,9 +58,13 @@ final class SystemPlaybackAudioSessionCoordinator: PlaybackAudioSessionCoordinat
     #endif
 }
 
-private enum SystemOutputRouteID {
+enum SystemOutputRouteID {
     static let automatic = "__route_automatic__"
     static let speaker = "__route_speaker__"
+
+    static func supportsDirectSelection(_ id: String) -> Bool {
+        id == automatic || id == speaker
+    }
 }
 
 @MainActor
