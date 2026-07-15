@@ -160,6 +160,9 @@ extension Media.Draft {
         self.addedAt = XtreamMapper.date(from: stream.added)
         self.backdropURL = nil
         self.country = nil
+        self.epgChannelID = XtreamMapper.text(stream.epgChannelId)
+        self.supportsCatchup = stream.tvArchive == 1
+        self.catchupDays = stream.tvArchiveDuration
     }
 
     nonisolated init?(from episode: Xtream.Episode, series: Media, categoryID: Category.ID? = nil) {

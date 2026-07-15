@@ -24,6 +24,7 @@ struct LiveScreen: View {
     @State private var selectedGroupKeys: Set<String> = []
     @State private var searchText = ""
     @State private var sort: BrowseSort = .title
+    @State private var selectedGuideChannel: Media?
 
     init() {
         self._categories = FetchAll(Category.where { $0.type.eq(MediaType.live) })
@@ -133,6 +134,9 @@ struct LiveScreen: View {
             }
             .onChange(of: categoryProjection.selectableCategoryIDs) { _, _ in
                 apply(filterState)
+            }
+            .sheet(item: $selectedGuideChannel) { channel in
+                LiveGuideSheet(channel: channel)
             }
         }
     }
@@ -293,18 +297,29 @@ struct LiveScreen: View {
 
                     Section {
                         ForEach(filteredChannels) { channel in
-                            Button {
-                                player.load(channel, presentation: .fullWindow)
-                            } label: {
-                                LiveChannelRow(channel: channel, categoryTitle: categoryTitle(for: channel))
+                            HStack(spacing: 8) {
+                                Button {
+                                    player.loadLiveChannel(channel, channels: filteredChannels)
+                                } label: {
+                                    LiveChannelRow(channel: channel, categoryTitle: categoryTitle(for: channel))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Play \(channel.title)")
+
+                                Button {
+                                    selectedGuideChannel = channel
+                                } label: {
+                                    Image(systemName: "list.bullet.rectangle")
+                                        .frame(minWidth: 44, minHeight: 44)
+                                }
+                                .buttonStyle(.borderless)
+                                .accessibilityLabel("Guide for \(channel.title)")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Play \(channel.title)")
                         }
                     } header: {
                         Text(title)
                     } footer: {
-                        Text("Search, grouping, and sorting are local. EPG, catch-up, zapping, DVR, and guide rows are not available yet.")
+                        Text("Search, grouping, sorting, and previous/next channel zapping use this local list. EPG, catch-up, and DVR require guide data not supplied by the current service layer.")
                     }
                 }
                 #if os(macOS)
@@ -316,7 +331,7 @@ struct LiveScreen: View {
 
     private var unavailableGuideCallout: some View {
         Label {
-            Text("Live playback is available. EPG, catch-up, channel zapping, DVR, and guide rows are not implemented yet.")
+            Text("Live playback and channel zapping are available. EPG, catch-up, DVR, and guide rows require provider guide data not supplied by the current service layer.")
         } icon: {
             Image(systemName: "info.circle")
         }
@@ -364,6 +379,103 @@ struct LiveScreen: View {
     private func categoryTitle(for channel: Media) -> String? {
         guard let categoryID = channel.categoryID else { return nil }
         return categoryProjection.categoryByID[categoryID]?.title
+    }
+}
+
+private struct LiveGuideSheet: View {
+    let channel: Media
+
+    @Environment(ProviderManager.self) private var providerManager
+    @Environment(Player.self) private var player
+    @Environment(\.dismiss) private var dismiss
+    @State private var programmes: [LiveGuideProgramme] = []
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading guide")
+                } else if let errorMessage {
+                    ContentUnavailableView {
+                        Label("Guide Unavailable", systemImage: "exclamationmark.triangle")
+                    } description: {
+                        Text(errorMessage)
+                    } actions: {
+                        Button("Retry") { Task { await load() } }
+                    }
+                } else if programmes.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Guide Data", systemImage: "list.bullet.rectangle")
+                    } description: {
+                        Text("The provider returned no current or upcoming programmes for this channel.")
+                    }
+                } else {
+                    List(programmes) { programme in
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(programme.title)
+                                .font(.headline)
+                            Text("\(programme.start.formatted(date: .omitted, time: .shortened))–\(programme.end.formatted(date: .omitted, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let description = programme.description {
+                                Text(description)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                            if channel.supportsCatchup && programme.archiveAvailable && programme.start < .now {
+                                Button("Play from Start", systemImage: "gobackward") {
+                                    playCatchup(programme)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+            }
+            .navigationTitle(channel.title)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            guard let provider = try providerManager.activeProviderConfiguration() else {
+                throw LiveGuideService.GuideError.invalidEndpoint
+            }
+            programmes = try await LiveGuideService().programmes(for: channel, provider: provider)
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+        isLoading = false
+    }
+
+    private func playCatchup(_ programme: LiveGuideProgramme) {
+        do {
+            guard let provider = try providerManager.activeProviderConfiguration() else {
+                throw LiveGuideService.GuideError.invalidEndpoint
+            }
+            let url = try LiveGuideService().catchupURL(
+                for: programme,
+                channel: channel,
+                provider: provider
+            )
+            dismiss()
+            player.load(channel, presentation: .fullWindow, sourceURL: url)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 }
 
