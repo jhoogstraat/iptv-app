@@ -43,6 +43,7 @@ struct MovieDetailScreen: View {
     @Environment(Session.self) private var session
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.openURL) private var openURL
     @FetchOne private var persistedMovie: Media?
     @FetchAll private var watchActivities: [WatchActivity]
     @FetchAll private var favorites: [Favorite]
@@ -273,6 +274,29 @@ struct MovieDetailScreen: View {
 
                 DownloadStatusBadge(media: currentMovie, presentation: .detailAction(.secondary))
                     .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
+
+                Menu {
+                    Button("Best Available", systemImage: "wand.and.stars") {
+                        player.load(currentMovie, presentation: .fullWindow)
+                    }
+                    Button("Provider Stream", systemImage: "network") {
+                        player.loadRemote(currentMovie)
+                    }
+                } label: {
+                    Label("Sources", systemImage: "rectangle.stack.badge.play")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DetailActionStyle(variant: .secondary))
+
+                if let trailerURL = TrailerURLResolver.url(from: currentMovie.trailer) {
+                    Button {
+                        openURL(trailerURL)
+                    } label: {
+                        Label("Trailer", systemImage: "play.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(DetailActionStyle(variant: .secondary))
+                }
             }
             .frame(maxWidth: 720, alignment: .leading)
 
@@ -522,6 +546,7 @@ struct SeriesDetailScreen: View {
     @Environment(Player.self) private var player
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.openURL) private var openURL
     @FetchOne private var persistedSeries: Media?
     @FetchAll private var seasons: [SeriesSeason]
     @FetchAll private var episodes: [Media]
@@ -742,6 +767,16 @@ struct SeriesDetailScreen: View {
                 }
                 .buttonStyle(DetailActionStyle(variant: .secondary))
                 .accessibilityHint("Updates the persisted favorite state for this provider.")
+
+                if let trailerURL = TrailerURLResolver.url(from: currentSeries.trailer) {
+                    Button {
+                        openURL(trailerURL)
+                    } label: {
+                        Label("Trailer", systemImage: "play.rectangle")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(DetailActionStyle(variant: .secondary))
+                }
 
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -1035,6 +1070,20 @@ struct SeriesDetailScreen: View {
         }
         .padding(.top, topInset + 10)
         .padding(.horizontal, 16)
+    }
+}
+
+private enum TrailerURLResolver {
+    static func url(from rawValue: String?) -> URL? {
+        guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else { return nil }
+        if let url = URL(string: value), url.scheme == "https" || url.scheme == "http" {
+            return url
+        }
+        var components = URLComponents(string: "https://www.youtube.com/watch")
+        components?.queryItems = [URLQueryItem(name: "v", value: value)]
+        return components?.url
     }
 }
 

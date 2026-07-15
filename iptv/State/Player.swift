@@ -260,6 +260,16 @@ final class Player {
         )
     }
 
+    func loadRemote(_ media: Media, presentation: Presentation = .fullWindow) {
+        do {
+            let provider = try activeProvider()
+            let url = try playbackSourceResolver.playbackURL(for: media, provider: provider)
+            load(media, presentation: presentation, sourceURL: url)
+        } catch {
+            processTerminalFailure(error)
+        }
+    }
+
     func loadLiveChannel(_ channel: Media, channels: [Media], presentation: Presentation = .fullWindow) {
         liveChannelQueue = channels.filter { $0.type == .live }
         load(channel, presentation: presentation)
