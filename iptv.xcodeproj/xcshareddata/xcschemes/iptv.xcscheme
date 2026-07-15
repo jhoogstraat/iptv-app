@@ -41,6 +41,17 @@
                ReferencedContainer = "container:iptv.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "1A0D26782E6728670091AF6A"
+               BuildableName = "iptvUITests.xctest"
+               BlueprintName = "iptvUITests"
+               ReferencedContainer = "container:iptv.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

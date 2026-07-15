@@ -7,7 +7,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Status
 
 - Target state: Settings is the durable management surface for provider configuration, library organization, playback defaults, and app information.
-- Implementation status (reviewed 2026-07-14): `SettingsScreen` has Provider, Library, Playback, and About destinations. Provider removal is explicitly named and confirmed; resync preserves provider configuration, favorites, watch history, and the initialized app-shell state when refresh fails; unchanged and name-only saves preserve initialization/catalog state; connection changes require onboarding sync. If Keychain reads fail, editable configuration still retains the provider name, URL, username, and transport approval while leaving only the password blank for recovery. Prefix visibility is database-backed per provider. Playback and About help/legal remain explicit placeholders.
+- Implementation status (reviewed 2026-07-15): `SettingsScreen` has Provider, Profiles, Library, Playback, and About destinations. Playback defaults persist in device `UserDefaults` and are consumed by `Player`; Help, license, and terms/privacy documents open real local content. Prefix visibility is database-backed per provider.
 - Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, or password changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation. Provider endpoints must use HTTPS; the app has no arbitrary-load ATS exception.
 
 ## User Experience
@@ -15,9 +15,9 @@ Settings gives users a place to inspect provider status, edit provider credentia
 - Settings overview lists Provider, Library, Playback, and About destinations.
 - Provider page shows honest category/media counts and setup/sync status.
 - Provider editor saves provider changes, resyncs catalog data, or removes the provider through separate consequence-specific actions.
-- Library page exposes detected prefix visibility controls backed by provider-scoped database rows; language-source/grouping controls remain disabled.
-- Playback page explains current player-default limitations; controls remain disabled until Settings owns their persisted contract.
-- About page shows app version while support/legal destinations remain placeholders.
+- Library page exposes detected prefix visibility controls backed by provider-scoped database rows.
+- Playback page persists preferred backend, subtitle default, and preferred audio/subtitle languages.
+- About page shows app version and opens local help, license, and terms/privacy documents.
 
 ## Data and State
 
@@ -26,7 +26,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 - `@FetchOne(Provider.where(\.isActive))` supplies the active provider row; password material is resolved through `ProviderCredentialStoring`, not SQLite.
 - Local category/media queries supply provider status counts with truthful labels.
 - `ProviderManager` classifies unchanged, name-only, connection-changing, resync, and removal operations so destructive effects are explicit.
-- `CategoryPrefixVisibility` and provider credentials persist through database rows and Keychain respectively. Player preferences currently use device `UserDefaults` from the player runtime rather than active Settings controls.
+- `CategoryPrefixVisibility` and provider credentials persist through database rows and Keychain respectively. Playback Settings and `Player` share the same device-scoped `UserDefaults` keys.
 
 ## Key Files
 
@@ -48,9 +48,8 @@ Settings gives users a place to inspect provider status, edit provider credentia
 
 ## Current Gaps / Planned Work
 
-- `Group categories by prefix` and `Language Source` remain disabled until their data contracts exist.
-- Playback defaults remain disabled; wiring them requires one explicit device- or profile-scoped persistence contract.
-- About help/licenses/terms remain placeholders.
+- Normalized provider language metadata and a configurable language-source contract remain planned.
+- Playback preferences are device-scoped rather than profile-scoped.
 - Provider passwords are stored in Keychain, with SQLite containing only credential references and migration/compensation behavior for failures.
 
 ## Notes for Agents

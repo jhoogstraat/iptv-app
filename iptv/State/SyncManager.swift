@@ -942,7 +942,7 @@ extension SyncManager {
         case idle, active, success, failure
     }
 
-    enum CategoryHydrationState: Equatable, Sendable {
+    nonisolated enum CategoryHydrationState: Equatable, Sendable {
         case unhydrated
         case loading
         case empty

@@ -15,7 +15,7 @@ struct WatchActivityStoreTests {
             let categoryID = try insertCategory(title: "Movies", database: database)
             let media = makeMedia(sourceID: 700, title: "Resume Me", categoryID: categoryID)
 
-            await WatchActivityStore.recordProgress(
+            _ = await WatchActivityStore.recordProgress(
                 for: media,
                 providerID: firstProviderID,
                 currentTime: 95,
@@ -24,7 +24,7 @@ struct WatchActivityStoreTests {
                 writeStamp: stamp(session: 100, generation: 1),
                 database: database
             )
-            await WatchActivityStore.recordProgress(
+            _ = await WatchActivityStore.recordProgress(
                 for: media,
                 providerID: secondProviderID,
                 currentTime: 45,
@@ -33,7 +33,7 @@ struct WatchActivityStoreTests {
                 writeStamp: stamp(session: 100, generation: 1),
                 database: database
             )
-            await WatchActivityStore.recordProgress(
+            _ = await WatchActivityStore.recordProgress(
                 for: media,
                 providerID: firstProviderID,
                 currentTime: 125,
@@ -350,7 +350,7 @@ struct WatchActivityStoreTests {
             #expect(recorded.completed == false)
 
             player.reset()
-            await WatchActivityStore.recordProgress(
+            _ = await WatchActivityStore.recordProgress(
                 for: media,
                 providerID: providerID,
                 currentTime: 140,

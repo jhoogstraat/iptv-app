@@ -8,7 +8,7 @@ The video player provides stable playback controls and renderer switching across
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
 - Implementation status (reviewed 2026-07-14): `Player`, VLC/AV backends, stable renderer container, root presentation, and one-time VLC-to-AV fallback are active. AV accepts extensionless HTTP(S) Xtream streams; runtime fallback carries position and play/pause intent; track preferences apply after metadata arrives; live playback rejects seek/rate mutations at the player boundary; ordered watch writes prevent stale progress regression. Loading another item immediately stops and detaches the prior backend, clears per-item track/quality/chapter state, and releases a newly selected backend on terminal failure, so a failed handoff cannot leave old media playing behind the error surface. Selecting a concrete episode row in series detail loads that episode directly into the shared full-window player, while standalone episode detail routes retain their full-window play action. macOS windows dismiss cleanly, visionOS uses its own player window, and tvOS back/focus behavior is explicit.
-- Current gaps: offline playback, profile-scoped preferences, episode quick switching, and richer EPG/catch-up/DVR live controls remain deferred.
+- Current gaps: profile-scoped preferences, episode quick switching, and DVR live controls remain deferred.
 
 ## User Experience
 
@@ -61,8 +61,8 @@ The video player provides stable playback controls and renderer switching across
 - Favorite toggle in `PlayerView` reads and writes the provider-scoped local `FavoriteStore` for the current media item.
 - Some advanced preferences are learned or stored device-globally in `UserDefaults` rather than exposed through profile-scoped Settings persistence.
 - Episode quick switching is not active; selecting a persisted episode row in series detail launches the shared full-window player directly without routing through an intermediate detail screen.
-- Live playback is channel-only: EPG/catch-up timelines, zapping controls, and DVR behavior are planned but not implemented.
-- Offline playback integration is planned but not implemented.
+- Live playback supports on-demand EPG context, eligible catch-up programs, and adjacent-channel zapping; DVR remains unimplemented.
+- Completed movie and episode downloads are selected before remote URL resolution.
 
 ## Notes for Agents
 

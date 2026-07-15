@@ -17,7 +17,7 @@ enum DetailSpacing {
     static let xl: CGFloat = 24
 }
 
-enum DetailEnrichmentState: Equatable {
+nonisolated enum DetailEnrichmentState: Equatable, Sendable {
     case idle
     case loading
     case success

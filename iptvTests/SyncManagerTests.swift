@@ -320,8 +320,7 @@ struct SyncManagerTests {
             try await syncManager.enrichDetails(for: series.id)
 
             let persistedSeries = try await database.read { db in
-                let media = try Media.find(db, key: series.id)
-                return try #require(media)
+                try Media.find(db, key: series.id)
             }
             let seasons = try await database.read { db in
                 try SeriesSeason.where { $0.seriesID.eq(series.id) }.order(by: \.seasonNumber).fetchAll(db)

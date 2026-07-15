@@ -1,0 +1,33 @@
+import XCTest
+
+final class OnboardingUITests: XCTestCase {
+    override func setUpWithError() throws {
+        continueAfterFailure = false
+    }
+
+    func testSourceSelectionOffersXtreamAndLabelsM3U8AsSoon() {
+        let app = XCUIApplication()
+        app.launch()
+
+        let xtreamSource = app.descendants(matching: .any)["onboarding.source.xtream"]
+        XCTAssertTrue(xtreamSource.waitForExistence(timeout: 10))
+
+        let m3u8Source = app.descendants(matching: .any)["onboarding.source.m3u8"]
+        XCTAssertTrue(m3u8Source.exists)
+        XCTAssertTrue(m3u8Source.staticTexts["soon"].exists)
+        XCTAssertFalse(m3u8Source.isEnabled)
+    }
+
+    func testXtreamSelectionReachesCredentialForm() {
+        let app = XCUIApplication()
+        app.launch()
+
+        let source = app.descendants(matching: .any)["onboarding.source.xtream"]
+        XCTAssertTrue(source.waitForExistence(timeout: 10))
+        source.tap()
+        app.descendants(matching: .any)["onboarding.source.continue"].tap()
+
+        XCTAssertTrue(app.textFields["onboarding.provider.url"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.secureTextFields["onboarding.provider.password"].exists)
+    }
+}
