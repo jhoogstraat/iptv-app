@@ -737,13 +737,6 @@ private struct CategoryPrefixVisibilitySelector: View {
         NavigationStack {
             List {
                 Section {
-                    Button("Show All Prefixes") {
-                        draftHiddenGroupKeys.removeAll()
-                    }
-                    .disabled(draftHiddenGroupKeys.isEmpty)
-                }
-
-                Section {
                     ForEach(filteredGroupKeys, id: \.self) { groupKey in
                         CategoryPrefixVisibilityRow(
                             title: CategoryGrouping.title(for: groupKey),
@@ -763,6 +756,7 @@ private struct CategoryPrefixVisibilitySelector: View {
             .navigationBarTitleDisplayMode(.inline)
 #endif
             .searchable(text: $searchText, prompt: "Search Prefixes")
+            .compactSearchToolbar()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
@@ -770,7 +764,15 @@ private struct CategoryPrefixVisibilitySelector: View {
                     }
                 }
 
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarItemGroup(placement: .confirmationAction) {
+                    Button(draftHiddenGroupKeys.isEmpty ? "Deselect All" : "Select All") {
+                        if draftHiddenGroupKeys.isEmpty {
+                            draftHiddenGroupKeys = Set(groupKeys)
+                        } else {
+                            draftHiddenGroupKeys.removeAll()
+                        }
+                    }
+
                     Button("Apply") {
                         onApply(draftHiddenGroupKeys)
                     }

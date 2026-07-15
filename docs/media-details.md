@@ -18,7 +18,7 @@ Media Details provides the focused destination for a selected movie or series it
 - Failed artwork loads should degrade gracefully.
 - Playback errors from a detail play action should be visible and recoverable.
 - Detail enrichment failures remain visible above saved metadata and provide a Retry action.
-- While initial detail enrichment is running, the metadata card contains a progress indicator instead of placeholder values. The card expands with an animated reveal when metadata becomes available.
+- While initial detail enrichment is running, the metadata card is already visible in its final horizontal position and contains a progress indicator instead of placeholder values. It stays top-anchored and expands downward with an opacity reveal when metadata becomes available. Its content is width-constrained to the visible detail column so long values wrap instead of forcing iPad portrait overflow.
 
 ### UI Direction
 

@@ -50,7 +50,7 @@ struct BrowseScreen: View {
             matchingGroupKeys: selectedGroupKeys
         )
         guard !LibraryQueryNormalizer.isEmpty(categorySearchText) else { return grouped }
-        return grouped.filter { LibraryQueryNormalizer.matches($0.title, query: categorySearchText) }
+        return grouped.filter { LibraryQueryNormalizer.matches($0.displayTitle, query: categorySearchText) }
     }
 
     private var hydrationSnapshot: LibraryHydrationSnapshot {
@@ -108,6 +108,7 @@ struct BrowseScreen: View {
         }
         .navigationTitle(screenTitle)
         .searchable(text: $categorySearchText, prompt: "Search categories")
+        .compactSearchToolbar()
         .task(id: visibilityRequest) {
             prefixVisibilityCache.resolve(visibilityRequest) {
                 CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
@@ -225,8 +226,9 @@ private struct BrowseCategoryScreen: View {
                 }
             )
         }
-        .navigationTitle(category.title)
-        .searchable(text: $searchText, prompt: "Search \(category.title)")
+        .navigationTitle(category.displayTitle)
+        .searchable(text: $searchText, prompt: "Search \(category.displayTitle)")
+        .compactSearchToolbar()
         .task(id: category.id) {
             await hydrate(force: false)
         }
@@ -736,6 +738,7 @@ struct LibraryFilterBar: View {
     var showsSort = true
     @Binding var state: LibraryFilterState
     let clearFilters: () -> Void
+    @State private var isGroupSelectorPresented = false
 
     private var groupSections: Array<(key: String, value: [Category])> {
         Dictionary(grouping: categories) { category in
@@ -744,7 +747,7 @@ struct LibraryFilterBar: View {
         .map { key, value in
             (
                 key,
-                value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                value.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
             )
         }
         .sorted { lhs, rhs in
@@ -763,7 +766,7 @@ struct LibraryFilterBar: View {
         .map { key, value in
             (
                 key,
-                value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+                value.sorted { $0.displayTitle.localizedStandardCompare($1.displayTitle) == .orderedAscending }
             )
         }
         .sorted { lhs, rhs in
@@ -785,60 +788,30 @@ struct LibraryFilterBar: View {
 
     private var hasActiveFilters: Bool { activeFilterCount > 0 }
 
-    private var activeGroupTitles: String {
-        state.selectedGroupKeys
-            .sorted { CategoryGrouping.title(for: $0) < CategoryGrouping.title(for: $1) }
-            .map { CategoryGrouping.title(for: $0) }
-            .joined(separator: ", ")
-    }
-
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Menu {
-                    Text("\(activeFilterCount) filter\(activeFilterCount == 1 ? "" : "s") applied")
-
-                    if hasActiveFilters {
-                        Button(role: .destructive, action: clearFilters) {
-                            Label("Remove All", systemImage: "xmark.circle")
-                        }
+                if hasActiveFilters {
+                    Button(action: clearFilters) {
+                        FilterPill(
+                            title: "",
+                            systemImage: "line.3.horizontal.decrease",
+                            badgeCount: activeFilterCount,
+                            isActive: true,
+                            showsChevron: false
+                        )
                     }
-                } label: {
-                    FilterPill(
-                        title: hasActiveFilters ? "" : "Filters",
-                        systemImage: hasActiveFilters ? "xmark.circle" : nil,
-                        badgeCount: activeFilterCount,
-                        isActive: hasActiveFilters,
-                        showsChevron: !hasActiveFilters
-                    )
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove all \(activeFilterCount) active filters")
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                .accessibilityLabel(hasActiveFilters ? "Remove all filters" : "Filters")
 
                 if showsGroupFilter {
-                    Menu {
-                        Button {
-                            state.selectedGroupKeys.removeAll()
-                        } label: {
-                            Label("All Groups", systemImage: state.selectedGroupKeys.isEmpty ? "checkmark" : "line.3.horizontal")
-                        }
-
-                        ForEach(groupSections, id: \.key) { section in
-                            Button {
-                                if state.selectedGroupKeys.contains(section.key) {
-                                    state.selectedGroupKeys.remove(section.key)
-                                } else {
-                                    state.selectedGroupKeys.insert(section.key)
-                                }
-                            } label: {
-                                Label(
-                                    CategoryGrouping.title(for: section.key),
-                                    systemImage: state.selectedGroupKeys.contains(section.key) ? "checkmark" : "line.3.horizontal"
-                                )
-                            }
-                        }
+                    Button {
+                        isGroupSelectorPresented = true
                     } label: {
                         FilterPill(
-                            title: state.selectedGroupKeys.isEmpty ? "Group" : activeGroupTitles,
+                            title: "Groups",
                             badgeCount: state.selectedGroupKeys.isEmpty ? 0 : state.selectedGroupKeys.count,
                             isActive: !state.selectedGroupKeys.isEmpty,
                             showsChevron: true
@@ -849,6 +822,7 @@ struct LibraryFilterBar: View {
                         ? "Group filter inactive"
                         : "Group filter active, \(state.selectedGroupKeys.count) selected"
                     )
+                    .buttonStyle(.plain)
                 }
 
                 if showsCategoryFilter {
@@ -866,7 +840,7 @@ struct LibraryFilterBar: View {
                                         state.selectedCategoryID = category.id
                                     } label: {
                                         Label(
-                                            category.title,
+                                            category.displayTitle,
                                             systemImage: state.selectedCategoryID == category.id ? "checkmark" : "folder"
                                         )
                                     }
@@ -875,7 +849,7 @@ struct LibraryFilterBar: View {
                         }
                     } label: {
                         FilterPill(
-                            title: selectedCategory?.title ?? "Category",
+                            title: selectedCategory?.displayTitle ?? "Category",
                             isActive: state.selectedCategoryID != nil,
                             showsChevron: true
                         )
@@ -883,7 +857,7 @@ struct LibraryFilterBar: View {
                     .accessibilityLabel(
                         state.selectedCategoryID == nil
                         ? "Category filter inactive"
-                        : "Category filter active, \(selectedCategory?.title ?? "selected category")"
+                        : "Category filter active, \(selectedCategory?.displayTitle ?? "selected category")"
                     )
                 }
 
@@ -943,6 +917,115 @@ struct LibraryFilterBar: View {
             .padding(.vertical, 8)
         }
         .background(.background)
+        .animation(.smooth(duration: 0.25), value: hasActiveFilters)
+        .sheet(isPresented: $isGroupSelectorPresented) {
+            LibraryGroupFilterSelector(
+                groupKeys: groupSections.map(\.key),
+                selectedGroupKeys: state.selectedGroupKeys
+            ) { selection in
+                state.selectedGroupKeys = selection
+                if let selectedCategory,
+                   !selection.isEmpty,
+                   !selection.contains(selectedCategory.groupKey) {
+                    state.selectedCategoryID = nil
+                }
+            }
+        }
+    }
+}
+
+struct LibraryGroupFilterSelector: View {
+    let groupKeys: [String]
+    let onApply: (Set<String>) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+    @State private var draftSelectedGroupKeys: Set<String>
+
+    init(
+        groupKeys: [String],
+        selectedGroupKeys: Set<String>,
+        onApply: @escaping (Set<String>) -> Void
+    ) {
+        self.groupKeys = groupKeys
+        self.onApply = onApply
+        self._draftSelectedGroupKeys = State(initialValue: selectedGroupKeys)
+    }
+
+    private var filteredGroupKeys: [String] {
+        guard !LibraryQueryNormalizer.isEmpty(searchText) else { return groupKeys }
+        return groupKeys.filter {
+            LibraryQueryNormalizer.matches(CategoryGrouping.title(for: $0), query: searchText)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Button {
+                        draftSelectedGroupKeys.removeAll()
+                    } label: {
+                        Label(
+                            "All Groups",
+                            systemImage: draftSelectedGroupKeys.isEmpty ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+                }
+
+                Section("Available Groups") {
+                    ForEach(filteredGroupKeys, id: \.self) { groupKey in
+                        Button {
+                            toggle(groupKey)
+                        } label: {
+                            HStack {
+                                Text(CategoryGrouping.title(for: groupKey))
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: draftSelectedGroupKeys.contains(groupKey) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(draftSelectedGroupKeys.contains(groupKey) ? Color.accentColor : Color.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Groups")
+#if !os(macOS) && !os(tvOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .searchable(text: $searchText, prompt: "Search Groups")
+            .compactSearchToolbar()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Apply \(draftSelectedGroupKeys.count)") {
+                        onApply(draftSelectedGroupKeys)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private func toggle(_ groupKey: String) {
+        if draftSelectedGroupKeys.contains(groupKey) {
+            draftSelectedGroupKeys.remove(groupKey)
+        } else {
+            draftSelectedGroupKeys.insert(groupKey)
+        }
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func compactSearchToolbar() -> some View {
+#if os(iOS) || os(visionOS)
+        searchToolbarBehavior(.minimize)
+#else
+        self
+#endif
     }
 }
 

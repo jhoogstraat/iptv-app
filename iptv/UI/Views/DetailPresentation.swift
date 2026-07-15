@@ -269,9 +269,15 @@ struct DetailContentLayout<Content: View>: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
-                column
-                    .frame(maxWidth: 920, alignment: .leading)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                if let availableWidth {
+                    column
+                        .frame(width: max(min(availableWidth, 920), 0), alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else {
+                    column
+                        .frame(maxWidth: 920, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
         }
     }

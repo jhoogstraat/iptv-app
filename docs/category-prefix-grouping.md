@@ -7,12 +7,12 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Status
 
 - Target state: detected category prefixes are first-class local organization metadata that can group category pickers, hide/show category groups, and feed search/recommendation filters consistently.
-- Implementation status (reviewed 2026-07-15): category sync derives pipe-delimited prefixes once and persists them as indexed `Category.groupKey` metadata; Movies, Series, and Live use those keys as section titles in their default category lists; Browse, Search, and Live expose group filtering; `SettingsScreen` hides detected groups per provider through `CategoryPrefixVisibilityStore`; and local database/filter requests apply hidden or selected groups consistently.
+- Implementation status (reviewed 2026-07-15): category sync derives pipe-delimited prefixes once and persists them as indexed `Category.groupKey` metadata; Movies, Series, and Live use those keys as section titles while category rows omit the redundant raw prefix; Browse, Search, and Live expose searchable multi-select group sheets; `SettingsScreen` hides detected groups per provider through `CategoryPrefixVisibilityStore` with nav-bar select/deselect-all; and local database/filter requests apply hidden or selected groups consistently.
 - Current limitation: grouping depends entirely on the raw provider category title; normalized category metadata, language source configuration, and recommendation-facing selected-group filters are not implemented.
 
 ## User Experience
 
-- Movies, Series, and Live open on category lists sectioned by detected group. Group filters and landing search narrow those category lists before native navigation; pushed media screens use independent media filter state. Search retains category and group filters for global result refinement.
+- Movies, Series, and Live open on category lists sectioned by detected group. Category row labels omit a matching pipe prefix because the section already communicates it. Group filters open searchable multi-select sheets, and landing search narrows the category lists before native navigation; pushed media screens use independent media filter state. Search retains category and group filters for global result refinement.
 - Unprefixed categories should remain visible under a fallback group.
 - Users can hide provider prefix groups in Settings, and those provider-scoped choices apply across Browse, Search, Live, and For You.
 - Language grouping should be configurable separately from raw provider category names when enough metadata exists.
@@ -20,7 +20,7 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Data and State
 
 - Current grouping source: `Category.title` at the category-sync write boundary.
-- Current parser: direct pipe-delimited string parsing, where the first pipe segment becomes the persisted `Category.groupKey`; screens never reparse titles.
+- Current parser: direct pipe-delimited string parsing, where the first pipe segment becomes the persisted `Category.groupKey`; screens never reparse titles. `Category.displayTitle` removes only the prefix matching that persisted key, preserving the provider-owned raw title for storage and relationships.
 - `categories(type, groupKey)` is indexed for category/group projections. Category conflict updates persist title and group key together so provider renames incrementally update the index.
 - Current Movies/Series/Live landing state stores selected category-group keys but no selected category. A concrete category is passed as native navigation context, and its destination observes only that category's rows. Global Search continues to combine selected category and group keys as local result filters.
 - Prefix visibility is persisted per provider in the local `category_prefix_visibility` table and invalidated through the revisioned `CategoryPrefixVisibilityStore` cache.

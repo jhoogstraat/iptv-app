@@ -228,6 +228,18 @@ struct LibraryFilterEngineTests {
         #expect(CategoryGrouping.key(for: "  |NL| Movies") == CategoryGrouping.ungroupedKey)
     }
 
+    @Test func categoryDisplayTitleUsesPersistedGroupKeyWithoutDestroyingRawTitle() {
+        #expect(CategoryGrouping.categoryTitle(for: "|NL| Movies", groupKey: "NL") == "Movies")
+        #expect(CategoryGrouping.categoryTitle(for: "|NL|", groupKey: "NL") == "|NL|")
+        #expect(
+            CategoryGrouping.categoryTitle(
+                for: "Movies |NL| Archive",
+                groupKey: CategoryGrouping.ungroupedKey
+            ) == "Movies |NL| Archive"
+        )
+        #expect(CategoryGrouping.categoryTitle(for: "|NL| Movies", groupKey: "EN") == "|NL| Movies")
+    }
+
     @Test func clearFiltersAlsoRestoresDefaultSort() {
         var state = LibraryFilterState(
             selectedCategoryID: 9,

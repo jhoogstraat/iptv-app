@@ -62,6 +62,23 @@ nonisolated enum CategoryGrouping: Sendable {
     static func title(for key: String) -> String {
         key == ungroupedKey ? "Ungrouped" : key
     }
+
+    /// Removes the already-persisted group prefix from a category's display title.
+    ///
+    /// This deliberately uses `groupKey` instead of reparsing the raw title in every view.
+    static func categoryTitle(for rawTitle: String, groupKey: String) -> String {
+        guard groupKey != ungroupedKey else { return rawTitle }
+        let prefix = "|\(groupKey)|"
+        guard rawTitle.hasPrefix(prefix) else { return rawTitle }
+        let title = rawTitle.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? rawTitle : title
+    }
+}
+
+extension Category {
+    var displayTitle: String {
+        CategoryGrouping.categoryTitle(for: title, groupKey: groupKey)
+    }
 }
 
 /// Shared query normalization for local browse, search, and filter matching.

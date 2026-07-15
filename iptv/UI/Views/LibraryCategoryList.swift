@@ -15,7 +15,7 @@ struct LibraryCategoryList<Destination: View>: View {
             (
                 key,
                 categories.sorted { lhs, rhs in
-                    let comparison = lhs.title.localizedStandardCompare(rhs.title)
+                    let comparison = lhs.displayTitle.localizedStandardCompare(rhs.displayTitle)
                     return comparison == .orderedSame ? lhs.id < rhs.id : comparison == .orderedAscending
                 }
             )
@@ -67,7 +67,7 @@ private struct LibraryCategoryRow: View {
                 .clipShape(.rect(cornerRadius: 10, style: .continuous))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(category.title)
+                Text(category.displayTitle)
                     .font(.headline)
                     .foregroundStyle(.primary)
                     .lineLimit(2)

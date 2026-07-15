@@ -144,6 +144,7 @@ struct SearchScreen: View {
             }
             .navigationTitle("Search")
             .searchable(text: $searchText, prompt: "Search Movies and Series")
+            .compactSearchToolbar()
             .task(id: visibilityRequest) {
                 prefixVisibilityCache.resolve(visibilityRequest) {
                     CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
@@ -355,7 +356,7 @@ private struct SearchResultRow: View {
 
                     if let category {
                         Text("•")
-                        Text(category.title)
+                        Text(category.displayTitle)
                             .lineLimit(1)
                     }
                 }
