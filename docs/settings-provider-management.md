@@ -8,7 +8,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 
 - Target state: Settings is the durable management surface for provider configuration, library organization, playback defaults, and app information.
 - Implementation status (reviewed 2026-07-14): `SettingsScreen` has Provider, Library, Playback, and About destinations. Provider removal is explicitly named and confirmed; resync preserves provider configuration, favorites, watch history, and the initialized app-shell state when refresh fails; unchanged and name-only saves preserve initialization/catalog state; connection changes require onboarding sync. If Keychain reads fail, editable configuration still retains the provider name, URL, username, and transport approval while leaving only the password blank for recovery. Prefix visibility is database-backed per provider. Playback and About help/legal remain explicit placeholders.
-- Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, password, or insecure-transport changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation.
+- Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, or password changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation. Provider endpoints must use HTTPS; the app has no arbitrary-load ATS exception.
 
 ## User Experience
 
@@ -22,7 +22,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Data and State
 
 - `SettingsDestination` controls subpage routing.
-- `ProviderFields` holds editable name, endpoint, username, password, and explicit insecure-HTTP approval.
+- `ProviderFields` holds editable name, HTTPS endpoint, username, and password. HTTP input produces a blocking validation explanation.
 - `@FetchOne(Provider.where(\.isActive))` supplies the active provider row; password material is resolved through `ProviderCredentialStoring`, not SQLite.
 - Local category/media queries supply provider status counts with truthful labels.
 - `ProviderManager` classifies unchanged, name-only, connection-changing, resync, and removal operations so destructive effects are explicit.
