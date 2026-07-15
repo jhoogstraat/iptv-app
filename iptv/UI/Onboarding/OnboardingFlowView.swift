@@ -1,8 +1,7 @@
 import SwiftUI
 
 struct OnboardingFlowView: View {
-    private enum OnboardingStep: Equatable {
-        case source
+    private enum Route: Hashable {
         case credentials
         case syncing
         case failed
@@ -12,50 +11,53 @@ struct OnboardingFlowView: View {
 
     @State private var selectedKind: ProviderSourceKind = .xtream
     @State private var providerFields = ProviderFields(name: "", endpoint: "", username: "", password: "")
-    @State private var step: OnboardingStep = .source
+    @State private var path: [Route] = []
     @State private var isSubmitting = false
     @State private var errorMessage: String?
     @State private var showsValidationErrors = false
     @State private var syncingRevision: Int?
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VStack(alignment: .leading, spacing: 20) {
-                if step == .credentials || step == .failed {
-                    Button {
-                        step = .source
-                        errorMessage = nil
-                    } label: {
-                        Label("Back", systemImage: "chevron.left")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(isSubmitting)
-                    .accessibilityIdentifier("onboarding.back")
-                }
-
-                content
+        NavigationStack(path: $path) {
+            onboardingScreen {
+                sourceStep
             }
-            .frame(maxWidth: 720)
-            .padding(32)
+            .navigationTitle("Welcome to iptv")
+            .navigationDestination(for: Route.self) { route in
+                switch route {
+                    case .credentials:
+                        onboardingScreen {
+                            credentialsStep
+                        }
+                        .navigationTitle(selectedKind.title)
+                        .navigationBarBackButtonHidden(isSubmitting)
+                    case .syncing:
+                        onboardingScreen {
+                            syncingStep
+                        }
+                        .navigationTitle("Syncing")
+                        .navigationBarBackButtonHidden(true)
+                    case .failed:
+                        onboardingScreen {
+                            failedStep
+                        }
+                        .navigationTitle("Sync failed")
+                }
+            }
         }
         .task(id: providerManager.revision) {
             await reactToProviderRevision()
         }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch step {
-            case .source:
-                sourceStep
-            case .credentials:
-                credentialsStep
-            case .syncing:
-                syncingStep
-            case .failed:
-                failedStep
+    private func onboardingScreen<Content: View>(
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            content()
+                .frame(maxWidth: 720, maxHeight: .infinity, alignment: .topLeading)
+                .padding(32)
         }
     }
 
@@ -63,8 +65,6 @@ struct OnboardingFlowView: View {
         ScrollView {
         VStack(alignment: .leading, spacing: 28) {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Welcome to iptv")
-                    .font(.largeTitle.weight(.bold))
                 Text("Add a source to sync your movies, series, and live TV catalog.")
                     .font(.title3)
                     .foregroundStyle(.secondary)
@@ -139,8 +139,8 @@ struct OnboardingFlowView: View {
                 .accessibilityIdentifier("onboarding.source.m3u8")
             }
 
-            Button("Continue") {
-                step = .credentials
+            NavigationLink(value: Route.credentials) {
+                Text("Continue")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -151,36 +151,31 @@ struct OnboardingFlowView: View {
 
     private var credentialsStep: some View {
         providerForm(
-            title: selectedKind.title,
             copy: "Your Xtream credentials are used to sync the catalog locally. Playback and browsing use the local library after sync completes.",
             saveLabel: "Start Sync",
-            showsBackButton: false
+            isRetry: false
         )
     }
 
     private var failedStep: some View {
         providerForm(
-            title: "Sync failed",
             copy: providerManager.session?.syncErrorMessage ?? errorMessage ?? fallbackSyncErrorMessage,
             saveLabel: "Retry Sync",
-            showsBackButton: true
+            isRetry: true
         )
     }
 
     private func providerForm(
-        title: String,
         copy: String,
         saveLabel: String,
-        showsBackButton: Bool
+        isRetry: Bool
     ) -> some View {
         Form {
             Section {
-                Text(title)
-                    .font(.title2.weight(.semibold))
                 Text(copy)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier(showsBackButton ? "onboarding.error.message" : "onboarding.credentials.copy")
+                    .accessibilityIdentifier(isRetry ? "onboarding.error.message" : "onboarding.credentials.copy")
             }
 
             ProviderEditorSection(
@@ -191,7 +186,7 @@ struct OnboardingFlowView: View {
                 saveLabel: saveLabel,
                 errorMessage: errorMessage,
                 showsValidationErrors: showsValidationErrors,
-                saveAccessibilityIdentifier: showsBackButton ? "onboarding.retry" : "onboarding.provider.save",
+                saveAccessibilityIdentifier: isRetry ? "onboarding.retry" : "onboarding.provider.save",
                 onSave: {
                     Task { await submit() }
                 },
@@ -288,7 +283,7 @@ struct OnboardingFlowView: View {
                 selectedKind = .xtream
                 showsValidationErrors = false
                 errorMessage = nil
-                step = .source
+                path = []
                 return
             }
 
@@ -313,16 +308,16 @@ struct OnboardingFlowView: View {
                     case .noProvider, .ready:
                         errorMessage = "Review the provider settings and try again."
                 }
-                step = .credentials
+                path = [.credentials]
                 return
             }
 
             guard !providerManager.activeProviderIsInitialized else { return }
-            step = .syncing
+            path = [.credentials, .syncing]
             await syncActiveProvider(for: providerManager.revision)
         } catch {
             errorMessage = error.localizedDescription
-            step = .credentials
+            path = [.credentials]
         }
     }
 
@@ -348,7 +343,7 @@ struct OnboardingFlowView: View {
             }
 
             showsValidationErrors = false
-            step = .syncing
+            path = [.credentials, .syncing]
             isSubmitting = false
             await syncActiveProvider(for: providerManager.revision)
         } catch {
@@ -365,7 +360,7 @@ struct OnboardingFlowView: View {
         let result = await providerManager.runInitialSyncForActiveProvider()
         if result == .failure {
             errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
-            step = .failed
+            path = [.credentials, .failed]
         }
     }
 }

@@ -29,5 +29,12 @@ final class OnboardingUITests: XCTestCase {
 
         XCTAssertTrue(app.textFields["onboarding.provider.url"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.secureTextFields["onboarding.provider.password"].exists)
+
+        let navigationBar = app.navigationBars["Xtream API"]
+        XCTAssertTrue(navigationBar.exists)
+        XCTAssertTrue(navigationBar.buttons.firstMatch.exists)
+        navigationBar.buttons.firstMatch.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.source.continue"].waitForExistence(timeout: 3))
     }
 }
