@@ -8,7 +8,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 
 - Target state: Settings is the durable management surface for provider configuration, library organization, playback defaults, and app information.
 - Implementation status (reviewed 2026-07-15): `SettingsScreen` has Provider, Profiles, Library, Playback, and About destinations. Playback defaults persist in device `UserDefaults` and are consumed by `Player`; Help, license, and terms/privacy documents open real local content. Prefix visibility is database-backed per provider.
-- Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, or password changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation. Provider endpoints must use HTTPS; the app has no arbitrary-load ATS exception.
+- Current provider behavior: name-only changes update display state without destroying catalog rows. Endpoint, username, or password changes rebuild an uninitialized session and route through onboarding. Explicit removal deletes provider credentials and provider-owned local state after confirmation. HTTPS is preferred and used for scheme-less input; HTTP Xtream providers require an explicit per-provider warning acknowledgement.
 
 ## User Experience
 
@@ -22,7 +22,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Data and State
 
 - `SettingsDestination` controls subpage routing.
-- `ProviderFields` holds editable name, HTTPS endpoint, username, and password. HTTP input produces a blocking validation explanation.
+- `ProviderFields` holds editable name, HTTP(S) endpoint, username, password, and persisted insecure-HTTP approval. HTTP input exposes an explicit warning and opt-in.
 - `@FetchOne(Provider.where(\.isActive))` supplies the active provider row; password material is resolved through `ProviderCredentialStoring`, not SQLite.
 - Local category/media queries supply provider status counts with truthful labels.
 - `ProviderManager` classifies unchanged, name-only, connection-changing, resync, and removal operations so destructive effects are explicit.

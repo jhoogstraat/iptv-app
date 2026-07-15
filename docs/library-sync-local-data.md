@@ -20,7 +20,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 
 ## Data and State
 
-- `providers`: provider identity, HTTPS endpoint, Keychain credential reference, source kind, active flag, and initialized flag. The legacy approval column remains in the pre-release schema model but production validation never permits HTTP.
+- `providers`: provider identity, HTTP(S) endpoint, explicit insecure-HTTP approval, Keychain credential reference, source kind, active flag, and initialized flag. Scheme-less endpoints default to HTTPS.
 - `categories`: source category ID, media type, display title, and hydration timestamp.
 - `media`: source stream ID, media type, title, category ID, rich detail metadata, episode/series linkage, container extension where available, and update timestamp. Live rows persist available channel metadata without inventing EPG data.
 - `SyncManager.InitialSyncPhase`: idle, checking provider, syncing movies, syncing series, syncing live, validating received data, replacing catalog, succeeded, failed.

@@ -45,8 +45,8 @@ final class ProviderFields {
             validation.endpoint = "Enter the provider URL."
         } else if normalizedEndpoint == nil {
             validation.endpoint = "Enter a valid HTTP or HTTPS URL without embedded credentials."
-        } else if normalizedEndpoint?.scheme?.lowercased() == "http" {
-            validation.endpoint = "Use an HTTPS provider URL. iOS blocks unencrypted provider traffic."
+        } else if normalizedEndpoint?.scheme?.lowercased() == "http", !allowsInsecureHTTP {
+            validation.endpoint = "Explicitly allow insecure HTTP to use this provider."
         }
         if trimmedUsername.isEmpty {
             validation.username = "Enter the provider username."
@@ -72,7 +72,7 @@ final class ProviderFields {
         }
 
         let isInsecure = normalizedEndpoint.scheme?.lowercased() == "http"
-        guard !isInsecure else { return nil }
+        guard !isInsecure || allowsInsecureHTTP else { return nil }
 
         return .init(
             id: id,
@@ -81,7 +81,7 @@ final class ProviderFields {
             username: trimmedUsername,
             password: password,
             endpoint: normalizedEndpoint,
-            allowsInsecureHTTP: false
+            allowsInsecureHTTP: isInsecure && allowsInsecureHTTP
         )
     }
 
@@ -162,14 +162,16 @@ struct ProviderEditorSection: View {
 
             if fields.isExplicitlyInsecure {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("HTTPS required", systemImage: "lock.trianglebadge.exclamationmark.fill")
+                    Label("Insecure HTTP connection", systemImage: "exclamationmark.triangle.fill")
                         .font(.headline)
                         .foregroundStyle(.orange)
 
-                    Text("Unencrypted HTTP would expose provider credentials and is blocked by the app transport policy. Ask the provider for an HTTPS endpoint.")
+                    Text("HTTP sends your provider username and password without transport encryption. Only continue if you trust this network and the provider cannot use HTTPS.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
+                    Toggle("Allow insecure HTTP for this provider", isOn: $fields.allowsInsecureHTTP)
+                        .accessibilityIdentifier("onboarding.provider.allowInsecureHTTP")
                 }
             }
 

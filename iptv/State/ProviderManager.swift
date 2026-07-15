@@ -468,17 +468,27 @@ final class ProviderManager {
         }
 
         let scheme = configuration.endpoint.scheme?.lowercased()
-        guard scheme == "https",
+        guard scheme == "https" || scheme == "http",
               configuration.endpoint.user == nil,
               configuration.endpoint.password == nil
         else {
             throw ProviderManagerError.unsupportedEndpoint
         }
 
+        guard scheme != "http" || configuration.allowsInsecureHTTP else {
+            throw ProviderManagerError.insecureTransportRequiresApproval
+        }
     }
 
     private func isTransportAllowed(for provider: Provider) -> Bool {
-        provider.endpoint.scheme?.lowercased() == "https"
+        switch provider.endpoint.scheme?.lowercased() {
+            case "https":
+                true
+            case "http":
+                provider.allowsInsecureHTTP
+            default:
+                false
+        }
     }
 
     private func compensateCredential(
