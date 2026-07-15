@@ -7,7 +7,7 @@ Media Details provides the focused destination for a selected movie or series it
 ## Status
 
 - Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume for playable rows, and bridges to the shared player; favorite controls persist through the shared provider-scoped favorites store while downloads remain explicit unsupported states.
-- Implementation status (reviewed 2026-07-10): `MediaDetailDestination` routes movies, series, episodes, and live states explicitly from Browse, Search, Favorites, and For You. Movie and series screens share adaptive hero/backdrop presentation, stable collapsed-title behavior, compact-width and large-Dynamic-Type layouts, truthful loading/empty/failure enrichment state, provider-scoped favorite/resume state, and shared full-window playback entry.
+- Implementation status: `MediaDetailDestination` routes movies, series, episodes, and live states explicitly from Browse, Search, Favorites, and For You. Movie and series screens share adaptive hero/backdrop presentation, truthful enrichment state, profile-scoped favorite/resume state, working trailer links, source selection, downloads, and shared full-window playback entry.
 - Series detail keeps its own Episodes/Details content and season selection. Selecting a concrete episode row calls the shared player directly with full-window presentation and surfaces terminal resolution/backend errors in the series detail; standalone `EpisodeDetailTile` routes remain available from other surfaces. `SyncManager.enrichDetails` single-flights detail requests, rejects stale provider ownership, reconciles seasons/episodes, and preserves the last good local snapshot when enrichment fails.
 
 ## User Experience
@@ -35,7 +35,7 @@ Media Details provides the focused destination for a selected movie or series it
 - Current persisted fields: title, cover/backdrop URL, rating, source ID, media type, category ID, TMDB ID, synopsis/plot, release date/year, runtime, genre, cast, director, trailer, added date, country when exposed by Xtream DTOs, parent-series/season/episode linkage, and movie/episode container extension.
 - Series seasons are stored in `SeriesSeason`; playable episodes are stored as `Media(type: .episode)` rows linked by `parentSeriesID`.
 - Player actions call `Player.load` after resolving a playable URL/source. A concrete series episode row loads its `.episode` directly with full-window presentation; standalone episode detail routes use the same full-window play contract. Series collection rows remain explicitly non-playable.
-- Movie and episode detail screens query provider-scoped `WatchActivity` rows by active provider ID, media type, and source ID to label Play vs Resume and show progress/remaining time; movie, series, and episode details query provider-scoped `Favorite` rows by the same content key for shared favorite controls.
+- Movie and episode detail screens query active-profile/provider `WatchActivity` rows to label Play vs Resume. Favorite and download state use the same profile/provider content boundary.
 
 ## Key Files
 
@@ -54,6 +54,7 @@ Media Details provides the focused destination for a selected movie or series it
 - Detail screens render from local persisted data and view state.
 - Movie and series detail paths do not share incorrect assumptions about episodes or playback URLs.
 - Play action resolves a playable source and launches the shared player.
+- Sources lets users prefer a verified local asset or explicitly bypass it for the provider stream. Trailer opens only when the provider supplied a usable URL or YouTube identifier.
 - Playable movie and episode details show Resume/progress only for unfinished meaningful watch activity; completed or too-short progress starts from zero.
 - Favorite actions update provider-scoped persisted state; download actions remain explicit unavailable affordances until downloads are implemented.
 - Missing metadata produces clear fallback UI instead of placeholder copy in completed paths.
