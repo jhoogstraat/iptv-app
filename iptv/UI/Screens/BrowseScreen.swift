@@ -169,7 +169,9 @@ private struct BrowseCategoryScreen: View {
     init(type: MediaType, category: Category) {
         self.type = type
         self.category = category
-        self._media = FetchAll()
+        self._media = FetchAll(
+            Media.where { $0.type.eq(type).and($0.categoryID.eq(category.id)) }
+        )
         self._mediaCounts = Fetch(
             wrappedValue: LibraryMediaCountsRequest.Value(),
             LibraryMediaCountsRequest(type: type)
@@ -178,6 +180,7 @@ private struct BrowseCategoryScreen: View {
 
     private var filterState: LibraryFilterState {
         LibraryFilterState(
+            selectedCategoryID: category.id,
             minimumRating: minimumRating,
             sort: sort
         )
@@ -231,15 +234,6 @@ private struct BrowseCategoryScreen: View {
         .compactSearchToolbar()
         .task(id: category.id) {
             await hydrate(force: false)
-        }
-        .task(id: category.id) {
-            do {
-                try await $media.load(
-                    Media.where { $0.type.eq(type).and($0.categoryID.eq(category.id)) }
-                )
-            } catch {
-                return
-            }
         }
     }
 
@@ -1067,7 +1061,7 @@ struct FilterPill: View {
         }
         .font(.subheadline)
         .foregroundStyle(isActive ? Color.white : Color.primary)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 6)
         .padding(.vertical, 6)
         .background(isActive ? Color.accentColor : Color.secondary.opacity(0.14))
         .clipShape(Capsule(style: .continuous))

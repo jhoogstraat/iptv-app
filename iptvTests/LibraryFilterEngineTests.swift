@@ -6,6 +6,22 @@ import Testing
 
 @Suite("Library filter engine", .serialized)
 struct LibraryFilterEngineTests {
+    @Test func categoryContextRejectsRowsFromAnUnscopedInitialSnapshot() {
+        let selectedCategory = makeCategory(id: 1, title: "Action")
+        let media = [
+            makeMedia(id: 1, sourceID: 100, title: "Selected", categoryID: selectedCategory.id),
+            makeMedia(id: 2, sourceID: 101, title: "Previously Loaded", categoryID: 2),
+        ]
+
+        let result = LibraryFilterEngine.filteredMedia(
+            media,
+            categories: [selectedCategory],
+            state: LibraryFilterState(selectedCategoryID: selectedCategory.id)
+        )
+
+        #expect(result.map(\.sourceID) == [100])
+    }
+
     @Test func groupSelectionUsesORWithinGroupsAndANDAcrossOtherFilters() {
         let categories = [
             makeCategory(id: 1, title: "|EN| Action"),

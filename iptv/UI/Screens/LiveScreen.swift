@@ -170,7 +170,9 @@ private struct LiveCategoryScreen: View {
 
     init(category: Category) {
         self.category = category
-        self._channels = FetchAll()
+        self._channels = FetchAll(
+            Media.where { $0.type.eq(MediaType.live).and($0.categoryID.eq(category.id)) }
+        )
         self._mediaCounts = Fetch(
             wrappedValue: LibraryMediaCountsRequest.Value(),
             LibraryMediaCountsRequest(type: .live)
@@ -186,7 +188,7 @@ private struct LiveCategoryScreen: View {
     }
 
     private var filterState: LibraryFilterState {
-        LibraryFilterState(sort: sort)
+        LibraryFilterState(selectedCategoryID: category.id, sort: sort)
     }
 
     private var filterRequest: LibraryFilterRequest {
@@ -221,15 +223,6 @@ private struct LiveCategoryScreen: View {
         .compactSearchToolbar()
         .task(id: category.id) {
             await hydrate(force: false)
-        }
-        .task(id: category.id) {
-            do {
-                try await $channels.load(
-                    Media.where { $0.type.eq(MediaType.live).and($0.categoryID.eq(category.id)) }
-                )
-            } catch {
-                return
-            }
         }
         .task(id: filterTaskID) {
             if !filterTaskID.normalizedQuery.isEmpty {
