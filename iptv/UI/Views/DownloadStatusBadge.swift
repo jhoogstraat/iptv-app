@@ -1,45 +1,102 @@
-//
-//  DownloadStatusBadge.swift
-//  iptv
-//
-//  Created by Codex on 11.03.26.
-//
-
 import SwiftUI
+import SQLiteData
+import Dependencies
 
 struct DownloadStatusBadge: View {
+    let media: Media
     let presentation: DownloadStatusBadgePresentation
 
-    init(presentation: DownloadStatusBadgePresentation = .capsule) {
+    @Environment(Player.self) private var player
+    @Environment(Session.self) private var session
+    @Dependency(\.defaultDatabase) private var database
+    @FetchAll private var downloads: [DownloadItem]
+    @State private var errorMessage: String?
+
+    init(media: Media, presentation: DownloadStatusBadgePresentation = .capsule) {
+        self.media = media
         self.presentation = presentation
     }
 
-    @ViewBuilder
-    var body: some View {
-        switch presentation {
-        case .capsule:
-            statusLabel
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.secondary.opacity(0.12), in: Capsule(style: .continuous))
-        case .detailAction(let variant):
-            DetailActionSurface(
-                label: statusLabel,
-                variant: variant,
-                isPressed: false,
-                isEnabled: true,
-                isFocused: false
-            )
+    private var item: DownloadItem? {
+        downloads.first {
+            $0.profileID == session.activeProfileID
+                && $0.providerID == session.providerID
+                && $0.mediaType == media.type
+                && $0.sourceID == media.sourceID
         }
     }
 
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            switch presentation {
+            case .capsule:
+                downloadButton
+                    .buttonStyle(.bordered)
+            case .detailAction(let variant):
+                downloadButton
+                    .buttonStyle(DetailActionStyle(variant: variant))
+            }
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            } else if let storedError = item?.errorMessage {
+                Text(storedError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var downloadButton: some View {
+        Button(action: performAction) {
+            statusLabel
+                .frame(maxWidth: presentation.isDetailAction ? .infinity : nil)
+        }
+        .disabled(media.type != .movie && media.type != .episode)
+    }
+
+    @ViewBuilder
     private var statusLabel: some View {
-        Label("Download unavailable", systemImage: "arrow.down.circle")
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Downloads unavailable")
-            .accessibilityHint("Offline playback is not available.")
+        switch item?.status {
+        case .queued, .downloading:
+            Label("Pause Download", systemImage: "pause.circle")
+        case .paused:
+            Label("Resume Download", systemImage: "arrow.down.circle")
+        case .completed:
+            Label("Remove Download", systemImage: "checkmark.circle.fill")
+        case .failed:
+            Label("Retry Download", systemImage: "arrow.clockwise.circle")
+        case nil:
+            Label("Download", systemImage: "arrow.down.circle")
+        }
+    }
+
+    private func performAction() {
+        do {
+            if let item {
+                switch item.status {
+                case .queued, .downloading:
+                    DownloadCoordinator.shared.pause(item, database: database)
+                case .paused, .failed:
+                    DownloadCoordinator.shared.resume(item, database: database)
+                case .completed:
+                    try DownloadCoordinator.shared.remove(item, database: database)
+                }
+            } else {
+                try player.download(media)
+            }
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private extension DownloadStatusBadgePresentation {
+    var isDetailAction: Bool {
+        if case .detailAction = self { return true }
+        return false
     }
 }

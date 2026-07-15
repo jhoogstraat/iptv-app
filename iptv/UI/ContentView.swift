@@ -107,6 +107,13 @@ struct ContentView: View {
                     
                     Tab(Tabs.downloads.name, systemImage: Tabs.downloads.symbol, value: Tabs.downloads) {
                         DownloadsScreen()
+                            .requireSessionOrElse {
+                                ContentUnavailableView {
+                                    Label("No provider configured", systemImage: "arrow.down.circle")
+                                } description: {
+                                    Text("Add a provider before downloading movies or episodes.")
+                                }
+                            }
                     }
                     .customizationID(Tabs.downloads.customizationID)
                 }
