@@ -310,7 +310,7 @@ struct OnboardingFlowView: View {
                     case .credentialsUnavailable:
                         errorMessage = "The saved password couldn’t be read. Enter it again to continue."
                     case .insecureTransportApprovalRequired:
-                        errorMessage = "Review and explicitly allow insecure HTTP, or use an HTTPS URL."
+                        errorMessage = "Use an HTTPS provider URL. Unencrypted HTTP is blocked."
                     case .noProvider, .ready:
                         errorMessage = "Review the provider settings and try again."
                 }

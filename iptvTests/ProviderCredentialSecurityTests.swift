@@ -167,7 +167,7 @@ struct ProviderCredentialSecurityTests {
         #expect(editableConfiguration.password.isEmpty)
     }
 
-    @Test func schemeLessDefaultsToHTTPSAndHTTPRequiresPersistedApproval() throws {
+    @Test func schemeLessDefaultsToHTTPSAndHTTPIsAlwaysRejected() throws {
         let secureFields = ProviderFields(
             name: "Secure",
             endpoint: "provider.example.com/player_api.php",
@@ -199,9 +199,9 @@ struct ProviderCredentialSecurityTests {
 
             do {
                 try manager.initialize(rejectedConfiguration)
-                Issue.record("Expected HTTP configuration without informed opt-in to be rejected.")
+                Issue.record("Expected HTTP configuration to be rejected.")
             } catch let error as ProviderManagerError {
-                guard case .insecureTransportRequiresApproval = error else {
+                guard case .unsupportedEndpoint = error else {
                     Issue.record("Unexpected provider error: \(error)")
                     return
                 }
@@ -211,22 +211,7 @@ struct ProviderCredentialSecurityTests {
         }
 
         insecureFields.allowsInsecureHTTP = true
-        let approvedConfiguration = try #require(insecureFields.build(id: nil, kind: .xtream))
-        #expect(approvedConfiguration.allowsInsecureHTTP)
-
-        let approvedCredentials = TestProviderCredentialStore()
-        try withTestDatabase(credentials: approvedCredentials) { database in
-            let manager = ProviderManager(database: database, credentialStore: approvedCredentials)
-            try manager.initialize(approvedConfiguration)
-
-            let storedProvider = try database.read { db in
-                let provider = try Provider.where(\.isActive).fetchOne(db)
-                return try #require(provider)
-            }
-            #expect(storedProvider.endpoint.absoluteString == "http://legacy.example.com")
-            #expect(storedProvider.allowsInsecureHTTP)
-            #expect(manager.accessState == .ready)
-        }
+        #expect(insecureFields.build(id: nil, kind: .xtream) == nil)
     }
 
     @Test func persistedHTTPWithoutApprovalCannotCreateOrRunSyncSession() async throws {
