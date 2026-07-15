@@ -3,7 +3,6 @@ import SwiftUI
 struct OnboardingFlowView: View {
     private enum Route: Hashable {
         case credentials
-        case syncing
         case failed
     }
 
@@ -16,6 +15,7 @@ struct OnboardingFlowView: View {
     @State private var errorMessage: String?
     @State private var showsValidationErrors = false
     @State private var syncingRevision: Int?
+    @State private var isSyncPresented = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -31,12 +31,6 @@ struct OnboardingFlowView: View {
                         }
                         .navigationTitle(selectedKind.title)
                         .navigationBarBackButtonHidden(isSubmitting)
-                    case .syncing:
-                        onboardingScreen {
-                            syncingStep
-                        }
-                        .navigationTitle("Syncing")
-                        .navigationBarBackButtonHidden(true)
                     case .failed:
                         onboardingScreen {
                             failedStep
@@ -51,6 +45,21 @@ struct OnboardingFlowView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
 #endif
+        .sheet(isPresented: $isSyncPresented) {
+            NavigationStack {
+                onboardingScreen {
+                    syncingStep
+                }
+                .navigationTitle("Syncing")
+#if !os(macOS) && !os(tvOS)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(Color.black, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+#endif
+            }
+            .interactiveDismissDisabled()
+        }
         .task(id: providerManager.revision) {
             await reactToProviderRevision()
         }
@@ -319,7 +328,8 @@ struct OnboardingFlowView: View {
             }
 
             guard !providerManager.activeProviderIsInitialized else { return }
-            path = [.credentials, .syncing]
+            path = [.credentials]
+            isSyncPresented = true
             await syncActiveProvider(for: providerManager.revision)
         } catch {
             errorMessage = error.localizedDescription
@@ -340,6 +350,7 @@ struct OnboardingFlowView: View {
 
         isSubmitting = true
         errorMessage = nil
+        isSyncPresented = true
 
         do {
             if providerManager.activeProviderID == nil {
@@ -349,11 +360,11 @@ struct OnboardingFlowView: View {
             }
 
             showsValidationErrors = false
-            path = [.credentials, .syncing]
             isSubmitting = false
             await syncActiveProvider(for: providerManager.revision)
         } catch {
             isSubmitting = false
+            isSyncPresented = false
             errorMessage = error.localizedDescription
         }
     }
@@ -366,6 +377,7 @@ struct OnboardingFlowView: View {
         let result = await providerManager.runInitialSyncForActiveProvider()
         if result == .failure {
             errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
+            isSyncPresented = false
             path = [.credentials, .failed]
         }
     }
