@@ -612,7 +612,7 @@ final class Player {
             throw MediaPlaybackSourceResolutionError.missingActiveProvider
         }
         let scheme = provider.endpoint.scheme?.lowercased()
-        guard scheme == "https" else {
+        guard scheme == "https" || (scheme == "http" && provider.allowsInsecureHTTP) else {
             throw MediaPlaybackSourceResolutionError.insecureProviderTransport
         }
         guard !provider.credentialReference.isEmpty else {
