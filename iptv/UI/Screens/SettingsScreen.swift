@@ -10,25 +10,6 @@ import SwiftUI
 import SQLiteData
 import Dependencies
 
-private enum LibraryLanguageSource: String, CaseIterable, Identifiable {
-    case automatic
-    case prefix
-    case suffix
-    
-    var id: String { rawValue }
-    
-    var title: String {
-        switch self {
-            case .automatic:
-                "Automatic"
-            case .prefix:
-                "Prefix"
-            case .suffix:
-                "Suffix"
-        }
-    }
-}
-
 private enum PlaybackPreference: String, CaseIterable, Identifiable {
     case automatic
     case avPlayer = "av"
@@ -573,20 +554,10 @@ struct SettingsScreen: View {
             .buttonStyle(.borderedProminent)
             .disabled(!providerManager.hasActiveProvider || detectedCategoryGroups.isEmpty)
 
-            Toggle("Group categories by prefix", isOn: .constant(true))
-                .disabled(true)
-
-            Picker("Language Source", selection: .constant(LibraryLanguageSource.prefix)) {
-                ForEach(LibraryLanguageSource.allCases) { source in
-                    Text(source.title)
-                        .tag(source)
-                }
-            }
-            .disabled(true)
         } header: {
             Text("Library Organization")
         } footer: {
-            Text("All detected prefixes start visible. Hidden prefixes are provider-scoped and are excluded from browse and search. Language filters currently use inferred category prefixes only; catalog, audio, and subtitle language metadata are not stored yet.")
+            Text("All detected prefixes start visible. Hidden prefixes are provider-scoped and excluded from browse and search.")
         }
     }
 

@@ -106,7 +106,10 @@ struct PlayerView: View {
     }
 
     private var synopsisText: String? {
-        nil
+        guard let synopsis = player.currentItem?.synopsis?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !synopsis.isEmpty
+        else { return nil }
+        return synopsis
     }
 
     private var selectedQualityBadgeText: String? {

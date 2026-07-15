@@ -105,8 +105,7 @@ struct OnboardingFlowView: View {
                     .accessibilityIdentifier("onboarding.source.\(kind.rawValue)")
                 }
                 
-                Button {} label: {
-                    HStack(alignment: .top, spacing: 14) {
+                HStack(alignment: .top, spacing: 14) {
                         Image(systemName: "circle")
                             .foregroundStyle(.secondary)
                             .font(.title3)
@@ -129,17 +128,14 @@ struct OnboardingFlowView: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(.secondary.opacity(0.12), in: Capsule())
-                    }
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
-                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(true)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                }
                 .accessibilityIdentifier("onboarding.source.m3u8")
             }
 
