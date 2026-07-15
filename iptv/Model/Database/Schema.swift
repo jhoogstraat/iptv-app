@@ -50,6 +50,7 @@ func appDatabase(
             "kind" TEXT NOT NULL DEFAULT 'xtream',
             "isInitialized" INTEGER NOT NULL DEFAULT 0,
             "isActive" INTEGER NOT NULL DEFAULT 0,
+            "lastSyncedAt" TEXT,
             "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         ) STRICT
         """).execute(db)
@@ -200,6 +201,7 @@ nonisolated struct Provider: Hashable, Identifiable, Sendable {
     var allowsInsecureHTTP = false
     var isInitialized: Bool = false
     var isActive: Bool = false
+    var lastSyncedAt: Date? = nil
 }
 
 @Table("media")

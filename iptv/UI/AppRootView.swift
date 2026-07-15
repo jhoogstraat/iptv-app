@@ -44,12 +44,19 @@ final class RecoverableBootstrap<Value> {
 
 struct AppRootView: View {
     @Environment(ProviderManager.self) private var providerManager
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        if providerManager.requiresOnboarding {
-            OnboardingFlowView()
-        } else {
-            ContentView()
+        Group {
+            if providerManager.requiresOnboarding {
+                OnboardingFlowView()
+            } else {
+                ContentView()
+            }
+        }
+        .task(id: scenePhase) {
+            guard scenePhase == .active, !providerManager.requiresOnboarding else { return }
+            await providerManager.refreshActiveProviderIfStale()
         }
     }
 }
