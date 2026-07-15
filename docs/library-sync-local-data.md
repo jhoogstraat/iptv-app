@@ -8,7 +8,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 
 - Target state: initial sync seeds the local library, background sync keeps it fresh, and screens read local data without direct provider fetches.
 - Implementation status (reviewed 2026-07-14): `SyncManager.sync()` single-flights initial sync, rejects non-2xx provider or proxy response headers before waiting for a body, bounds providers that never answer and later category responses that stall, requires at least one received category across movie, series, and live, and atomically replaces the catalog only after all required families succeed. Duplicate initial-sync, category-hydration, and detail-enrichment callers join the active operation instead of cancelling and restarting it. Category hydration reconciles incoming movie/series/live rows by deleting stale rows and updating timestamps. Provider changes invalidate active sync/detail/hydration ownership so stale work cannot commit into a replacement catalog.
-- Current schema: a fresh development database is created complete in one initial `Create tables` registration with provider, category, media, category-prefix-visibility, series-season, watch-activity, and favorites tables plus current indexes and metadata/write-order columns. Provider passwords live only in Keychain behind a database credential reference; `providers` has no plaintext password column. Before release, there is intentionally no compatibility migration chain for older development databases.
+- Current schema: because the app is not yet live, the complete current schema is intentionally consolidated into the single initial `Create tables` migration. It creates provider, category, media, category-prefix-visibility, series-season, watch-activity, and favorites tables plus current indexes and metadata/write-order columns. Provider passwords live only in Keychain behind a database credential reference; `providers` has no plaintext password column.
 
 ## User Experience
 
@@ -58,7 +58,7 @@ Library sync turns remote Xtream catalog data into local app state. The local li
 - Provider-isolated user state exists for category prefix visibility, watch progress, and favorites; downloads and recommendations are not yet present in the current schema.
 - Media records do not include playable URL fields, language, audio tracks, subtitle tracks, or full cast/crew normalization.
 - Provider isolation is mixed: user-state tables are provider-scoped, while `categories` and `media` have no provider column; provider sync/delete paths clear the singleton local library, and active-provider filters prevent watch progress from leaking across providers.
-- A release migration policy is not defined yet; add compatibility migrations before shipping only when preserving an installed production schema becomes a real deployment requirement.
+- Keep pre-release schema changes merged into the initial migration. Start a compatibility migration chain only after the first live schema ships.
 
 ## Notes for Agents
 
