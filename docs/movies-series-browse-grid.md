@@ -24,7 +24,7 @@ Movies and Series browse gives users fast local category navigation and poster-g
 
 - `BrowseScreen.type` controls whether categories are movie or series categories.
 - `@FetchAll(Category.where { $0.type.eq(type) })` supplies categories.
-- `BrowseScreen` owns landing-only `selectedGroupKeys` and category search state. `BrowseCategoryScreen` receives a concrete `Category` from navigation and owns its own media search, rating, and sort state.
+- `BrowseScreen` owns landing-only `selectedGroupKeys` and category search state. `BrowseCategoryScreen` receives a concrete `Category` from navigation, initializes its database observation with that category and media type already applied, and owns its own media search, rating, and sort state. Its presentation request also carries the category ID as a defensive constraint, so an initial or stale unscoped snapshot cannot expose media from another category.
 - Category and media search text are separately normalized through `LibraryQueryNormalizer`; landing search matches category titles, while destination search matches media titles only inside the navigated category.
 - `BrowseSort.title`, `.newest`, and `.rating` are applied by `LibraryFilterEngine`.
 - `CoverGridSection` snapshots the already-fetched local `Media`, categories, filter state, hidden groups, and query, computes the shared filter/sort result off the main actor, and retains the previous grid while a newer request runs. SwiftUI compares a compact `LibraryFilterTaskID`; catalog arrays are not part of task identity. Cancellation propagates into the worker, and the latest bulk result is committed without a full-grid animation. The task performs no SQLite or remote work.
@@ -48,6 +48,7 @@ Movies and Series browse gives users fast local category navigation and poster-g
 - Movies and Series use the same browse implementation without divergent behavior.
 - Browse reads from local `Category` and `Media` rows.
 - Selecting an unhydrated category fetches and persists that category's media exactly through session/sync infrastructure.
+- A category destination never presents media from another category, including while its first hydration changes the local catalog.
 - Category rows use native navigation, do not increment the active-filter count, and support the platform back gesture.
 - Group state filters the category landing list but is not carried into the pushed media filter state.
 - Selecting a large category remains interactive while provider decoding and reconciliation run away from the main actor, and the UI receives one committed catalog update.

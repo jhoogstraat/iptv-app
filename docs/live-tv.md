@@ -28,7 +28,7 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 - EPG programmes are requested on demand rather than persisted. Channel rows store `epgChannelID`, `supportsCatchup`, and `catchupDays`.
 - Player resolves live rows through the provider live path. Catch-up uses the provider timeshift path and is treated as seekable archived playback; live mode hides timeline controls and exposes zapping.
 - The displayed channel result is reused for empty-state checks, row rendering, playback, and previous/next zapping; the full channel catalog is not repeatedly filtered during a render.
-- `LiveScreen` observes categories and compact grouped counts. Each `LiveCategoryScreen` observes only its navigated category's channel rows; there is no cross-category channel observation on the landing screen.
+- `LiveScreen` observes categories and compact grouped counts. Each `LiveCategoryScreen` initializes its observation with the navigated category already applied and repeats that category constraint in its presentation filter, so first hydration cannot expose previously loaded channels from another category. There is no cross-category channel observation on the landing screen.
 
 ## Key Files
 
@@ -46,6 +46,7 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 - Movies, Series, and Live use the same sectioned category-list presentation as their default view.
 - Category navigation uses the native feature stack and supports platform back navigation without representing the category as a filter.
 - Live tab renders local channels without direct routine remote fetches.
+- A live category destination never presents channels from another category, including during first hydration.
 - Search/filter behavior is local and consistent with browse/search semantics.
 - Channel playback uses the shared player backend/fallback system.
 - EPG/catch-up data, when implemented, is provider-scoped and refreshable independently from movies/series.
