@@ -23,20 +23,16 @@ struct OnboardingFlowView: View {
             onboardingScreen {
                 sourceStep
             }
-            .navigationTitle("Welcome to iptv")
             .navigationDestination(for: Route.self) { route in
                 switch route {
                     case .credentials:
                         onboardingScreen {
                             credentialsStep
                         }
-                        .navigationTitle(selectedKind.title)
-                        .navigationBarBackButtonHidden(isSubmitting)
                     case .failed:
                         onboardingScreen {
                             failedStep
                         }
-                        .navigationTitle("Sync failed")
                 }
             }
         }
@@ -54,7 +50,6 @@ struct OnboardingFlowView: View {
                 onboardingScreen {
                     syncingStep
                 }
-                .navigationTitle("Syncing")
 #if !os(macOS) && !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(Color.black, for: .navigationBar)
@@ -166,6 +161,7 @@ struct OnboardingFlowView: View {
             .accessibilityIdentifier("onboarding.source.continue")
         }
         }
+        .navigationTitle("Welcome to iptv")
     }
 
     private var credentialsStep: some View {
@@ -174,6 +170,8 @@ struct OnboardingFlowView: View {
             saveLabel: "Start Sync",
             isRetry: false
         )
+        .navigationTitle(selectedKind.title)
+        .navigationBarBackButtonHidden(isSubmitting)
     }
 
     private var failedStep: some View {
@@ -182,6 +180,7 @@ struct OnboardingFlowView: View {
             saveLabel: "Retry Sync",
             isRetry: true
         )
+        .navigationTitle("Sync failed")
     }
 
     private func providerForm(
@@ -238,6 +237,7 @@ struct OnboardingFlowView: View {
         .frame(maxWidth: 440)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .accessibilityIdentifier("onboarding.sync.progress")
+        .navigationTitle("Syncing")
     }
 
     private func syncRow(title: String, status: SyncManager.SyncStatus) -> some View {
