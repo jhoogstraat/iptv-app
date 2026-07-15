@@ -646,6 +646,11 @@ struct ForYouSnapshot {
 }
 
 struct ForYouScreen: View {
+    private struct CatalogLoadTaskID: Hashable {
+        let request: ForYouCatalogRequest
+        let retryRevision: Int
+    }
+
     @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
@@ -655,6 +660,9 @@ struct ForYouScreen: View {
 
     @State private var selectedDetail: Media?
     @State private var loadedCatalogRequest: ForYouCatalogRequest?
+    @State private var failedCatalogRequest: ForYouCatalogRequest?
+    @State private var catalogLoadErrorMessage: String?
+    @State private var catalogLoadRetryRevision = 0
 
     private var catalogRequest: ForYouCatalogRequest {
         ForYouCatalogRequest(
@@ -664,26 +672,59 @@ struct ForYouScreen: View {
         )
     }
 
+    private var catalogLoadTaskID: CatalogLoadTaskID {
+        CatalogLoadTaskID(
+            request: catalogRequest,
+            retryRevision: catalogLoadRetryRevision
+        )
+    }
+
     var body: some View {
         NavigationStack {
-            if loadedCatalogRequest != catalogRequest {
+            if loadedCatalogRequest == catalogRequest {
+                content(makeSnapshot())
+            } else if failedCatalogRequest == catalogRequest {
+                catalogLoadFailure
+            } else {
                 ProgressView("Loading For You…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityIdentifier("forYou.catalog.loading")
-            } else {
-                content(makeSnapshot())
             }
         }
-        .task(id: catalogRequest) {
-            do {
-                try await $catalog.load(catalogRequest).task
-                guard !Task.isCancelled else { return }
-                loadedCatalogRequest = catalogRequest
-            } catch is CancellationError {
-                return
-            } catch {
-                return
+        .task(id: catalogLoadTaskID) {
+            await loadCatalog(catalogRequest)
+        }
+    }
+
+    @ViewBuilder
+    private var catalogLoadFailure: some View {
+        ContentUnavailableView {
+            Label("Couldn’t Load For You", systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(catalogLoadErrorMessage ?? "The local catalog could not be read.")
+        } actions: {
+            Button("Retry") {
+                catalogLoadRetryRevision &+= 1
             }
+        }
+        .accessibilityIdentifier("forYou.catalog.failed")
+    }
+
+    private func loadCatalog(_ request: ForYouCatalogRequest) async {
+        failedCatalogRequest = nil
+        catalogLoadErrorMessage = nil
+        do {
+            let subscription = try await $catalog.load(request)
+            guard !Task.isCancelled, request == catalogRequest else { return }
+            loadedCatalogRequest = request
+            try await subscription.task
+        } catch is CancellationError {
+            return
+        } catch {
+            guard !Task.isCancelled, request == catalogRequest else { return }
+            loadedCatalogRequest = nil
+            failedCatalogRequest = request
+            catalogLoadErrorMessage = error.localizedDescription
         }
     }
 
