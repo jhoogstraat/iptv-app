@@ -13,7 +13,7 @@ struct VideoTile: View {
     var body: some View {
         ZStack(alignment: .top) {
             artwork
-            badgeRow
+            Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.secondary.opacity(0.12))
@@ -39,38 +39,6 @@ struct VideoTile: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-    }
-
-    private var badgeRow: some View {
-        HStack {
-//            if let rating = media.formattedRating {
-//                HStack(alignment: .firstTextBaseline, spacing: 3) {
-//                    Image(systemName: "star.fill")
-//                        .foregroundStyle(.orange)
-//                    Text(rating)
-//                        .fontWeight(.semibold)
-//                }
-//                .font(.footnote)
-//                .padding(.horizontal, 2)
-//                .padding(4)
-//                .background(.thinMaterial)
-//                .clipShape(.rect(cornerRadius: 8))
-//            }
-            Spacer()
-//            if let lang = media.language {
-//                Text(lang)
-//                    .font(.footnote.weight(.semibold))
-//                    .padding(.horizontal, 2)
-//                    .padding(4)
-//                    .background(.thinMaterial)
-//                    .clipShape(.rect(cornerRadius: 8))
-//            }
-
-//            if let selection {
-//                DownloadStatusBadge(selection: selection)
-//            }
-        }
-        .padding(6)
     }
 }
 
