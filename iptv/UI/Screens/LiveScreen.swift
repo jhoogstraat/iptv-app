@@ -54,7 +54,7 @@ struct LiveScreen: View {
             matchingGroupKeys: selectedGroupKeys
         )
         guard !LibraryQueryNormalizer.isEmpty(categorySearchText) else { return grouped }
-        return grouped.filter { LibraryQueryNormalizer.matches($0.title, query: categorySearchText) }
+        return grouped.filter { LibraryQueryNormalizer.matches($0.displayTitle, query: categorySearchText) }
     }
 
     private var hydrationSnapshot: LibraryHydrationSnapshot {
@@ -81,6 +81,7 @@ struct LiveScreen: View {
             }
             .navigationTitle("Live")
             .searchable(text: $categorySearchText, prompt: "Search categories")
+            .compactSearchToolbar()
             .task(id: visibilityRequest) {
                 prefixVisibilityCache.resolve(visibilityRequest) {
                     CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
@@ -215,8 +216,9 @@ private struct LiveCategoryScreen: View {
             Divider()
             content
         }
-        .navigationTitle(category.title)
-        .searchable(text: $searchText, prompt: "Search \(category.title)")
+        .navigationTitle(category.displayTitle)
+        .searchable(text: $searchText, prompt: "Search \(category.displayTitle)")
+        .compactSearchToolbar()
         .task(id: category.id) {
             await hydrate(force: false)
         }
@@ -257,13 +259,13 @@ private struct LiveCategoryScreen: View {
             LiveLoadingList()
         case .empty:
             ContentUnavailableView {
-                Label("No channels in \(category.title)", systemImage: "tray")
+                Label("No channels in \(category.displayTitle)", systemImage: "tray")
             } description: {
                 Text("The provider returned this live category, but no channels were found for it.")
             }
         case let .failed(message):
             ContentUnavailableView {
-                Label("Couldn’t load \(category.title)", systemImage: "exclamationmark.triangle")
+                Label("Couldn’t load \(category.displayTitle)", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(message)
             } actions: {
@@ -273,7 +275,7 @@ private struct LiveCategoryScreen: View {
             }
         case .populated:
             channelList(
-                title: category.title,
+                title: category.displayTitle,
                 emptyTitle: "No channels match",
                 emptyMessage: "Clear search or filters to show the local channels in this category."
             )
@@ -452,6 +454,7 @@ private struct LiveFilterBar: View {
     let categories: [Category]
     @Binding var selectedGroupKeys: Set<String>
     let clearFilters: () -> Void
+    @State private var isGroupSelectorPresented = false
 
     private var groupSections: Array<(key: String, value: [Category])> {
         Dictionary(grouping: categories) { category in
@@ -470,70 +473,48 @@ private struct LiveFilterBar: View {
 
     private var activeFilterCount: Int { selectedGroupKeys.isEmpty ? 0 : 1 }
 
-    private var activeGroupTitles: String {
-        selectedGroupKeys
-            .sorted { CategoryGrouping.title(for: $0) < CategoryGrouping.title(for: $1) }
-            .map { CategoryGrouping.title(for: $0) }
-            .joined(separator: ", ")
-    }
-
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                Menu {
-                    Text("\(activeFilterCount) filter\(activeFilterCount == 1 ? "" : "s") applied")
-
-                    if activeFilterCount > 0 {
-                        Button(role: .destructive, action: clearFilters) {
-                            Label("Remove All", systemImage: "xmark.circle")
-                        }
+                if activeFilterCount > 0 {
+                    Button(action: clearFilters) {
+                        FilterPill(
+                            title: "",
+                            systemImage: "line.3.horizontal.decrease",
+                            badgeCount: activeFilterCount,
+                            isActive: true,
+                            showsChevron: false
+                        )
                     }
-                } label: {
-                    FilterPill(
-                        title: activeFilterCount > 0 ? "" : "Filters",
-                        systemImage: activeFilterCount > 0 ? "xmark.circle" : nil,
-                        badgeCount: activeFilterCount,
-                        isActive: activeFilterCount > 0,
-                        showsChevron: activeFilterCount == 0
-                    )
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove all \(activeFilterCount) active filters")
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
-                .accessibilityLabel(activeFilterCount > 0 ? "Remove all filters" : "Filters")
 
-                Menu {
-                    Button {
-                        selectedGroupKeys.removeAll()
-                    } label: {
-                        Label("All Groups", systemImage: selectedGroupKeys.isEmpty ? "checkmark" : "line.3.horizontal")
-                    }
-
-                    ForEach(groupSections, id: \.key) { section in
-                        Button {
-                            if selectedGroupKeys.contains(section.key) {
-                                selectedGroupKeys.remove(section.key)
-                            } else {
-                                selectedGroupKeys.insert(section.key)
-                            }
-                        } label: {
-                            Label(
-                                CategoryGrouping.title(for: section.key),
-                                systemImage: selectedGroupKeys.contains(section.key) ? "checkmark" : "line.3.horizontal"
-                            )
-                        }
-                    }
+                Button {
+                    isGroupSelectorPresented = true
                 } label: {
                     FilterPill(
-                        title: selectedGroupKeys.isEmpty ? "Group" : activeGroupTitles,
+                        title: "Groups",
                         badgeCount: selectedGroupKeys.isEmpty ? 0 : selectedGroupKeys.count,
                         isActive: !selectedGroupKeys.isEmpty,
                         showsChevron: true
                     )
                 }
+                .buttonStyle(.plain)
 
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
         .background(.background)
+        .animation(.smooth(duration: 0.25), value: activeFilterCount)
+        .sheet(isPresented: $isGroupSelectorPresented) {
+            LibraryGroupFilterSelector(
+                groupKeys: groupSections.map(\.key),
+                selectedGroupKeys: selectedGroupKeys
+            ) { selectedGroupKeys = $0 }
+        }
     }
 }
 

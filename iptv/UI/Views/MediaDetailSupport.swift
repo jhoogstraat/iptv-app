@@ -34,20 +34,23 @@ struct DetailMetadataGrid: View {
     let isLoading: Bool
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             if isLoading {
                 ProgressView("Loading details…")
                     .controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: 56, alignment: .center)
                     .transition(.opacity)
             } else {
-                VStack(alignment: .leading, spacing: DetailSpacing.sm) {
-                    ForEach(rows) { row in
-                        LabeledContent(row.label, value: row.displayValue)
+                ForEach(rows) { row in
+                    LabeledContent {
+                        Text(row.displayValue)
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } label: {
+                        Text(row.label)
                     }
+                    .transition(.opacity)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .padding(DetailSpacing.md)
