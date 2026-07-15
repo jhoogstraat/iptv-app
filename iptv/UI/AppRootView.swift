@@ -45,6 +45,7 @@ final class RecoverableBootstrap<Value> {
 struct AppRootView: View {
     @Environment(ProviderManager.self) private var providerManager
     @Environment(\.scenePhase) private var scenePhase
+    @State private var connectionMonitor = InternetConnectionMonitor.shared
 
     var body: some View {
         Group {
@@ -54,8 +55,29 @@ struct AppRootView: View {
                 ContentView()
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !connectionMonitor.isConnected {
+                Label("Offline — showing saved content", systemImage: "wifi.slash")
+                    .font(.footnote.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .background(.orange.opacity(0.92))
+                    .foregroundStyle(.black)
+                    .accessibilityIdentifier("connectivity.offline")
+            }
+        }
         .task(id: scenePhase) {
-            guard scenePhase == .active, !providerManager.requiresOnboarding else { return }
+            guard scenePhase == .active,
+                  connectionMonitor.isConnected,
+                  !providerManager.requiresOnboarding
+            else { return }
+            await providerManager.refreshActiveProviderIfStale()
+        }
+        .task(id: connectionMonitor.isConnected) {
+            guard connectionMonitor.isConnected,
+                  scenePhase == .active,
+                  !providerManager.requiresOnboarding
+            else { return }
             await providerManager.refreshActiveProviderIfStale()
         }
     }
