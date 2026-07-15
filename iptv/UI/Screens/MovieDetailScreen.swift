@@ -271,7 +271,7 @@ struct MovieDetailScreen: View {
                 .buttonStyle(DetailActionStyle(variant: .secondary))
                 .accessibilityHint("Updates the persisted favorite state for this provider.")
 
-                DownloadStatusBadge(presentation: .detailAction(.secondary))
+                DownloadStatusBadge(media: currentMovie, presentation: .detailAction(.secondary))
                     .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
             }
             .frame(maxWidth: 720, alignment: .leading)
@@ -327,7 +327,7 @@ struct MovieDetailScreen: View {
     private var availabilitySection: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             DetailSectionHeader(title: "Source and Downloads")
-            Text("Playback uses the active provider’s saved source. Favorites are stored for this provider. Offline downloads are unavailable.")
+            Text("Playback uses a completed local download when available, otherwise it streams from the active provider. Favorites and downloads are isolated by profile.")
                 .font(.body)
                 .lineSpacing(5)
                 .foregroundStyle(.secondary)
@@ -743,8 +743,6 @@ struct SeriesDetailScreen: View {
                 .buttonStyle(DetailActionStyle(variant: .secondary))
                 .accessibilityHint("Updates the persisted favorite state for this provider.")
 
-                DownloadStatusBadge(presentation: .detailAction(.secondary))
-                    .frame(maxWidth: stacked ? .infinity : nil, alignment: .leading)
             }
             .frame(maxWidth: 720, alignment: .leading)
 

@@ -221,13 +221,33 @@ final class Player {
                 providerID: provider.id,
                 database: database
             )
-            let url = try playbackSourceResolver.playbackURL(for: media, provider: provider)
+            let url: URL
+            if let localURL = DownloadStore.localPlaybackURL(
+                for: media,
+                providerID: provider.id,
+                database: database
+            ) {
+                url = localURL
+            } else {
+                url = try playbackSourceResolver.playbackURL(for: media, provider: provider)
+            }
             try activateBackend(for: url)
             try backend?.load(url: url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
         } catch {
             processTerminalFailure(error)
         }
+    }
+
+    func download(_ media: Media) throws {
+        let provider = try activeProvider()
+        let remoteURL = try playbackSourceResolver.playbackURL(for: media, provider: provider)
+        try DownloadCoordinator.shared.enqueue(
+            media,
+            providerID: provider.id,
+            remoteURL: remoteURL,
+            database: database
+        )
     }
 
     /// Clears any loaded media and resets the player model to its default state.

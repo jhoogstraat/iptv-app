@@ -86,7 +86,7 @@ struct EpisodeDetailTile: View {
                         .buttonStyle(DetailActionStyle(variant: .icon))
                         .accessibilityHint("Updates the persisted favorite state for this provider.")
 
-                        DownloadStatusBadge()
+                        DownloadStatusBadge(media: episode)
                     }
 
                     if let favoriteError {

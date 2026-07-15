@@ -189,6 +189,32 @@ func appDatabase(
         CREATE INDEX "favorites_provider_updated_idx"
         ON "favorites" ("profileID", "providerID", "updatedAt" DESC)
         """).execute(db)
+
+        try #sql("""
+        CREATE TABLE "download_items" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "profileID" INTEGER NOT NULL,
+            "providerID" INTEGER NOT NULL,
+            "mediaType" INTEGER NOT NULL,
+            "sourceID" INTEGER NOT NULL,
+            "title" TEXT NOT NULL,
+            "artworkURL" TEXT,
+            "remoteURL" TEXT NOT NULL,
+            "localPath" TEXT,
+            "status" INTEGER NOT NULL DEFAULT 0,
+            "errorMessage" TEXT,
+            "createdAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("profileID", "providerID", "mediaType", "sourceID"),
+            FOREIGN KEY ("profileID") REFERENCES "user_profiles"("id") ON DELETE CASCADE,
+            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
+        ) STRICT
+        """).execute(db)
+
+        try #sql("""
+        CREATE INDEX "download_items_profile_provider_updated_idx"
+        ON "download_items" ("profileID", "providerID", "updatedAt" DESC)
+        """).execute(db)
     }
     
     
