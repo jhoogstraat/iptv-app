@@ -31,7 +31,7 @@ private enum LibraryLanguageSource: String, CaseIterable, Identifiable {
 
 private enum PlaybackPreference: String, CaseIterable, Identifiable {
     case automatic
-    case avPlayer
+    case avPlayer = "av"
     case vlc
     
     var id: String { rawValue }
@@ -44,6 +44,33 @@ private enum PlaybackPreference: String, CaseIterable, Identifiable {
                 "AVPlayer"
             case .vlc:
                 "VLC"
+        }
+    }
+}
+
+private enum SupportDocument: String, Identifiable {
+    case help
+    case licenses
+    case terms
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .help: "Help"
+        case .licenses: "Open-Source Licenses"
+        case .terms: "Terms and Privacy"
+        }
+    }
+
+    var body: String {
+        switch self {
+        case .help:
+            "Add an Xtream-compatible provider in Settings, sync the catalog, then browse or search local content. Downloads are available for direct movies and episodes. If playback fails, verify credentials, transport approval, and provider availability, then retry."
+        case .licenses:
+            "This app uses open-source components including VLCKit, GRDB, SQLiteData, Nuke, Swift Collections, and Point-Free Swift libraries. Their license notices are distributed with the corresponding source packages and binary artifacts."
+        case .terms:
+            "This client does not provide media or subscriptions. You are responsible for the provider credentials and content you configure and for complying with applicable rights and laws. Provider credentials are stored in the system keychain; catalog and viewing state are stored locally on this device."
         }
     }
 }
@@ -173,6 +200,11 @@ struct SettingsScreen: View {
     @State private var profileBeingRenamed: UserProfile?
     @State private var renamedProfileName = ""
     @State private var profileErrorMessage: String?
+    @State private var supportDocument: SupportDocument?
+    @AppStorage("preferredPlaybackBackend") private var playbackPreference: PlaybackPreference = .automatic
+    @AppStorage("defaultSubtitleEnabled") private var subtitlesEnabledByDefault = false
+    @AppStorage("preferredAudioLanguage") private var preferredAudioLanguage = ""
+    @AppStorage("preferredSubtitleLanguage") private var preferredSubtitleLanguage = ""
     @AppStorage(UserProfileStore.activeProfileIDKey) private var activeProfileID = UserProfileStore.primaryProfileID
     @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
@@ -233,6 +265,21 @@ struct SettingsScreen: View {
             TextField("Profile name", text: $renamedProfileName)
             Button("Rename", action: renameProfile)
             Button("Cancel", role: .cancel) { profileBeingRenamed = nil }
+        }
+        .sheet(item: $supportDocument) { document in
+            NavigationStack {
+                ScrollView {
+                    Text(document.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+                .navigationTitle(document.title)
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { supportDocument = nil }
+                    }
+                }
+            }
         }
     }
     
@@ -573,33 +620,33 @@ struct SettingsScreen: View {
     
     private var playbackSection: some View {
         Section {
-            Picker("Preferred Player", selection: .constant(PlaybackPreference.automatic)) {
+            Picker("Preferred Player", selection: $playbackPreference) {
                 ForEach(PlaybackPreference.allCases) { preference in
                     Text(preference.title)
                         .tag(preference)
                 }
             }
-            .disabled(true)
-            
-            Toggle("Enable subtitles by default", isOn: .constant(false))
-                .disabled(true)
-            
-            TextField(text: .constant(""), prompt: Text("Not configured")) {
+            Toggle("Enable subtitles by default", isOn: $subtitlesEnabledByDefault)
+
+            TextField(text: $preferredAudioLanguage, prompt: Text("For example: en")) {
                 Text("Preferred Audio Language")
             }
-            .disabled(true)
+
+            TextField(text: $preferredSubtitleLanguage, prompt: Text("For example: de")) {
+                Text("Preferred Subtitle Language")
+            }
         } header: {
             Text("Playback Defaults")
         } footer: {
-            Text("Dedicated playback defaults are not exposed here yet. Today those preferences are learned from the active player session.")
+            Text("Language values accept ISO codes such as en, de, or nl and apply when the next item exposes a matching track. Automatic player selection keeps fallback enabled.")
         }
     }
     
     private var supportSection: some View {
         Section("Help & Legal") {
-            LabeledContent("Help", value: "Coming Soon")
-            LabeledContent("Licenses", value: "Coming Soon")
-            LabeledContent("Terms", value: "Coming Soon")
+            Button("Help") { supportDocument = .help }
+            Button("Open-Source Licenses") { supportDocument = .licenses }
+            Button("Terms and Privacy") { supportDocument = .terms }
             LabeledContent("Version", value: appVersionDescription)
         }
     }
