@@ -50,6 +50,11 @@ final class ProviderManager {
         accessState != .ready || !activeProviderIsInitialized
     }
 
+    var lastSuccessfulSync: Date? {
+        guard let activeProviderID else { return nil }
+        return try? database.read { try Provider.find($0, key: activeProviderID).lastSyncedAt }
+    }
+
     init(
         database: (any DatabaseWriter)? = nil,
         credentialStore: any ProviderCredentialStoring = KeychainProviderCredentialStore()
@@ -294,6 +299,18 @@ final class ProviderManager {
         await synchronizeActiveProvider(force: true)
     }
 
+    @discardableResult
+    func refreshActiveProviderIfStale(
+        now: Date = .now,
+        maxAge: TimeInterval = CatalogRefreshPolicy.defaultMaxAge
+    ) async -> SyncManager.SyncStatus {
+        guard activeProviderIsInitialized else { return .idle }
+        guard CatalogRefreshPolicy.isStale(lastSuccessfulSync: lastSuccessfulSync, now: now, maxAge: maxAge) else {
+            return .success
+        }
+        return await synchronizeActiveProvider(force: true)
+    }
+
     private func synchronizeActiveProvider(force: Bool) async -> SyncManager.SyncStatus {
         guard accessState == .ready, let capturedSession = session else { return .failure }
         guard force || !activeProviderIsInitialized else { return .success }
@@ -309,7 +326,11 @@ final class ProviderManager {
                     return false
                 }
 
-                try Provider.find(providerID).update { $0.isInitialized = true }.execute(db)
+                let now = Date()
+                try Provider.find(providerID).update {
+                    $0.isInitialized = true
+                    $0.lastSyncedAt = #bind(now)
+                }.execute(db)
                 return true
             }
             guard committed, session === capturedSession, capturedSession.isCurrent else {
@@ -495,6 +516,19 @@ final class ProviderManager {
         activeProviderID = nil
         activeProviderIsInitialized = false
         accessState = .noProvider
+    }
+}
+
+nonisolated enum CatalogRefreshPolicy {
+    static let defaultMaxAge: TimeInterval = 6 * 60 * 60
+
+    static func isStale(
+        lastSuccessfulSync: Date?,
+        now: Date,
+        maxAge: TimeInterval = defaultMaxAge
+    ) -> Bool {
+        guard let lastSuccessfulSync else { return true }
+        return now.timeIntervalSince(lastSuccessfulSync) >= max(0, maxAge)
     }
 }
 

@@ -330,6 +330,11 @@ struct SettingsScreen: View {
                 .foregroundStyle(status.color)
             }
 
+            LabeledContent("Last Sync") {
+                Text(providerManager.lastSuccessfulSync?.formatted(date: .abbreviated, time: .shortened) ?? "Not yet")
+                    .foregroundStyle(.secondary)
+            }
+
             if status.title == "Sync Failed", let errorMessage = providerManager.session?.syncErrorMessage {
                 LabeledContent("Sync Error") {
                     Text(errorMessage)

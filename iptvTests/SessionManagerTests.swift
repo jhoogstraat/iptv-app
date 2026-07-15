@@ -10,6 +10,14 @@ import Testing
 struct SessionManagerTests {
     private let credentialStore = TestProviderCredentialStore()
 
+    @Test func catalogRefreshPolicyRefreshesMissingAndExpiredTimestamps() {
+        let now = Date(timeIntervalSince1970: 10_000)
+
+        #expect(CatalogRefreshPolicy.isStale(lastSuccessfulSync: nil, now: now, maxAge: 100))
+        #expect(CatalogRefreshPolicy.isStale(lastSuccessfulSync: now.addingTimeInterval(-100), now: now, maxAge: 100))
+        #expect(!CatalogRefreshPolicy.isStale(lastSuccessfulSync: now.addingTimeInterval(-99), now: now, maxAge: 100))
+    }
+
     @Test func loadWithoutActiveProviderSetsNoProviderState() throws {
         try withTestDatabase { database in
             try resetDatabase(database)
