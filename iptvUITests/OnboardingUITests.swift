@@ -30,6 +30,12 @@ final class OnboardingUITests: XCTestCase {
         XCTAssertTrue(app.textFields["onboarding.provider.url"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.secureTextFields["onboarding.provider.password"].exists)
 
+        let insecureToggle = app.switches["onboarding.provider.allowInsecureHTTP"]
+        XCTAssertTrue(insecureToggle.exists)
+        XCTAssertFalse(app.descendants(matching: .any)["onboarding.provider.insecureHTTPWarning"].exists)
+        insecureToggle.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["onboarding.provider.insecureHTTPWarning"].exists)
+
         let navigationBar = app.navigationBars["Xtream API"]
         XCTAssertTrue(navigationBar.exists)
         XCTAssertTrue(navigationBar.buttons.firstMatch.exists)
