@@ -36,4 +36,26 @@ struct BootstrapTests {
         #expect(bootstrap.errorMessage == nil)
         #expect(bootstrap.isLoading == false)
     }
+
+    @Test(arguments: [
+        (true, true, false, true),
+        (false, true, false, false),
+        (true, false, false, false),
+        (true, true, true, false),
+        (false, false, true, false),
+    ])
+    func providerRefreshEligibility(
+        isSceneActive: Bool,
+        isConnected: Bool,
+        requiresOnboarding: Bool,
+        expected: Bool
+    ) {
+        let eligibility = ProviderRefreshEligibility(
+            isSceneActive: isSceneActive,
+            isConnected: isConnected,
+            requiresOnboarding: requiresOnboarding
+        )
+
+        #expect(eligibility.shouldRefresh == expected)
+    }
 }

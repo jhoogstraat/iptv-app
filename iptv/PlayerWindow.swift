@@ -202,10 +202,6 @@ private struct PlayerCommands: Commands {
 }
 
 extension PlayerWindow {
-    private func menuLabel(_ title: String, selected: Bool) -> String {
-        selected ? "✓ \(title)" : title
-    }
-
     /// Calculates the aspect ratio of the specified size.
     func aspectRatio(of size: CGSize) -> CGFloat {
         size.width / size.height
