@@ -25,6 +25,8 @@ struct SearchScreen: View {
     @State private var minimumRating: Double?
     @State private var sort: BrowseSort = .title
     @State private var scope: LibrarySearchScope = .all
+    @State private var displayedResults: [Media] = []
+    @State private var hasCompletedSearch = false
 
     private var visibilityRequest: CategoryPrefixVisibilityRequest {
         CategoryPrefixVisibilityRequest(
@@ -82,9 +84,9 @@ struct SearchScreen: View {
         !LibraryQueryNormalizer.isEmpty(searchText) || filterState.hasActiveFilters
     }
 
-    private var results: [Media] {
-        LibraryFilterEngine.filteredMedia(
-            scopedMedia,
+    private var searchRequest: LibraryFilterRequest {
+        LibraryFilterRequest(
+            media: scopedMedia,
             categories: categories,
             state: filterState,
             hiddenGroupKeys: hiddenGroupKeys,
@@ -100,7 +102,7 @@ struct SearchScreen: View {
             favorites: favorites,
             watchActivities: watchActivities
         )
-        let projectedResults = results
+        let projectedResults = displayedResults
 
         NavigationStack {
             VStack(spacing: 0) {
@@ -133,6 +135,19 @@ struct SearchScreen: View {
                 prefixVisibilityCache.resolve(visibilityRequest) {
                     CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
                 }
+            }
+            .task(id: searchRequest) {
+                if !hasCompletedSearch {
+                    displayedResults = []
+                }
+                if !LibraryQueryNormalizer.isEmpty(searchText) {
+                    try? await Task.sleep(for: .milliseconds(120))
+                }
+                guard !Task.isCancelled else { return }
+                let result = await LibraryFilterEngine.filteredMedia(inBackground: searchRequest)
+                guard !Task.isCancelled else { return }
+                displayedResults = result
+                hasCompletedSearch = true
             }
             .onChange(of: scope) { _, _ in
                 retainScopeCompatibleSelections()
@@ -194,6 +209,9 @@ struct SearchScreen: View {
                         Text("Search local Movies and Series, then narrow results with category group, category, rating, and sort filters.")
                     }
                 }
+            } else if !hasCompletedSearch {
+                ProgressView("Searching local library")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if results.isEmpty {
                 emptyResults
             } else {
