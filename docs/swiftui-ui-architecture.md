@@ -8,7 +8,7 @@ The application UI should prefer standard SwiftUI containers, controls, presenta
 
 - The current UI uses native navigation, lists, menus, searchable content, unavailable states, and platform presentation APIs across the main application surfaces.
 - A repository-wide review on 2026-07-15 covered concrete SwiftUI views, view modifiers, button styles, and platform representables.
-- Shared detail presentation, artwork sizing, filtering, placeholder, and playback-presentation primitives already exist, but several screens retain duplicate loading, filtering, formatting, and detail-shell implementations.
+- Shared detail presentation, artwork sizing, filtering, placeholder, and playback-presentation primitives already exist. Movie and series detail destinations now live in focused files, use native transparent navigation chrome, and retain their separate screen layouts while sharing only semantic presentation primitives.
 - The initial architecture pass removes duplicate root refresh tasks, restores native button semantics for playable download rows, and removes an unused duplicate player command helper.
 
 ## User Experience
@@ -37,6 +37,9 @@ The application UI should prefer standard SwiftUI containers, controls, presenta
 - `iptv/UI/Screens/LiveScreen.swift`
 - `iptv/UI/Screens/DownloadsScreen.swift`
 - `iptv/UI/Screens/MovieDetailScreen.swift`
+- `iptv/UI/Screens/SeriesDetailScreen.swift`
+- `iptv/UI/Screens/MediaDetailDestination.swift`
+- `iptv/UI/Views/MediaDetailSupport.swift`
 - `iptv/Player/PlayerView.swift`
 
 ## Target Acceptance Criteria
@@ -55,7 +58,7 @@ The application UI should prefer standard SwiftUI containers, controls, presenta
 - Replace the prefix-visibility checkmark button with a standard `Toggle` and restore standard `NavigationLink` disclosure behavior in category lists.
 - Give For You catalog loading an explicit failure state with retry instead of leaving the progress view active after a fetch error.
 - Replace the custom iOS playback timeline with `Slider` unless a documented visual requirement justifies maintaining custom drag and accessibility behavior.
-- Extract the duplicated movie/series detail scaffold only after adding layout and platform-focus coverage.
+- Extract a duplicated movie/series detail scaffold only if future layout and platform-focus coverage demonstrates that a shared lifecycle abstraction is safer than the current focused screens.
 - Consider a narrow artwork loader abstraction, while preserving context-specific sizing, content mode, placeholders, and accessibility.
 - Remove provably unused legacy views and commented implementations in a separate cleanup.
 
