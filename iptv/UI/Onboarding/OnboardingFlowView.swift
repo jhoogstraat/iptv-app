@@ -3,6 +3,10 @@ import SwiftUI
 struct OnboardingFlowView: View {
     private enum Route: Hashable {
         case credentials
+    }
+
+    private enum SyncSheetState: Equatable {
+        case syncing
         case failed
     }
 
@@ -16,7 +20,7 @@ struct OnboardingFlowView: View {
     @State private var showsValidationErrors = false
     @State private var syncingRevision: Int?
     @State private var isSyncPresented = false
-    @State private var routeAfterSyncDismissal: Route?
+    @State private var syncSheetState = SyncSheetState.syncing
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -29,10 +33,6 @@ struct OnboardingFlowView: View {
                         onboardingScreen {
                             credentialsStep
                         }
-                    case .failed:
-                        onboardingScreen {
-                            failedStep
-                        }
                 }
             }
         }
@@ -44,11 +44,20 @@ struct OnboardingFlowView: View {
 #endif
         .sheet(
             isPresented: $isSyncPresented,
-            onDismiss: navigateAfterSyncDismissal
+            onDismiss: syncSheetDidDismiss
         ) {
             NavigationStack {
-                onboardingScreen {
-                    syncingStep
+                Group {
+                    switch syncSheetState {
+                        case .syncing:
+                            onboardingScreen {
+                                syncingStep
+                            }
+                        case .failed:
+                            onboardingScreen {
+                                failedStep
+                            }
+                    }
                 }
 #if !os(macOS) && !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -56,8 +65,17 @@ struct OnboardingFlowView: View {
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarColorScheme(.dark, for: .navigationBar)
 #endif
+                .toolbar {
+                    if syncSheetState == .failed {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Edit Credentials") {
+                                isSyncPresented = false
+                            }
+                        }
+                    }
+                }
             }
-            .interactiveDismissDisabled()
+            .interactiveDismissDisabled(syncSheetState == .syncing)
         }
         .task(id: providerManager.revision) {
             await reactToProviderRevision()
@@ -333,7 +351,7 @@ struct OnboardingFlowView: View {
 
             guard !providerManager.activeProviderIsInitialized else { return }
             path = [.credentials]
-            routeAfterSyncDismissal = nil
+            syncSheetState = .syncing
             isSyncPresented = true
             await syncActiveProvider(for: providerManager.revision)
         } catch {
@@ -355,7 +373,7 @@ struct OnboardingFlowView: View {
 
         isSubmitting = true
         errorMessage = nil
-        routeAfterSyncDismissal = nil
+        syncSheetState = .syncing
         isSyncPresented = true
 
         do {
@@ -370,7 +388,6 @@ struct OnboardingFlowView: View {
             await syncActiveProvider(for: providerManager.revision)
         } catch {
             isSubmitting = false
-            routeAfterSyncDismissal = nil
             isSyncPresented = false
             errorMessage = error.localizedDescription
         }
@@ -384,14 +401,13 @@ struct OnboardingFlowView: View {
         let result = await providerManager.runInitialSyncForActiveProvider()
         if result == .failure {
             errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
-            routeAfterSyncDismissal = .failed
-            isSyncPresented = false
+            syncSheetState = .failed
         }
     }
 
-    private func navigateAfterSyncDismissal() {
-        guard let route = routeAfterSyncDismissal else { return }
-        routeAfterSyncDismissal = nil
-        path = [.credentials, route]
+    private func syncSheetDidDismiss() {
+        guard syncSheetState == .failed else { return }
+        errorMessage = nil
+        showsValidationErrors = false
     }
 }
