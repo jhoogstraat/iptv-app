@@ -160,7 +160,10 @@ struct ProviderEditorSection: View {
                 .accessibilityIdentifier("onboarding.provider.password")
             validationMessage(fields.validation.password, field: "password")
 
-            if fields.isExplicitlyInsecure {
+            Toggle("Allow insecure HTTP for this provider", isOn: $fields.allowsInsecureHTTP)
+                .accessibilityIdentifier("onboarding.provider.allowInsecureHTTP")
+
+            if fields.allowsInsecureHTTP {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Insecure HTTP connection", systemImage: "exclamationmark.triangle.fill")
                         .font(.headline)
@@ -169,10 +172,8 @@ struct ProviderEditorSection: View {
                     Text("HTTP sends your provider username and password without transport encryption. Only continue if you trust this network and the provider cannot use HTTPS.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-
-                    Toggle("Allow insecure HTTP for this provider", isOn: $fields.allowsInsecureHTTP)
-                        .accessibilityIdentifier("onboarding.provider.allowInsecureHTTP")
                 }
+                .accessibilityIdentifier("onboarding.provider.insecureHTTPWarning")
             }
 
             if let errorMessage {

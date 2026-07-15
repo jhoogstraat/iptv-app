@@ -22,7 +22,7 @@ Settings gives users a place to inspect provider status, edit provider credentia
 ## Data and State
 
 - `SettingsDestination` controls subpage routing.
-- `ProviderFields` holds editable name, HTTP(S) endpoint, username, password, and persisted insecure-HTTP approval. HTTP input exposes an explicit warning and opt-in.
+- `ProviderFields` holds editable name, HTTP(S) endpoint, username, password, and persisted insecure-HTTP approval. The approval toggle is always available; enabling it reveals the transport warning, while HTTP validation still requires the opt-in.
 - `@FetchOne(Provider.where(\.isActive))` supplies the active provider row; password material is resolved through `ProviderCredentialStoring`, not SQLite.
 - Local category/media queries supply provider status counts with truthful labels.
 - `ProviderManager` classifies unchanged, name-only, connection-changing, resync, and removal operations so destructive effects are explicit.

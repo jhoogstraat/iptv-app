@@ -16,6 +16,7 @@ struct OnboardingFlowView: View {
     @State private var showsValidationErrors = false
     @State private var syncingRevision: Int?
     @State private var isSyncPresented = false
+    @State private var routeAfterSyncDismissal: Route?
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -45,7 +46,10 @@ struct OnboardingFlowView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
 #endif
-        .sheet(isPresented: $isSyncPresented) {
+        .sheet(
+            isPresented: $isSyncPresented,
+            onDismiss: navigateAfterSyncDismissal
+        ) {
             NavigationStack {
                 onboardingScreen {
                     syncingStep
@@ -199,7 +203,7 @@ struct OnboardingFlowView: View {
                 isConfigured: false,
                 isSaving: isSubmitting,
                 saveLabel: saveLabel,
-                errorMessage: errorMessage,
+                errorMessage: isRetry ? nil : errorMessage,
                 showsValidationErrors: showsValidationErrors,
                 saveAccessibilityIdentifier: isRetry ? "onboarding.retry" : "onboarding.provider.save",
                 onSave: {
@@ -329,6 +333,7 @@ struct OnboardingFlowView: View {
 
             guard !providerManager.activeProviderIsInitialized else { return }
             path = [.credentials]
+            routeAfterSyncDismissal = nil
             isSyncPresented = true
             await syncActiveProvider(for: providerManager.revision)
         } catch {
@@ -350,6 +355,7 @@ struct OnboardingFlowView: View {
 
         isSubmitting = true
         errorMessage = nil
+        routeAfterSyncDismissal = nil
         isSyncPresented = true
 
         do {
@@ -364,6 +370,7 @@ struct OnboardingFlowView: View {
             await syncActiveProvider(for: providerManager.revision)
         } catch {
             isSubmitting = false
+            routeAfterSyncDismissal = nil
             isSyncPresented = false
             errorMessage = error.localizedDescription
         }
@@ -377,8 +384,14 @@ struct OnboardingFlowView: View {
         let result = await providerManager.runInitialSyncForActiveProvider()
         if result == .failure {
             errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
+            routeAfterSyncDismissal = .failed
             isSyncPresented = false
-            path = [.credentials, .failed]
         }
+    }
+
+    private func navigateAfterSyncDismissal() {
+        guard let route = routeAfterSyncDismissal else { return }
+        routeAfterSyncDismissal = nil
+        path = [.credentials, route]
     }
 }
