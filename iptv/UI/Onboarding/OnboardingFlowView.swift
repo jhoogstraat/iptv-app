@@ -5,11 +5,6 @@ struct OnboardingFlowView: View {
         case credentials
     }
 
-    private enum SyncSheetState: Equatable {
-        case syncing
-        case failed
-    }
-
     @Environment(ProviderManager.self) private var providerManager
 
     @State private var selectedKind: ProviderSourceKind = .xtream
@@ -20,7 +15,7 @@ struct OnboardingFlowView: View {
     @State private var showsValidationErrors = false
     @State private var syncingRevision: Int?
     @State private var isSyncPresented = false
-    @State private var syncSheetState = SyncSheetState.syncing
+    @State private var hasSyncFailed = false
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -42,22 +37,10 @@ struct OnboardingFlowView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
 #endif
-        .sheet(
-            isPresented: $isSyncPresented,
-            onDismiss: syncSheetDidDismiss
-        ) {
+        .sheet(isPresented: $isSyncPresented) {
             NavigationStack {
-                Group {
-                    switch syncSheetState {
-                        case .syncing:
-                            onboardingScreen {
-                                syncingStep
-                            }
-                        case .failed:
-                            onboardingScreen {
-                                failedStep
-                            }
-                    }
+                onboardingScreen {
+                    syncingStep
                 }
 #if !os(macOS) && !os(tvOS)
                 .navigationBarTitleDisplayMode(.inline)
@@ -65,17 +48,8 @@ struct OnboardingFlowView: View {
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarColorScheme(.dark, for: .navigationBar)
 #endif
-                .toolbar {
-                    if syncSheetState == .failed {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Edit Credentials") {
-                                isSyncPresented = false
-                            }
-                        }
-                    }
-                }
             }
-            .interactiveDismissDisabled(syncSheetState == .syncing)
+            .interactiveDismissDisabled()
         }
         .task(id: providerManager.revision) {
             await reactToProviderRevision()
@@ -184,21 +158,14 @@ struct OnboardingFlowView: View {
 
     private var credentialsStep: some View {
         providerForm(
-            copy: "Your Xtream credentials are used to sync the catalog locally. Playback and browsing use the local library after sync completes.",
-            saveLabel: "Start Sync",
-            isRetry: false
+            copy: hasSyncFailed
+                ? errorMessage ?? fallbackSyncErrorMessage
+                : "Your Xtream credentials are used to sync the catalog locally. Playback and browsing use the local library after sync completes.",
+            saveLabel: hasSyncFailed ? "Retry Sync" : "Start Sync",
+            isRetry: hasSyncFailed
         )
         .navigationTitle(selectedKind.title)
         .navigationBarBackButtonHidden(isSubmitting)
-    }
-
-    private var failedStep: some View {
-        providerForm(
-            copy: providerManager.session?.syncErrorMessage ?? errorMessage ?? fallbackSyncErrorMessage,
-            saveLabel: "Retry Sync",
-            isRetry: true
-        )
-        .navigationTitle("Sync failed")
     }
 
     private func providerForm(
@@ -208,8 +175,13 @@ struct OnboardingFlowView: View {
     ) -> some View {
         Form {
             Section {
+                if isRetry {
+                    Label("Sync failed", systemImage: "exclamationmark.triangle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.red)
+                }
                 Text(copy)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(isRetry ? .red : .secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(isRetry ? "onboarding.error.message" : "onboarding.credentials.copy")
             }
@@ -320,6 +292,7 @@ struct OnboardingFlowView: View {
                 selectedKind = .xtream
                 showsValidationErrors = false
                 errorMessage = nil
+                hasSyncFailed = false
                 path = []
                 return
             }
@@ -351,7 +324,7 @@ struct OnboardingFlowView: View {
 
             guard !providerManager.activeProviderIsInitialized else { return }
             path = [.credentials]
-            syncSheetState = .syncing
+            hasSyncFailed = false
             isSyncPresented = true
             await syncActiveProvider(for: providerManager.revision)
         } catch {
@@ -373,7 +346,7 @@ struct OnboardingFlowView: View {
 
         isSubmitting = true
         errorMessage = nil
-        syncSheetState = .syncing
+        hasSyncFailed = false
         isSyncPresented = true
 
         do {
@@ -401,13 +374,8 @@ struct OnboardingFlowView: View {
         let result = await providerManager.runInitialSyncForActiveProvider()
         if result == .failure {
             errorMessage = providerManager.session?.syncErrorMessage ?? fallbackSyncErrorMessage
-            syncSheetState = .failed
+            hasSyncFailed = true
+            isSyncPresented = false
         }
-    }
-
-    private func syncSheetDidDismiss() {
-        guard syncSheetState == .failed else { return }
-        errorMessage = nil
-        showsValidationErrors = false
     }
 }
