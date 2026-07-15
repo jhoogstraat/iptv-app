@@ -109,7 +109,16 @@ struct ProviderCredentialSecurityTests {
                 "addedAt",
                 "backdropURL",
                 "country",
+                "epgChannelID",
+                "supportsCatchup",
+                "catchupDays",
             ])
+
+            let categoryIndexes = Set(try db.indexes(on: "categories").map(\.name))
+            #expect(categoryIndexes.contains("categories_type_idx"))
+            let mediaIndexes = Set(try db.indexes(on: "media").map(\.name))
+            #expect(mediaIndexes.contains("media_type_idx"))
+            #expect(mediaIndexes.contains("media_category_idx"))
 
             let watchActivityColumns = Set(try db.columns(in: "watch_activity").map(\.name))
             #expect(watchActivityColumns.contains("writeSessionStartedAt"))

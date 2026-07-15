@@ -562,7 +562,7 @@ struct SettingsScreen: View {
     }
 
     private var detectedCategoryGroups: [String] {
-        Set(categories.map { CategoryGrouping.key(for: $0.title) })
+        Set(categories.map(\.groupKey))
             .sorted {
                 CategoryGrouping.title(for: $0).localizedStandardCompare(CategoryGrouping.title(for: $1)) == .orderedAscending
             }

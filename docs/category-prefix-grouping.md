@@ -7,21 +7,22 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Status
 
 - Target state: detected category prefixes are first-class local organization metadata that can group category pickers, hide/show category groups, and feed search/recommendation filters consistently.
-- Implementation status (reviewed 2026-07-10): `CategoryGrouping` extracts pipe-delimited prefixes from raw `Category.title`; Browse, Search, and Live expose group-first selection; the selected group set constrains category-picker rows; `SettingsScreen` hides detected groups per provider through `CategoryPrefixVisibilityStore`; and `LibraryFilterEngine` applies hidden/selected groups to local results.
+- Implementation status (reviewed 2026-07-15): category sync derives pipe-delimited prefixes once and persists them as indexed `Category.groupKey` metadata; Movies, Series, and Live use those keys as section titles in their default category lists; Browse, Search, and Live expose group filtering; `SettingsScreen` hides detected groups per provider through `CategoryPrefixVisibilityStore`; and local database/filter requests apply hidden or selected groups consistently.
 - Current limitation: grouping depends entirely on the raw provider category title; normalized category metadata, language source configuration, and recommendation-facing selected-group filters are not implemented.
 
 ## User Experience
 
-- Group selection appears before category selection in Browse, Search, and Live; selecting groups constrains the category picker to those groups.
+- Movies, Series, and Live open on category lists sectioned by detected group. Group filters and landing search narrow those category lists before native navigation; pushed media screens use independent media filter state. Search retains category and group filters for global result refinement.
 - Unprefixed categories should remain visible under a fallback group.
 - Users can hide provider prefix groups in Settings, and those provider-scoped choices apply across Browse, Search, Live, and For You.
 - Language grouping should be configurable separately from raw provider category names when enough metadata exists.
 
 ## Data and State
 
-- Current grouping source: `Category.title`.
-- Current parser: pipe-delimited title pattern, where the first pipe segment becomes the group key.
-- Current browse/search/live state: selected category and selected category-group keys narrow local `Media` results. A category is cleared if a later group selection excludes its group, while an empty group selection keeps any valid category.
+- Current grouping source: `Category.title` at the category-sync write boundary.
+- Current parser: direct pipe-delimited string parsing, where the first pipe segment becomes the persisted `Category.groupKey`; screens never reparse titles.
+- `categories(type, groupKey)` is indexed for category/group projections. Category conflict updates persist title and group key together so provider renames incrementally update the index.
+- Current Movies/Series/Live landing state stores selected category-group keys but no selected category. A concrete category is passed as native navigation context, and its destination observes only that category's rows. Global Search continues to combine selected category and group keys as local result filters.
 - Prefix visibility is persisted per provider in the local `category_prefix_visibility` table and invalidated through the revisioned `CategoryPrefixVisibilityStore` cache.
 
 ## Key Files
@@ -43,7 +44,7 @@ Category prefix grouping organizes provider categories by provider-encoded prefi
 ## Current Gaps / Planned Work
 
 - Recommendation surfaces apply provider-hidden groups but do not expose interactive selected-group filters.
-- The current regex is intentionally narrow; normalized provider-agnostic grouping metadata and language-source configuration remain planned.
+- The current pipe-prefix parser is intentionally narrow; normalized provider-agnostic grouping metadata and language-source configuration remain planned.
 
 ## Notes for Agents
 

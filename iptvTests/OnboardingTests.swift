@@ -8,6 +8,21 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct OnboardingTests {
+    @Test func initialMissingProviderObservationPreservesUnsavedDraft() {
+        var state = OnboardingProviderRevisionState()
+
+        #expect(state.observeMissingProvider() == false)
+        #expect(state.observeMissingProvider() == true)
+    }
+
+    @Test func missingProviderAfterObservedProviderResetsDraft() {
+        var state = OnboardingProviderRevisionState()
+
+        state.observeProvider()
+
+        #expect(state.observeMissingProvider() == true)
+    }
+
     @Test func providerFieldsBuildReturnsNilWhenRequiredFieldsAreEmpty() {
         let fields = ProviderFields(name: "", endpoint: "example.com", username: "user", password: "pass")
 

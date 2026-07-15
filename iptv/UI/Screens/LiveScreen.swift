@@ -10,25 +10,19 @@ import SQLiteData
 
 struct LiveScreen: View {
     @Environment(Session.self) private var session
-    @Environment(Player.self) private var player
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
     @State private var prefixVisibilityCache = CategoryPrefixVisibilityCache()
-
-    @FetchAll
-    private var categories: [Category]
-
-    @FetchAll
-    private var channels: [Media]
-
-    @State private var selectedCategoryID: Category.ID?
     @State private var selectedGroupKeys: Set<String> = []
-    @State private var searchText = ""
-    @State private var sort: BrowseSort = .title
-    @State private var selectedGuideChannel: Media?
+    @State private var categorySearchText = ""
+    @FetchAll private var categories: [Category]
+    @Fetch private var mediaCounts = LibraryMediaCountsRequest.Value()
 
     init() {
         self._categories = FetchAll(Category.where { $0.type.eq(MediaType.live) })
-        self._channels = FetchAll(Media.where { $0.type.eq(MediaType.live) })
+        self._mediaCounts = Fetch(
+            wrappedValue: LibraryMediaCountsRequest.Value(),
+            LibraryMediaCountsRequest(type: .live)
+        )
     }
 
     private var visibilityRequest: CategoryPrefixVisibilityRequest {
@@ -54,42 +48,21 @@ struct LiveScreen: View {
         categoryProjection.selectableCategories
     }
 
-    private var selectedCategory: Category? {
-        selectedCategoryID.flatMap { categoryProjection.categoryByID[$0] }
+    private var landingCategories: [Category] {
+        let grouped = LibraryCategoryFilterOptions.categories(
+            visibleCategories,
+            matchingGroupKeys: selectedGroupKeys
+        )
+        guard !LibraryQueryNormalizer.isEmpty(categorySearchText) else { return grouped }
+        return grouped.filter { LibraryQueryNormalizer.matches($0.title, query: categorySearchText) }
     }
 
     private var hydrationSnapshot: LibraryHydrationSnapshot {
         LibraryHydrationSnapshot(
             categories: categories,
-            media: channels,
+            mediaCountsByCategoryID: mediaCounts.byCategoryID,
             overrides: session.runtimeHydrationStates
         )
-    }
-
-    private var selectedHydrationState: SyncManager.CategoryHydrationState {
-        hydrationSnapshot.state(for: selectedCategory)
-    }
-
-    private var filterState: LibraryFilterState {
-        LibraryFilterState(
-            selectedCategoryID: selectedCategoryID,
-            selectedGroupKeys: selectedGroupKeys,
-            sort: sort
-        )
-    }
-
-    private var filteredChannels: [Media] {
-        LibraryFilterEngine.filteredMedia(
-            channels,
-            categories: categories,
-            state: filterState,
-            hiddenGroupKeys: hiddenGroupKeys,
-            query: searchText
-        )
-    }
-
-    private var hasLocalSearchOrGroupFilter: Bool {
-        !LibraryQueryNormalizer.isEmpty(searchText) || !selectedGroupKeys.isEmpty
     }
 
     var body: some View {
@@ -98,45 +71,24 @@ struct LiveScreen: View {
                 if visibilitySnapshot != nil, !categories.isEmpty {
                     LiveFilterBar(
                         categories: visibleCategories,
-                        selectedCategoryID: Binding(
-                            get: { selectedCategoryID },
-                            set: { categoryID in
-                                var nextState = filterState
-                                nextState.selectedCategoryID = categoryID
-                                apply(nextState)
-                            }
-                        ),
-                        selectedGroupKeys: Binding(
-                            get: { selectedGroupKeys },
-                            set: { groupKeys in
-                                var nextState = filterState
-                                nextState.selectedGroupKeys = groupKeys
-                                apply(nextState)
-                            }
-                        ),
-                        sort: $sort,
-                        clearFilters: clearFilters
+                        selectedGroupKeys: $selectedGroupKeys,
+                        clearFilters: { selectedGroupKeys.removeAll() }
                     )
                     Divider()
                 }
 
                 content
             }
-            .navigationTitle(selectedCategory?.title ?? "Live")
-            .searchable(text: $searchText, prompt: "Search local live channels")
-            .task(id: selectedCategoryID) {
-                await hydrateSelectedCategoryIfNeeded()
-            }
+            .navigationTitle("Live")
+            .searchable(text: $categorySearchText, prompt: "Search categories")
             .task(id: visibilityRequest) {
                 prefixVisibilityCache.resolve(visibilityRequest) {
                     CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
                 }
             }
             .onChange(of: categoryProjection.selectableCategoryIDs) { _, _ in
-                apply(filterState)
-            }
-            .sheet(item: $selectedGuideChannel) { channel in
-                LiveGuideSheet(channel: channel)
+                let availableGroups = Set(visibleCategories.map(\.groupKey))
+                selectedGroupKeys.formIntersection(availableGroups)
             }
         }
     }
@@ -158,16 +110,16 @@ struct LiveScreen: View {
                     CategoryPrefixVisibilityStore.setHiddenGroupKeys([], for: session.providerID)
                 }
             }
-        } else if selectedCategory == nil, !hasLocalSearchOrGroupFilter, channels.isEmpty {
-            liveCategoryPicker
-        } else if let selectedCategory {
-            selectedCategoryContent(selectedCategory)
+        } else if landingCategories.isEmpty {
+            ContentUnavailableView.search(text: categorySearchText)
         } else {
-            channelList(
-                title: "Local live channels",
-                emptyTitle: "No local live channels match",
-                emptyMessage: "Open a category to hydrate channels first. Search and filters only use live rows already stored locally."
-            )
+            LibraryCategoryList(
+                categories: landingCategories,
+                hydrationSnapshot: hydrationSnapshot,
+                contentName: "channel"
+            ) { category in
+                LiveCategoryScreen(category: category)
+            }
         }
     }
 
@@ -199,54 +151,110 @@ struct LiveScreen: View {
         }
     }
 
-    private var liveCategoryPicker: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                unavailableGuideCallout
+}
 
-                Text("Choose a category to load its channels")
-                    .font(.headline)
-                    .padding(.horizontal)
+private struct LiveCategoryScreen: View {
+    let category: Category
 
-                LazyVStack(spacing: 10) {
-                    ForEach(visibleCategories) { category in
-                        Button {
-                            selectedCategoryID = category.id
-                        } label: {
-                            LiveCategoryRow(
-                                category: category,
-                                hydrationState: hydrationSnapshot.state(for: category)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom, 20)
+    @Environment(Session.self) private var session
+    @Environment(Player.self) private var player
+    @State private var searchText = ""
+    @State private var sort: BrowseSort = .title
+    @State private var selectedGuideChannel: Media?
+    @State private var displayedChannels: [Media] = []
+    @State private var hasCompletedInitialComputation = false
+    @State private var catalogRevision = 0
+    @FetchAll private var channels: [Media]
+    @Fetch private var mediaCounts = LibraryMediaCountsRequest.Value()
+
+    init(category: Category) {
+        self.category = category
+        self._channels = FetchAll()
+        self._mediaCounts = Fetch(
+            wrappedValue: LibraryMediaCountsRequest.Value(),
+            LibraryMediaCountsRequest(type: .live)
+        )
+    }
+
+    private var hydrationState: SyncManager.CategoryHydrationState {
+        LibraryHydrationSnapshot(
+            categories: [category],
+            mediaCountsByCategoryID: mediaCounts.byCategoryID,
+            overrides: session.runtimeHydrationStates
+        ).state(for: category)
+    }
+
+    private var filterState: LibraryFilterState {
+        LibraryFilterState(sort: sort)
+    }
+
+    private var filterRequest: LibraryFilterRequest {
+        LibraryFilterRequest(
+            media: channels,
+            categories: [category],
+            state: filterState,
+            hiddenGroupKeys: [],
+            query: searchText,
+            includedTypes: [.live]
+        )
+    }
+
+    private var filterTaskID: LibraryFilterTaskID {
+        LibraryFilterTaskID(
+            state: filterState,
+            hiddenGroupKeys: [],
+            query: searchText,
+            includedTypes: [.live],
+            catalogRevision: catalogRevision
+        )
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            LiveMediaFilterBar(sort: $sort)
+            Divider()
+            content
+        }
+        .navigationTitle(category.title)
+        .searchable(text: $searchText, prompt: "Search \(category.title)")
+        .task(id: category.id) {
+            await hydrate(force: false)
+        }
+        .task(id: category.id) {
+            do {
+                try await $channels.load(
+                    Media.where { $0.type.eq(MediaType.live).and($0.categoryID.eq(category.id)) }
+                )
+            } catch {
+                return
             }
-            .padding(.top, 16)
+        }
+        .task(id: filterTaskID) {
+            if !filterTaskID.normalizedQuery.isEmpty {
+                do {
+                    try await Task.sleep(for: .milliseconds(150))
+                } catch {
+                    return
+                }
+            }
+            let result = await LibraryFilterEngine.filteredMedia(inBackground: filterRequest)
+            guard !Task.isCancelled else { return }
+            displayedChannels = result
+            hasCompletedInitialComputation = true
+        }
+        .task(id: channels.count) {
+            catalogRevision &+= 1
+        }
+        .sheet(item: $selectedGuideChannel) { channel in
+            LiveGuideSheet(channel: channel)
         }
     }
 
     @ViewBuilder
-    private func selectedCategoryContent(_ category: Category) -> some View {
-        switch selectedHydrationState {
-        case .unhydrated:
-            ContentUnavailableView {
-                Label("Loading \(category.title)", systemImage: "clock.arrow.circlepath")
-            } description: {
-                Text("This live category is being hydrated from the provider into the local database.")
-            }
-        case .loading:
-            VStack(spacing: 12) {
-                ProgressView()
-                Text("Loading \(category.title)")
-                    .font(.headline)
-                Text("Channel rows are being saved locally before display.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private var content: some View {
+        switch hydrationState {
+        case .unhydrated, .loading:
+            LiveLoadingList()
         case .empty:
             ContentUnavailableView {
                 Label("No channels in \(category.title)", systemImage: "tray")
@@ -260,7 +268,7 @@ struct LiveScreen: View {
                 Text(message)
             } actions: {
                 Button("Retry") {
-                    Task { await hydrateSelectedCategory(force: true) }
+                    Task { await hydrate(force: true) }
                 }
             }
         case .populated:
@@ -274,32 +282,26 @@ struct LiveScreen: View {
 
     private func channelList(title: String, emptyTitle: String, emptyMessage: String) -> some View {
         Group {
-            if filteredChannels.isEmpty {
+            if !hasCompletedInitialComputation {
+                ProgressView("Filtering local live channels")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if displayedChannels.isEmpty {
                 ContentUnavailableView {
                     Label(emptyTitle, systemImage: "magnifyingglass")
                 } description: {
                     Text(emptyMessage)
                 } actions: {
-                    if filterState.hasActiveFilters || !LibraryQueryNormalizer.isEmpty(searchText) {
-                        Button("Clear Search and Filters", action: clearFiltersAndSearch)
+                    if sort != .title || !LibraryQueryNormalizer.isEmpty(searchText) {
+                        Button("Clear Search and Sort", action: clearSearchAndSort)
                     }
                 }
             } else {
                 List {
                     Section {
-#if os(tvOS)
-                        unavailableGuideCallout
-#else
-                        unavailableGuideCallout
-                            .listRowSeparator(.hidden)
-#endif
-                    }
-
-                    Section {
-                        ForEach(filteredChannels) { channel in
+                        ForEach(displayedChannels) { channel in
                             HStack(spacing: 8) {
                                 Button {
-                                    player.loadLiveChannel(channel, channels: filteredChannels)
+                                    player.loadLiveChannel(channel, channels: displayedChannels)
                                 } label: {
                                     LiveChannelRow(channel: channel, categoryTitle: categoryTitle(for: channel))
                                 }
@@ -329,56 +331,23 @@ struct LiveScreen: View {
         }
     }
 
-    private var unavailableGuideCallout: some View {
-        Label {
-            Text("Live playback and channel zapping are available. EPG, catch-up, DVR, and guide rows require provider guide data not supplied by the current service layer.")
-        } icon: {
-            Image(systemName: "info.circle")
-        }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-    }
-
-    private func clearFilters() {
-        selectedCategoryID = nil
-        selectedGroupKeys.removeAll()
+    private func clearSearchAndSort() {
         sort = .title
-    }
-
-    private func apply(_ state: LibraryFilterState) {
-        var normalizedState = state
-        normalizedState.retainSelections(availableIn: visibleCategories)
-        selectedCategoryID = normalizedState.selectedCategoryID
-        selectedGroupKeys = normalizedState.selectedGroupKeys
-        sort = normalizedState.sort
-    }
-
-    private func clearFiltersAndSearch() {
-        clearFilters()
         searchText = ""
     }
 
-    private func hydrateSelectedCategoryIfNeeded() async {
-        guard selectedHydrationState == .unhydrated else { return }
-        await hydrateSelectedCategory(force: false)
-    }
-
-    private func hydrateSelectedCategory(force: Bool) async {
-        guard let selectedCategory else { return }
-        if !force, session.hydrationState(for: selectedCategory) != .unhydrated { return }
+    private func hydrate(force: Bool) async {
+        if !force, hydrationState != .unhydrated { return }
 
         do {
-            try await session.update(.live, in: selectedCategory.id)
-        } catch is CancellationError {
-            return
+            try await session.update(.live, in: category.id)
         } catch {
             return
         }
     }
 
     private func categoryTitle(for channel: Media) -> String? {
-        guard let categoryID = channel.categoryID else { return nil }
-        return categoryProjection.categoryByID[categoryID]?.title
+        channel.categoryID == category.id ? category.title : nil
     }
 }
 
@@ -481,14 +450,12 @@ private struct LiveGuideSheet: View {
 
 private struct LiveFilterBar: View {
     let categories: [Category]
-    @Binding var selectedCategoryID: Category.ID?
     @Binding var selectedGroupKeys: Set<String>
-    @Binding var sort: BrowseSort
     let clearFilters: () -> Void
 
     private var groupSections: Array<(key: String, value: [Category])> {
         Dictionary(grouping: categories) { category in
-            CategoryGrouping.key(for: category.title)
+            category.groupKey
         }
         .map { key, value in
             (
@@ -501,36 +468,7 @@ private struct LiveFilterBar: View {
         }
     }
 
-    private var categorySections: Array<(key: String, value: [Category])> {
-        let matchingCategories = LibraryCategoryFilterOptions.categories(
-            categories,
-            matchingGroupKeys: selectedGroupKeys
-        )
-        return Dictionary(grouping: matchingCategories) { category in
-            CategoryGrouping.key(for: category.title)
-        }
-        .map { key, value in
-            (
-                key,
-                value.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            )
-        }
-        .sorted { lhs, rhs in
-            CategoryGrouping.title(for: lhs.key).localizedStandardCompare(CategoryGrouping.title(for: rhs.key)) == .orderedAscending
-        }
-    }
-
-    private var selectedCategory: Category? {
-        categories.first { $0.id == selectedCategoryID }
-    }
-
-    private var activeFilterCount: Int {
-        var count = 0
-        if selectedCategoryID != nil { count += 1 }
-        if !selectedGroupKeys.isEmpty { count += 1 }
-        if sort != .title { count += 1 }
-        return count
-    }
+    private var activeFilterCount: Int { selectedGroupKeys.isEmpty ? 0 : 1 }
 
     private var activeGroupTitles: String {
         selectedGroupKeys
@@ -591,35 +529,20 @@ private struct LiveFilterBar: View {
                     )
                 }
 
-                Menu {
-                    Button {
-                        selectedCategoryID = nil
-                    } label: {
-                        Label("All Hydrated Categories", systemImage: selectedCategoryID == nil ? "checkmark" : "rectangle.grid.1x2")
-                    }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .background(.background)
+    }
+}
 
-                    ForEach(categorySections, id: \.key) { section in
-                        Section(CategoryGrouping.title(for: section.key)) {
-                            ForEach(section.value) { category in
-                                Button {
-                                    selectedCategoryID = category.id
-                                } label: {
-                                    Label(
-                                        category.title,
-                                        systemImage: selectedCategoryID == category.id ? "checkmark" : "folder"
-                                    )
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    FilterPill(
-                        title: selectedCategory?.title ?? "Category",
-                        isActive: selectedCategoryID != nil,
-                        showsChevron: true
-                    )
-                }
+private struct LiveMediaFilterBar: View {
+    @Binding var sort: BrowseSort
 
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
                 Menu {
                     ForEach([BrowseSort.title, .newest], id: \.self) { option in
                         Button {
@@ -635,6 +558,7 @@ private struct LiveFilterBar: View {
                         showsChevron: true
                     )
                 }
+                .accessibilityLabel("Sorted by \(sort.title)")
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -643,55 +567,36 @@ private struct LiveFilterBar: View {
     }
 }
 
-private struct LiveCategoryRow: View {
-    let category: Category
-    let hydrationState: SyncManager.CategoryHydrationState
-
+private struct LiveLoadingList: View {
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "rectangle.3.group.bubble")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 42, height: 42)
-                .background(Color.accentColor.opacity(0.12))
-                .clipShape(.rect(cornerRadius: 10, style: .continuous))
+        List {
+            Section {
+                ForEach(0..<12, id: \.self) { _ in
+                    HStack(spacing: 12) {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.secondary.opacity(0.16))
+                            .frame(width: 42, height: 42)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(category.title)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-
-                Text(statusText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 7) {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.secondary.opacity(0.16))
+                                .frame(height: 13)
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.secondary.opacity(0.11))
+                                .frame(width: 120, height: 10)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                    .redacted(reason: .placeholder)
+                    .accessibilityHidden(true)
+                }
             }
-
-            Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.tertiary)
         }
-        .padding(14)
-        .background(Color.secondary.opacity(0.10))
-        .clipShape(.rect(cornerRadius: 14, style: .continuous))
-        .contentShape(Rectangle())
-    }
-
-    private var statusText: String {
-        switch hydrationState {
-        case .unhydrated:
-            "Not loaded yet"
-        case .loading:
-            "Loading channels"
-        case .empty:
-            "Loaded, no channels"
-        case let .populated(count):
-            "\(count) local channel\(count == 1 ? "" : "s")"
-        case .failed:
-            "Failed to load"
-        }
+        .libraryShimmer()
+        #if os(macOS)
+        .listStyle(.inset)
+        #endif
+        .accessibilityLabel("Loading channels")
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import SQLiteData
 import Testing
 
 @testable import iptv
@@ -205,6 +206,98 @@ struct ForYouSnapshotTests {
         #expect(ForYouMediaIdentity.continueWatching(for: original) == ForYouMediaIdentity.continueWatching(for: refreshed))
     }
 
+    @Test func catalogRequestUsesPersistedGroupsAndReturnsBoundedVisibleCandidates() throws {
+        let database = try testAppDatabase()
+        try database.write { db in
+            let provider = try Provider.insert {
+                Provider.Draft(
+                    id: providerID,
+                    kind: .xtream,
+                    name: "Provider",
+                    username: "user",
+                    credentialReference: "credential",
+                    endpoint: URL(string: "https://example.com")!,
+                    isActive: true
+                )
+            }.returning(\.self).fetchOne(db)!
+            let visibleCategory = try iptv.Category.insert {
+                iptv.Category.Draft(
+                    id: nil,
+                    sourceID: "visible",
+                    type: .movie,
+                    title: "|EN| Movies",
+                    groupKey: "EN",
+                    updatedAt: now
+                )
+            }.returning(\.self).fetchOne(db)!
+            let hiddenCategory = try iptv.Category.insert {
+                iptv.Category.Draft(
+                    id: nil,
+                    sourceID: "hidden",
+                    type: .movie,
+                    title: "|NL| Movies",
+                    groupKey: "NL",
+                    updatedAt: now
+                )
+            }.returning(\.self).fetchOne(db)!
+            try CategoryPrefixVisibility.insert {
+                CategoryPrefixVisibility.Draft(
+                    id: nil,
+                    providerID: provider.id,
+                    groupKey: "NL",
+                    isHidden: true,
+                    updatedAt: now
+                )
+            }.execute(db)
+
+            for index in 0..<30 {
+                try insertMediaDraft(
+                    sourceID: 1_000 + index,
+                    title: "Visible \(index)",
+                    categoryID: visibleCategory.id,
+                    rating: Double(index),
+                    in: db
+                )
+            }
+            try insertMediaDraft(
+                sourceID: 9_999,
+                title: "Hidden top rated",
+                categoryID: hiddenCategory.id,
+                rating: 100,
+                in: db
+            )
+        }
+
+        let projection = try database.read {
+            try ForYouCatalogRequest(
+                providerID: providerID,
+                profileID: UserProfileStore.primaryProfileID,
+                profileRevision: 0
+            ).fetch($0)
+        }
+        let snapshot = ForYouSnapshot(
+            providerID: providerID,
+            categories: projection.categories,
+            media: projection.media,
+            watchActivities: projection.watchActivities,
+            favorites: projection.favorites,
+            hiddenGroupKeys: projection.hiddenGroupKeys,
+            runtimeHydrationStates: [:],
+            syncStatus: .success,
+            syncErrorMessage: nil,
+            mediaCountsByCategoryID: projection.mediaCountsByCategoryID,
+            hasAnyCatalogMedia: projection.hasAnyMedia,
+            hasAnyVisibleMedia: projection.hasAnyVisibleMedia,
+            now: now
+        )
+
+        #expect(projection.hiddenGroupKeys == ["NL"])
+        #expect(projection.media.allSatisfy { $0.sourceID != 9_999 })
+        #expect(projection.media.count <= ForYouSnapshot.railLimit * 2)
+        #expect(snapshot.topRatedMovies.count == ForYouSnapshot.railLimit)
+        #expect(snapshot.topRatedMovies.first?.rating == 29)
+    }
+
     private func makeSnapshot(
         categories: [iptv.Category] = [],
         media: [Media] = [],
@@ -240,6 +333,7 @@ struct ForYouSnapshotTests {
             sourceID: "category-\(id)",
             type: type,
             title: title,
+            groupKey: CategoryGrouping.key(for: title),
             updatedAt: updatedAt
         )
     }
@@ -304,5 +398,41 @@ struct ForYouSnapshotTests {
             createdAt: now,
             updatedAt: now
         )
+    }
+
+    private func insertMediaDraft(
+        sourceID: Int,
+        title: String,
+        categoryID: iptv.Category.ID,
+        rating: Double,
+        in db: Database
+    ) throws {
+        try Media.insert {
+            Media.Draft(
+                id: nil,
+                sourceID: sourceID,
+                type: .movie,
+                title: title,
+                categoryID: categoryID,
+                tmdbID: nil,
+                coverURL: nil,
+                rating: rating,
+                parentSeriesID: nil,
+                seasonNumber: nil,
+                episodeNumber: nil,
+                containerExtension: "mp4",
+                synopsis: nil,
+                releaseDate: nil,
+                runtimeSeconds: nil,
+                genre: nil,
+                cast: nil,
+                director: nil,
+                trailer: nil,
+                addedAt: nil,
+                backdropURL: nil,
+                country: nil,
+                updatedAt: now
+            )
+        }.execute(db)
     }
 }

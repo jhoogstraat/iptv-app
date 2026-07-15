@@ -117,6 +117,79 @@ struct LibraryFilterEngineTests {
         #expect(backgroundResult.map(\.sourceID) == [102, 100])
     }
 
+    @Test func backgroundFilteringRestrictsResultsToRequestedMediaTypes() async {
+        let media = [
+            makeMedia(id: 1, sourceID: 100, type: .movie, title: "Shared Title"),
+            makeMedia(id: 2, sourceID: 101, type: .series, title: "Shared Title"),
+            makeMedia(id: 3, sourceID: 102, type: .live, title: "Shared Title"),
+        ]
+        let request = LibraryFilterRequest(
+            media: media,
+            categories: [],
+            state: LibraryFilterState(),
+            hiddenGroupKeys: [],
+            query: "shared",
+            includedTypes: [.movie, .series]
+        )
+
+        let result = await LibraryFilterEngine.filteredMedia(inBackground: request)
+
+        #expect(result.map(\.type) == [.movie, .series])
+    }
+
+    @Test func cancellingBackgroundFilteringCancelsItsDetachedWorker() async {
+        let media = (0..<50_000).map { index in
+            makeMedia(
+                id: index + 1,
+                sourceID: index + 1,
+                title: "Large Catalog Entry \(index)"
+            )
+        }
+        let request = LibraryFilterRequest(
+            media: media,
+            categories: [],
+            state: LibraryFilterState(),
+            hiddenGroupKeys: [],
+            query: "catalog"
+        )
+        let task = Task {
+            await LibraryFilterEngine.filteredMedia(inBackground: request)
+        }
+
+        task.cancel()
+        let result = await task.value
+
+        #expect(result.isEmpty)
+    }
+
+    @Test func compactTaskIdentityNormalizesQueriesAndTracksCatalogRevision() {
+        let state = LibraryFilterState(selectedGroupKeys: ["EN"], sort: .rating)
+        let first = LibraryFilterTaskID(
+            state: state,
+            hiddenGroupKeys: ["NL"],
+            query: " Café  News ",
+            includedTypes: [.movie],
+            catalogRevision: 4
+        )
+        let equivalent = LibraryFilterTaskID(
+            state: state,
+            hiddenGroupKeys: ["NL"],
+            query: "cafe news",
+            includedTypes: [.movie],
+            catalogRevision: 4
+        )
+        let refreshedCatalog = LibraryFilterTaskID(
+            state: state,
+            hiddenGroupKeys: ["NL"],
+            query: "cafe news",
+            includedTypes: [.movie],
+            catalogRevision: 5
+        )
+
+        #expect(first == equivalent)
+        #expect(first != refreshedCatalog)
+    }
+
     @Test func hiddenCategoryRelationshipsRemainAvailableAcrossLibraryProjections() {
         for (offset, type) in [MediaType.movie, .series, .live].enumerated() {
             let base = offset * 10
@@ -535,6 +608,7 @@ struct LibraryFilterEngineTests {
             sourceID: "category-\(id)",
             type: type,
             title: title,
+            groupKey: CategoryGrouping.key(for: title),
             updatedAt: updatedAt
         )
     }

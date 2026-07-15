@@ -122,9 +122,7 @@ struct MovieDetailScreen: View {
                         }
 
                         DetailContentLayout(isCompact: isCompact, availableWidth: proxy.size.width) {
-                            section("Synopsis", text: synopsisText)
                             metadataSection
-                            availabilitySection
                         }
                         .background(Color.black)
                     }
@@ -220,8 +218,6 @@ struct MovieDetailScreen: View {
             : AnyLayout(HStackLayout(alignment: .center, spacing: DetailSpacing.xs))
 
         return layout {
-            DetailMetaPill(label: "Media type", value: "Movie", systemImage: "film")
-
             if let year = releaseYear {
                 DetailMetaPill(label: "Release year", value: year, systemImage: "calendar")
             }
@@ -343,21 +339,7 @@ struct MovieDetailScreen: View {
 
     private var metadataSection: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.sm) {
-            DetailSectionHeader(title: "Library Metadata")
             DetailMetadataGrid(rows: metadataRows)
-        }
-    }
-
-    private var availabilitySection: some View {
-        VStack(alignment: .leading, spacing: DetailSpacing.sm) {
-            DetailSectionHeader(title: "Source and Downloads")
-            Text("Playback uses a completed local download when available, otherwise it streams from the active provider. Favorites and downloads are isolated by profile.")
-                .font(.body)
-                .lineSpacing(5)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            DetailEnrichmentStatus(state: enrichmentState, retry: retryEnrichment)
         }
     }
 
@@ -464,17 +446,6 @@ struct MovieDetailScreen: View {
         }
 
         return String(format: "%d:%02d", minutes, seconds)
-    }
-
-    private func section(_ title: String, text: String) -> some View {
-        VStack(alignment: .leading, spacing: DetailSpacing.xs) {
-            DetailSectionHeader(title: title)
-            Text(text)
-                .font(.body)
-                .lineSpacing(5)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
     }
 
     private func heroScrollMetrics(collapseDistance: CGFloat) -> some View {
@@ -719,8 +690,6 @@ struct SeriesDetailScreen: View {
             : AnyLayout(HStackLayout(alignment: .center, spacing: DetailSpacing.xs))
 
         return layout {
-            DetailMetaPill(label: "Media type", value: "Series", systemImage: "tv")
-
             if let year = releaseYear {
                 DetailMetaPill(label: "Release year", value: year, systemImage: "calendar")
             }
@@ -744,19 +713,6 @@ struct SeriesDetailScreen: View {
 
         return VStack(alignment: .leading, spacing: DetailSpacing.xs) {
             layout {
-                Button {
-                    selectedTab = .episodes
-                } label: {
-                    Label(
-                        episodes.isEmpty ? "Episodes unavailable" : "Select Episode",
-                        systemImage: "list.bullet.rectangle"
-                    )
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(DetailActionStyle(variant: .primary))
-                .disabled(episodes.isEmpty)
-
                 Button(action: toggleFavorite) {
                     Label(
                         currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites",
@@ -860,17 +816,7 @@ struct SeriesDetailScreen: View {
 
     private var detailsSection: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.lg) {
-            VStack(alignment: .leading, spacing: DetailSpacing.xs) {
-                DetailSectionHeader(title: "Synopsis")
-                Text(synopsisText)
-                    .font(.body)
-                    .lineSpacing(5)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
             VStack(alignment: .leading, spacing: DetailSpacing.sm) {
-                DetailSectionHeader(title: "Library Metadata")
                 DetailMetadataGrid(rows: metadataRows)
             }
         }
@@ -1192,7 +1138,8 @@ private struct DetailMetadataGrid: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DetailSpacing.sm) {
             ForEach(rows) { row in
-                metadataUnit(row)
+                LabeledContent(row.label, value: row.value ?? "Not available")
+                // metadataUnit(row)
             }
         }
         .padding(DetailSpacing.md)

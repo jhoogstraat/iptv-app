@@ -191,10 +191,7 @@ struct DetailEnrichmentStatus: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Refreshing details")
         case .success:
-            Label("Details refreshed", systemImage: "checkmark.circle")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isStaticText)
+            EmptyView()
         case .failure(let message):
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .center, spacing: DetailSpacing.sm) {

@@ -27,6 +27,8 @@ struct SearchScreen: View {
     @State private var scope: LibrarySearchScope = .all
     @State private var displayedResults: [Media] = []
     @State private var hasCompletedSearch = false
+    @State private var catalogRevision = 0
+    @State private var mediaCountsByCategoryID: [Category.ID: Int] = [:]
 
     private var visibilityRequest: CategoryPrefixVisibilityRequest {
         CategoryPrefixVisibilityRequest(
@@ -58,7 +60,7 @@ struct SearchScreen: View {
     private var hydrationSnapshot: LibraryHydrationSnapshot {
         LibraryHydrationSnapshot(
             categories: categories,
-            media: media,
+            mediaCountsByCategoryID: mediaCountsByCategoryID,
             overrides: session.runtimeHydrationStates
         )
     }
@@ -67,8 +69,8 @@ struct SearchScreen: View {
         hydrationSnapshot.coverage(for: visibleCategories)
     }
 
-    private var scopedMedia: [Media] {
-        media.filter { scope.includes($0.type) }
+    private var scopeHasLocalMedia: Bool {
+        media.contains { scope.includes($0.type) }
     }
 
     private var filterState: LibraryFilterState {
@@ -86,11 +88,22 @@ struct SearchScreen: View {
 
     private var searchRequest: LibraryFilterRequest {
         LibraryFilterRequest(
-            media: scopedMedia,
+            media: media,
             categories: categories,
             state: filterState,
             hiddenGroupKeys: hiddenGroupKeys,
-            query: searchText
+            query: searchText,
+            includedTypes: scope.includedTypes
+        )
+    }
+
+    private var searchTaskID: LibraryFilterTaskID {
+        LibraryFilterTaskID(
+            state: filterState,
+            hiddenGroupKeys: hiddenGroupKeys,
+            query: searchText,
+            includedTypes: scope.includedTypes,
+            catalogRevision: catalogRevision
         )
     }
 
@@ -136,12 +149,18 @@ struct SearchScreen: View {
                     CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
                 }
             }
-            .task(id: searchRequest) {
-                if !hasCompletedSearch {
+            .task(id: searchTaskID) {
+                guard searchIsActive else {
                     displayedResults = []
+                    hasCompletedSearch = false
+                    return
                 }
-                if !LibraryQueryNormalizer.isEmpty(searchText) {
-                    try? await Task.sleep(for: .milliseconds(120))
+                if !searchTaskID.normalizedQuery.isEmpty {
+                    do {
+                        try await Task.sleep(for: .milliseconds(150))
+                    } catch {
+                        return
+                    }
                 }
                 guard !Task.isCancelled else { return }
                 let result = await LibraryFilterEngine.filteredMedia(inBackground: searchRequest)
@@ -154,6 +173,16 @@ struct SearchScreen: View {
             }
             .onChange(of: categoryProjection.selectableCategoryIDs) { _, _ in
                 retainScopeCompatibleSelections()
+            }
+            .onChange(of: media) { _, _ in
+                catalogRevision &+= 1
+                mediaCountsByCategoryID = LibraryHydrationSnapshot.mediaCountsByCategoryID(for: media)
+            }
+            .onChange(of: categories) { _, _ in
+                catalogRevision &+= 1
+            }
+            .task(id: media.count) {
+                mediaCountsByCategoryID = LibraryHydrationSnapshot.mediaCountsByCategoryID(for: media)
             }
         }
     }
@@ -196,7 +225,7 @@ struct SearchScreen: View {
             }
 
             if !searchIsActive {
-                if scopedMedia.isEmpty {
+                if !scopeHasLocalMedia {
                     ContentUnavailableView {
                         Label("No local \(scope.title.lowercased()) streams loaded", systemImage: "folder.badge.questionmark")
                     } description: {

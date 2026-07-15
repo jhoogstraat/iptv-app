@@ -193,15 +193,6 @@ extension Media.Draft {
     }
 }
 
-extension Category.Draft {
-    nonisolated init(from category: Xtream.Category, type: Xtream.ContentType) {
-        self.id = nil
-        self.sourceID = category.id
-        self.type = .from(type)
-        self.title = category.name
-    }
-}
-
 extension SeriesSeason.Draft {
     nonisolated init(from season: Xtream.Season, seriesID: Media.ID) {
         self.id = nil

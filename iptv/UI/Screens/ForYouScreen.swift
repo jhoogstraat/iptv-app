@@ -7,9 +7,264 @@
 
 import SwiftUI
 import SQLiteData
+import GRDB
+
+nonisolated struct ForYouCatalogRequest: FetchKeyRequest {
+    struct Value: Sendable {
+        var categories: [Category] = []
+        var media: [Media] = []
+        var watchActivities: [WatchActivity] = []
+        var favorites: [Favorite] = []
+        var hiddenGroupKeys: Set<String> = []
+        var mediaCountsByCategoryID: [Category.ID: Int] = [:]
+        var hasAnyMedia = false
+        var hasAnyVisibleMedia = false
+    }
+
+    let providerID: Provider.ID?
+    let profileID: UserProfile.ID
+    let profileRevision: Int
+
+    func fetch(_ db: Database) throws -> Value {
+        guard let providerID else { return Value() }
+
+        let categories = try Category.where {
+            $0.type.eq(MediaType.movie)
+                .or($0.type.eq(MediaType.series))
+                .or($0.type.eq(MediaType.episode))
+        }.fetchAll(db)
+        let hiddenGroupKeys = Set(
+            try CategoryPrefixVisibility
+                .select(\.groupKey)
+                .where { $0.providerID.eq(providerID).and($0.isHidden.eq(true)) }
+                .fetchAll(db)
+        )
+        let mediaCountsByCategoryID = try fetchMediaCounts(db)
+        let hasAnyMedia = try fetchMediaCount(db, providerID: nil) > 0
+        let hasAnyVisibleMedia = try fetchMediaCount(db, providerID: providerID) > 0
+
+        var mediaByID: [Media.ID: Media] = [:]
+        for item in try fetchRatedMedia(db, type: .movie, providerID: providerID) {
+            mediaByID[item.id] = item
+        }
+        for item in try fetchRatedMedia(db, type: .series, providerID: providerID) {
+            mediaByID[item.id] = item
+        }
+        for item in try fetchRecentMedia(db, providerID: providerID) {
+            mediaByID[item.id] = item
+        }
+
+        let favorites = try fetchFavorites(db, providerID: providerID, profileID: profileID)
+        for item in try fetchFavoriteMedia(db, providerID: providerID, profileID: profileID) {
+            mediaByID[item.id] = item
+        }
+
+        let watchActivities = try fetchWatchActivities(
+            db,
+            providerID: providerID,
+            profileID: profileID
+        )
+        for item in try fetchWatchActivityMedia(db, providerID: providerID, profileID: profileID) {
+            mediaByID[item.id] = item
+        }
+
+        return Value(
+            categories: categories,
+            media: Array(mediaByID.values),
+            watchActivities: watchActivities,
+            favorites: favorites,
+            hiddenGroupKeys: hiddenGroupKeys,
+            mediaCountsByCategoryID: mediaCountsByCategoryID,
+            hasAnyMedia: hasAnyMedia,
+            hasAnyVisibleMedia: hasAnyVisibleMedia
+        )
+    }
+
+    private func fetchMediaCounts(_ db: Database) throws -> [Category.ID: Int] {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+            SELECT "categoryID", COUNT(*) AS "mediaCount"
+            FROM "media"
+            WHERE "type" IN (?, ?, ?) AND "categoryID" IS NOT NULL
+            GROUP BY "categoryID"
+            """,
+            arguments: [MediaType.movie.rawValue, MediaType.series.rawValue, MediaType.episode.rawValue]
+        )
+        return Dictionary(uniqueKeysWithValues: rows.map { row in
+            (row["categoryID"] as Int, row["mediaCount"] as Int)
+        })
+    }
+
+    private func fetchMediaCount(_ db: Database, providerID: Provider.ID?) throws -> Int {
+        let visibility = providerID == nil ? "" : Self.visibilityJoin
+        let visible = providerID == nil ? "" : "AND visibility.id IS NULL"
+        let arguments: StatementArguments = if let providerID {
+            [providerID, MediaType.movie.rawValue, MediaType.series.rawValue, MediaType.episode.rawValue]
+        } else {
+            [MediaType.movie.rawValue, MediaType.series.rawValue, MediaType.episode.rawValue]
+        }
+        return try Int.fetchOne(
+            db,
+            sql: """
+            SELECT COUNT(*)
+            FROM "media" AS media
+            LEFT JOIN "categories" AS category ON category.id = media.categoryID
+            \(visibility)
+            WHERE media.type IN (?, ?, ?) \(visible)
+            """,
+            arguments: arguments
+        ) ?? 0
+    }
+
+    private func fetchRatedMedia(
+        _ db: Database,
+        type: MediaType,
+        providerID: Provider.ID
+    ) throws -> [Media] {
+        let ids = try Int.fetchAll(
+            db,
+            sql: """
+            SELECT media.id
+            FROM "media" AS media
+            LEFT JOIN "categories" AS category ON category.id = media.categoryID
+            \(Self.visibilityJoin)
+            WHERE media.type = ? AND media.rating IS NOT NULL AND visibility.id IS NULL
+            ORDER BY media.rating DESC, media.title COLLATE NOCASE, media.sourceID, media.type, media.id
+            LIMIT ?
+            """,
+            arguments: [providerID, type.rawValue, ForYouSnapshot.railLimit]
+        )
+        return try Media.where { $0.id.in(ids) }.fetchAll(db)
+    }
+
+    private func fetchRecentMedia(_ db: Database, providerID: Provider.ID) throws -> [Media] {
+        let ids = try Int.fetchAll(
+            db,
+            sql: """
+            SELECT media.id
+            FROM "media" AS media
+            LEFT JOIN "categories" AS category ON category.id = media.categoryID
+            \(Self.visibilityJoin)
+            WHERE media.type IN (?, ?) AND visibility.id IS NULL
+            ORDER BY media.updatedAt DESC, media.title COLLATE NOCASE, media.sourceID, media.type, media.id
+            LIMIT ?
+            """,
+            arguments: [
+                providerID,
+                MediaType.movie.rawValue,
+                MediaType.series.rawValue,
+                ForYouSnapshot.railLimit,
+            ]
+        )
+        return try Media.where { $0.id.in(ids) }.fetchAll(db)
+    }
+
+    private func fetchFavorites(
+        _ db: Database,
+        providerID: Provider.ID,
+        profileID: UserProfile.ID
+    ) throws -> [Favorite] {
+        let ids = try Int.fetchAll(
+            db,
+            sql: Self.favoriteSQL(selection: "favorite.id"),
+            arguments: [providerID, profileID, providerID, ForYouSnapshot.railLimit]
+        )
+        return try Favorite.where { $0.id.in(ids) }.fetchAll(db)
+    }
+
+    private func fetchFavoriteMedia(
+        _ db: Database,
+        providerID: Provider.ID,
+        profileID: UserProfile.ID
+    ) throws -> [Media] {
+        let ids = try Int.fetchAll(
+            db,
+            sql: Self.favoriteSQL(selection: "media.id"),
+            arguments: [providerID, profileID, providerID, ForYouSnapshot.railLimit]
+        )
+        return try Media.where { $0.id.in(ids) }.fetchAll(db)
+    }
+
+    private func fetchWatchActivities(
+        _ db: Database,
+        providerID: Provider.ID,
+        profileID: UserProfile.ID
+    ) throws -> [WatchActivity] {
+        let ids = try Int.fetchAll(
+            db,
+            sql: Self.watchActivitySQL(selection: "activity.id"),
+            arguments: [providerID, profileID, providerID, ForYouSnapshot.railLimit]
+        )
+        return try WatchActivity.where { $0.id.in(ids) }.fetchAll(db)
+    }
+
+    private func fetchWatchActivityMedia(
+        _ db: Database,
+        providerID: Provider.ID,
+        profileID: UserProfile.ID
+    ) throws -> [Media] {
+        let ids = try Int.fetchAll(
+            db,
+            sql: Self.watchActivitySQL(selection: "media.id"),
+            arguments: [providerID, profileID, providerID, ForYouSnapshot.railLimit]
+        )
+        return try Media.where { $0.id.in(ids) }.fetchAll(db)
+    }
+
+    private static let visibilityJoin = """
+    LEFT JOIN "category_prefix_visibility" AS visibility
+      ON visibility.providerID = ?
+     AND visibility.groupKey = COALESCE(category.groupKey, '---')
+     AND visibility.isHidden = 1
+    """
+
+    private static func favoriteSQL(selection: String) -> String {
+        """
+        SELECT \(selection)
+        FROM "favorites" AS favorite
+        JOIN "media" AS media
+          ON media.type = favorite.mediaType AND media.sourceID = favorite.sourceID
+        LEFT JOIN "categories" AS category ON category.id = media.categoryID
+        \(visibilityJoin)
+        WHERE favorite.profileID = ? AND favorite.providerID = ? AND visibility.id IS NULL
+        ORDER BY favorite.updatedAt DESC, favorite.title COLLATE NOCASE,
+                 favorite.mediaType, favorite.sourceID, favorite.id
+        LIMIT ?
+        """
+    }
+
+    private static func watchActivitySQL(selection: String) -> String {
+        """
+        SELECT \(selection)
+        FROM "watch_activity" AS activity
+        JOIN "media" AS media
+          ON media.type = activity.mediaType AND media.sourceID = activity.sourceID
+        LEFT JOIN "categories" AS category ON category.id = media.categoryID
+        \(visibilityJoin)
+        WHERE activity.profileID = ?
+          AND activity.providerID = ?
+          AND activity.completed = 0
+          AND activity.currentTime >= \(WatchActivityStore.minimumResumeSeconds)
+          AND (
+            activity.duration IS NULL
+            OR activity.duration <= 0
+            OR (
+              activity.duration - activity.currentTime >= \(WatchActivityStore.minimumRemainingSeconds)
+              AND activity.currentTime / activity.duration < \(WatchActivityStore.completionFraction)
+            )
+          )
+          AND media.type IN (\(MediaType.movie.rawValue), \(MediaType.episode.rawValue))
+          AND visibility.id IS NULL
+        ORDER BY activity.lastWatchedAt DESC, activity.title COLLATE NOCASE,
+                 activity.mediaType, activity.sourceID, activity.id
+        LIMIT ?
+        """
+    }
+}
 
 struct ForYouSnapshot {
-    static let railLimit = 20
+    nonisolated static let railLimit = 20
 
     struct ContinueWatchingEntry: Identifiable {
         let activity: WatchActivity
@@ -101,6 +356,9 @@ struct ForYouSnapshot {
         runtimeHydrationStates: [Category.ID: SyncManager.CategoryHydrationState],
         syncStatus: SyncManager.SyncStatus,
         syncErrorMessage: String?,
+        mediaCountsByCategoryID suppliedMediaCountsByCategoryID: [Category.ID: Int]? = nil,
+        hasAnyCatalogMedia suppliedHasAnyCatalogMedia: Bool? = nil,
+        hasAnyVisibleMedia suppliedHasAnyVisibleMedia: Bool? = nil,
         now: Date = .now
     ) {
         let categoryByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
@@ -248,14 +506,18 @@ struct ForYouSnapshot {
             self.sparseState = nil
         } else {
             self.hero = nil
+            let mediaCountsByCategoryID = suppliedMediaCountsByCategoryID
+                ?? LibraryHydrationSnapshot.mediaCountsByCategoryID(for: media)
+            let hasAnyCatalogMedia = suppliedHasAnyCatalogMedia ?? !media.isEmpty
+            let hasAnyVisibleMedia = suppliedHasAnyVisibleMedia ?? !visibleMediaIDs.isEmpty
             self.sparseState = Self.makeSparseState(
                 categories: categories,
-                media: media,
-                visibleMediaIDs: visibleMediaIDs,
+                hasAnyCatalogMedia: hasAnyCatalogMedia,
+                hasAnyVisibleMedia: hasAnyVisibleMedia,
                 hiddenGroupKeys: hiddenGroupKeys,
                 hydrationSnapshot: LibraryHydrationSnapshot(
                     categories: categories,
-                    media: media,
+                    mediaCountsByCategoryID: mediaCountsByCategoryID,
                     overrides: runtimeHydrationStates
                 ),
                 syncStatus: syncStatus,
@@ -291,8 +553,8 @@ struct ForYouSnapshot {
 
     private static func makeSparseState(
         categories: [Category],
-        media: [Media],
-        visibleMediaIDs: Set<Media.ID>,
+        hasAnyCatalogMedia: Bool,
+        hasAnyVisibleMedia: Bool,
         hiddenGroupKeys: Set<String>,
         hydrationSnapshot: LibraryHydrationSnapshot,
         syncStatus: SyncManager.SyncStatus,
@@ -301,8 +563,7 @@ struct ForYouSnapshot {
         var visibleCategories: [Category] = []
         visibleCategories.reserveCapacity(categories.count)
         for category in categories {
-            let groupKey = CategoryGrouping.key(for: category.title)
-            if !hiddenGroupKeys.contains(groupKey) {
+            if !hiddenGroupKeys.contains(category.groupKey) {
                 visibleCategories.append(category)
             }
         }
@@ -326,19 +587,19 @@ struct ForYouSnapshot {
         let allCategoriesHidden = !categories.isEmpty
             && visibleCategories.isEmpty
             && !hiddenGroupKeys.isEmpty
-        let allMediaHidden = !media.isEmpty
-            && visibleMediaIDs.isEmpty
+        let allMediaHidden = hasAnyCatalogMedia
+            && !hasAnyVisibleMedia
             && !hiddenGroupKeys.isEmpty
         if allCategoriesHidden || allMediaHidden {
             return .allHidden
         }
 
-        if syncStatus == .success && categories.isEmpty && media.isEmpty {
+        if syncStatus == .success && categories.isEmpty && !hasAnyCatalogMedia {
             return .allEmpty
         }
 
         if hydrationStates.contains(.unhydrated)
-            || (categories.isEmpty && media.isEmpty && syncStatus == .idle) {
+            || (categories.isEmpty && !hasAnyCatalogMedia && syncStatus == .idle) {
             return .unhydrated
         }
 
@@ -349,7 +610,7 @@ struct ForYouSnapshot {
                 case .unhydrated, .loading, .populated, .failed: false
                 }
             }
-        if allHydratedCategoriesEmpty || (syncStatus == .success && media.isEmpty) {
+        if allHydratedCategoriesEmpty || (syncStatus == .success && !hasAnyCatalogMedia) {
             return .allEmpty
         }
 
@@ -390,37 +651,38 @@ struct ForYouScreen: View {
     @Environment(Player.self) private var player
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
-    @AppStorage(FavoriteStore.revisionKey) private var favoritesRevision = 0
-
-    @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)).or($0.type.eq(MediaType.episode)) }) private var categories: [Category]
-    @FetchAll(Media.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)).or($0.type.eq(MediaType.episode)) }) private var media: [Media]
-    @FetchAll(WatchActivity.where { $0.completed.eq(false) }) private var watchActivities: [WatchActivity]
-    @FetchAll private var favorites: [Favorite]
+    @Fetch private var catalog = ForYouCatalogRequest.Value()
 
     @State private var selectedDetail: Media?
-    @State private var prefixVisibilityCache = CategoryPrefixVisibilityCache()
+    @State private var loadedCatalogRequest: ForYouCatalogRequest?
+
+    private var catalogRequest: ForYouCatalogRequest {
+        ForYouCatalogRequest(
+            providerID: session.providerID,
+            profileID: session.activeProfileID,
+            profileRevision: profileRevision
+        )
+    }
 
     var body: some View {
-        let visibilityRequest = CategoryPrefixVisibilityRequest(
-            providerID: session.providerID,
-            revision: prefixVisibilityRevision
-        )
-
         NavigationStack {
-            if let visibilitySnapshot = prefixVisibilityCache.snapshot(for: visibilityRequest) {
-                content(
-                    makeSnapshot(hiddenGroupKeys: visibilitySnapshot.hiddenGroupKeys)
-                )
-            } else {
-                ProgressView("Loading library visibility…")
+            if loadedCatalogRequest != catalogRequest {
+                ProgressView("Loading For You…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .accessibilityIdentifier("forYou.visibility.loading")
+                    .accessibilityIdentifier("forYou.catalog.loading")
+            } else {
+                content(makeSnapshot())
             }
         }
-        .task(id: visibilityRequest) {
-            prefixVisibilityCache.resolve(visibilityRequest) {
-                CategoryPrefixVisibilityStore.snapshot(for: visibilityRequest)
+        .task(id: catalogRequest) {
+            do {
+                try await $catalog.load(catalogRequest).task
+                guard !Task.isCancelled else { return }
+                loadedCatalogRequest = catalogRequest
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
         }
     }
@@ -453,20 +715,21 @@ struct ForYouScreen: View {
         }
     }
 
-    private func makeSnapshot(hiddenGroupKeys: Set<String>) -> ForYouSnapshot {
-        _ = favoritesRevision
-
+    private func makeSnapshot() -> ForYouSnapshot {
         return ForYouSnapshot(
             providerID: session.providerID,
             profileID: session.activeProfileID,
-            categories: categories,
-            media: media,
-            watchActivities: watchActivities,
-            favorites: favorites,
-            hiddenGroupKeys: hiddenGroupKeys,
+            categories: catalog.categories,
+            media: catalog.media,
+            watchActivities: catalog.watchActivities,
+            favorites: catalog.favorites,
+            hiddenGroupKeys: catalog.hiddenGroupKeys,
             runtimeHydrationStates: session.runtimeHydrationStates,
             syncStatus: session.sync,
-            syncErrorMessage: session.syncErrorMessage
+            syncErrorMessage: session.syncErrorMessage,
+            mediaCountsByCategoryID: catalog.mediaCountsByCategoryID,
+            hasAnyCatalogMedia: catalog.hasAnyMedia,
+            hasAnyVisibleMedia: catalog.hasAnyVisibleMedia
         )
     }
 

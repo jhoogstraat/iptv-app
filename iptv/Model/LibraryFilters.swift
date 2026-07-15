@@ -1,5 +1,6 @@
 import Dependencies
 import Foundation
+import GRDB
 import OSLog
 import SQLiteData
 
@@ -50,12 +51,11 @@ nonisolated enum CategoryGrouping: Sendable {
     /// Pipe-delimited names such as `|NL| Movies` use the first pipe segment as the group key.
     /// Categories without that shape remain in the ungrouped bucket.
     static func key(for title: String) -> String {
-        if let match = title.firstMatch(of: #/^\|([^|]+)\|\s*(.*)/#) {
-            let key = String(match.output.1).trimmingCharacters(in: .whitespacesAndNewlines)
-            return key.isEmpty ? ungroupedKey : key
-        }
-
-        return ungroupedKey
+        guard title.first == "|" else { return ungroupedKey }
+        let remainder = title.dropFirst()
+        guard let closingPipe = remainder.firstIndex(of: "|") else { return ungroupedKey }
+        let key = remainder[..<closingPipe].trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? ungroupedKey : key
     }
 
     /// Display-safe title for a grouping key.
@@ -129,7 +129,7 @@ nonisolated struct LibraryFilterState: Hashable, Sendable {
     }
 
     mutating func retainSelections(availableIn categories: [Category]) {
-        let groupKeys = Set(categories.map { CategoryGrouping.key(for: $0.title) })
+        let groupKeys = Set(categories.map(\.groupKey))
         selectedGroupKeys.formIntersection(groupKeys)
 
         guard let selectedCategoryID else { return }
@@ -138,19 +138,61 @@ nonisolated struct LibraryFilterState: Hashable, Sendable {
             return
         }
 
-        let selectedCategoryGroupKey = CategoryGrouping.key(for: selectedCategory.title)
+        let selectedCategoryGroupKey = selectedCategory.groupKey
         if !selectedGroupKeys.isEmpty, !selectedGroupKeys.contains(selectedCategoryGroupKey) {
             self.selectedCategoryID = nil
         }
     }
 }
 
-nonisolated struct LibraryFilterRequest: Hashable, Sendable {
+nonisolated struct LibraryFilterRequest: Sendable {
     let media: [Media]
     let categories: [Category]
     let state: LibraryFilterState
     let hiddenGroupKeys: Set<String>
     let query: String
+    let includedTypes: Set<MediaType>?
+
+    init(
+        media: [Media],
+        categories: [Category],
+        state: LibraryFilterState,
+        hiddenGroupKeys: Set<String>,
+        query: String,
+        includedTypes: Set<MediaType>? = nil
+    ) {
+        self.media = media
+        self.categories = categories
+        self.state = state
+        self.hiddenGroupKeys = hiddenGroupKeys
+        self.query = query
+        self.includedTypes = includedTypes
+    }
+}
+
+/// Compact identity for a filter computation. Catalog rows intentionally stay out of this value:
+/// SwiftUI compares task IDs on the main actor, so putting entire row arrays in the ID makes every
+/// query change proportional to the size of the library before background work can begin.
+nonisolated struct LibraryFilterTaskID: Hashable, Sendable {
+    let state: LibraryFilterState
+    let hiddenGroupKeys: Set<String>
+    let normalizedQuery: String
+    let includedTypes: Set<MediaType>?
+    let catalogRevision: Int
+
+    init(
+        state: LibraryFilterState,
+        hiddenGroupKeys: Set<String>,
+        query: String,
+        includedTypes: Set<MediaType>? = nil,
+        catalogRevision: Int
+    ) {
+        self.state = state
+        self.hiddenGroupKeys = hiddenGroupKeys
+        self.normalizedQuery = LibraryQueryNormalizer.normalized(query)
+        self.includedTypes = includedTypes
+        self.catalogRevision = catalogRevision
+    }
 }
 
 nonisolated enum LibraryEmptyCriteria: Equatable, Sendable {
@@ -188,7 +230,7 @@ struct LibraryCategoryProjection: Sendable {
             .filter { category in
                 let typeIsIncluded = includedTypes?.contains(category.type) ?? true
                 return typeIsIncluded
-                    && !hiddenGroupKeys.contains(CategoryGrouping.key(for: category.title))
+                    && !hiddenGroupKeys.contains(category.groupKey)
             }
             .sorted { lhs, rhs in
                 let comparison = lhs.title.localizedStandardCompare(rhs.title)
@@ -198,7 +240,7 @@ struct LibraryCategoryProjection: Sendable {
                 return lhs.id < rhs.id
             }
         selectableCategoryIDs = Set(selectableCategories.map(\.id))
-        selectableGroupKeys = Set(selectableCategories.map { CategoryGrouping.key(for: $0.title) })
+        selectableGroupKeys = Set(selectableCategories.map(\.groupKey))
     }
 }
 
@@ -209,10 +251,41 @@ nonisolated enum LibraryCategoryFilterOptions: Sendable {
     ) -> [Category] {
         guard !matchingGroupKeys.isEmpty else { return categories }
         return categories.filter {
-            matchingGroupKeys.contains(CategoryGrouping.key(for: $0.title))
+            matchingGroupKeys.contains($0.groupKey)
         }
     }
 
+}
+
+/// A compact observation used by category landing rows. Database changes only
+/// publish this small dictionary instead of reducing the entire media catalog on
+/// the main actor in every tab.
+nonisolated struct LibraryMediaCountsRequest: FetchKeyRequest {
+    struct Value: Equatable, Sendable {
+        var byCategoryID: [Category.ID: Int] = [:]
+    }
+
+    let type: MediaType
+
+    func fetch(_ db: Database) throws -> Value {
+        let rows = try Row.fetchAll(
+            db,
+            sql: """
+            SELECT categoryID, COUNT(*) AS mediaCount
+            FROM media
+            WHERE type = ? AND categoryID IS NOT NULL
+            GROUP BY categoryID
+            """,
+            arguments: [type.rawValue]
+        )
+        return Value(
+            byCategoryID: Dictionary(
+                uniqueKeysWithValues: rows.map { row in
+                    (row["categoryID"] as Int, row["mediaCount"] as Int)
+                }
+            )
+        )
+    }
 }
 
 enum LibrarySearchScope: String, CaseIterable, Identifiable, Sendable {
@@ -251,11 +324,18 @@ struct LibraryHydrationSnapshot: Sendable {
         media: [Media],
         overrides: [Category.ID: SyncManager.CategoryHydrationState] = [:]
     ) {
-        let mediaCounts = media.reduce(into: [Category.ID: Int]()) { counts, item in
-            guard let categoryID = item.categoryID else { return }
-            counts[categoryID, default: 0] += 1
-        }
+        self.init(
+            categories: categories,
+            mediaCountsByCategoryID: Self.mediaCountsByCategoryID(for: media),
+            overrides: overrides
+        )
+    }
 
+    init(
+        categories: [Category],
+        mediaCountsByCategoryID: [Category.ID: Int],
+        overrides: [Category.ID: SyncManager.CategoryHydrationState] = [:]
+    ) {
         statesByCategoryID = Dictionary(
             uniqueKeysWithValues: categories.map { category in
                 let state: SyncManager.CategoryHydrationState
@@ -264,12 +344,19 @@ struct LibraryHydrationSnapshot: Sendable {
                 } else if category.updatedAt == nil {
                     state = .unhydrated
                 } else {
-                    let count = mediaCounts[category.id, default: 0]
+                    let count = mediaCountsByCategoryID[category.id, default: 0]
                     state = count == 0 ? .empty : .populated(count)
                 }
                 return (category.id, state)
             }
         )
+    }
+
+    static func mediaCountsByCategoryID(for media: [Media]) -> [Category.ID: Int] {
+        media.reduce(into: [Category.ID: Int]()) { counts, item in
+            guard let categoryID = item.categoryID else { return }
+            counts[categoryID, default: 0] += 1
+        }
     }
 
     func state(for category: Category?) -> SyncManager.CategoryHydrationState {
@@ -386,25 +473,55 @@ nonisolated enum LibraryFilterEngine: Sendable {
         categories: [Category],
         state: LibraryFilterState,
         hiddenGroupKeys: Set<String> = [],
-        query: String = ""
+        query: String = "",
+        includedTypes: Set<MediaType>? = nil
     ) -> [Media] {
-        let categoryByID = Dictionary(uniqueKeysWithValues: categories.map { ($0.id, $0) })
+        let groupKeyByCategoryID = Dictionary(
+            uniqueKeysWithValues: categories.map { ($0.id, $0.groupKey) }
+        )
+        let normalizedQuery = LibraryQueryNormalizer.normalized(query)
+        var result: [Media] = []
+        result.reserveCapacity(media.count)
 
-        return media
-            .filter { matches($0, categoryByID: categoryByID, state: state, hiddenGroupKeys: hiddenGroupKeys, query: query) }
-            .sorted { ordered($0, before: $1, by: state.sort) }
+        for (index, item) in media.enumerated() {
+            if index.isMultiple(of: 256), Task.isCancelled {
+                return []
+            }
+            let groupKey = item.categoryID.flatMap { groupKeyByCategoryID[$0] }
+                ?? CategoryGrouping.ungroupedKey
+            guard matches(
+                item,
+                groupKey: groupKey,
+                state: state,
+                hiddenGroupKeys: hiddenGroupKeys,
+                normalizedQuery: normalizedQuery,
+                includedTypes: includedTypes
+            ) else { continue }
+            result.append(item)
+        }
+
+        guard !Task.isCancelled else { return [] }
+        result.sort { ordered($0, before: $1, by: state.sort) }
+        return Task.isCancelled ? [] : result
     }
 
     static func filteredMedia(inBackground request: LibraryFilterRequest) async -> [Media] {
-        await Task.detached(priority: .userInitiated) {
+        let worker = Task.detached(priority: .userInitiated) {
             filteredMedia(
                 request.media,
                 categories: request.categories,
                 state: request.state,
                 hiddenGroupKeys: request.hiddenGroupKeys,
-                query: request.query
+                query: request.query,
+                includedTypes: request.includedTypes
             )
-        }.value
+        }
+
+        return await withTaskCancellationHandler {
+            await worker.value
+        } onCancel: {
+            worker.cancel()
+        }
     }
 
     /// Evaluates AND-across-groups / OR-within-group filter semantics for one media row.
@@ -415,14 +532,34 @@ nonisolated enum LibraryFilterEngine: Sendable {
         hiddenGroupKeys: Set<String> = [],
         query: String = ""
     ) -> Bool {
-        let category = media.categoryID.flatMap { categoryByID[$0] }
-        let groupKey = category.map { CategoryGrouping.key(for: $0.title) } ?? CategoryGrouping.ungroupedKey
+        let groupKey = media.categoryID.flatMap { categoryByID[$0]?.groupKey }
+            ?? CategoryGrouping.ungroupedKey
+        return matches(
+            media,
+            groupKey: groupKey,
+            state: state,
+            hiddenGroupKeys: hiddenGroupKeys,
+            normalizedQuery: LibraryQueryNormalizer.normalized(query)
+        )
+    }
 
-        if hiddenGroupKeys.contains(groupKey) {
+    private static func matches(
+        _ media: Media,
+        groupKey: String,
+        state: LibraryFilterState,
+        hiddenGroupKeys: Set<String>,
+        normalizedQuery: String,
+        includedTypes: Set<MediaType>? = nil
+    ) -> Bool {
+        if let includedTypes, !includedTypes.contains(media.type) {
             return false
         }
 
         if let selectedCategoryID = state.selectedCategoryID, media.categoryID != selectedCategoryID {
+            return false
+        }
+
+        if hiddenGroupKeys.contains(groupKey) {
             return false
         }
 
@@ -436,7 +573,8 @@ nonisolated enum LibraryFilterEngine: Sendable {
             }
         }
 
-        if !LibraryQueryNormalizer.matches(media.title, query: query) {
+        if !normalizedQuery.isEmpty,
+           !LibraryQueryNormalizer.normalized(media.title).contains(normalizedQuery) {
             return false
         }
 
