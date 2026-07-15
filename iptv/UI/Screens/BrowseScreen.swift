@@ -1068,10 +1068,11 @@ struct FilterPill: View {
         .font(.subheadline)
         .foregroundStyle(isActive ? Color.white : Color.primary)
         .padding(.horizontal, 12)
-        .frame(minHeight: 44)
+        .padding(.vertical, 6)
         .background(isActive ? Color.accentColor : Color.secondary.opacity(0.14))
         .clipShape(Capsule(style: .continuous))
-        .contentShape(Capsule(style: .continuous))
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
