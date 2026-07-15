@@ -70,6 +70,7 @@ struct WatchActivityStoreTests {
                 try WatchActivity.insert {
                     WatchActivity.Draft(
                         id: nil,
+                        profileID: UserProfileStore.primaryProfileID,
                         providerID: providerID,
                         mediaType: .movie,
                         sourceID: 1,
@@ -86,6 +87,7 @@ struct WatchActivityStoreTests {
                 try WatchActivity.insert {
                     WatchActivity.Draft(
                         id: nil,
+                        profileID: UserProfileStore.primaryProfileID,
                         providerID: providerID,
                         mediaType: .episode,
                         sourceID: 2,
@@ -102,6 +104,7 @@ struct WatchActivityStoreTests {
                 try WatchActivity.insert {
                     WatchActivity.Draft(
                         id: nil,
+                        profileID: UserProfileStore.primaryProfileID,
                         providerID: providerID,
                         mediaType: .movie,
                         sourceID: 3,
@@ -118,6 +121,7 @@ struct WatchActivityStoreTests {
                 try WatchActivity.insert {
                     WatchActivity.Draft(
                         id: nil,
+                        profileID: UserProfileStore.primaryProfileID,
                         providerID: providerID,
                         mediaType: .movie,
                         sourceID: 4,
@@ -149,6 +153,7 @@ struct WatchActivityStoreTests {
                 try WatchActivity.insert {
                     WatchActivity.Draft(
                         id: nil,
+                        profileID: UserProfileStore.primaryProfileID,
                         providerID: providerID,
                         mediaType: .episode,
                         sourceID: 44,
@@ -165,6 +170,7 @@ struct WatchActivityStoreTests {
                 try WatchActivity.insert {
                     WatchActivity.Draft(
                         id: nil,
+                        profileID: UserProfileStore.primaryProfileID,
                         providerID: providerID,
                         mediaType: .movie,
                         sourceID: 44,
@@ -185,6 +191,7 @@ struct WatchActivityStoreTests {
 
             let lowerID = WatchActivity(
                 id: 1,
+                profileID: UserProfileStore.primaryProfileID,
                 providerID: providerID,
                 mediaType: .movie,
                 sourceID: 44,
@@ -199,6 +206,7 @@ struct WatchActivityStoreTests {
             )
             let higherID = WatchActivity(
                 id: 2,
+                profileID: UserProfileStore.primaryProfileID,
                 providerID: providerID,
                 mediaType: .movie,
                 sourceID: 44,

@@ -53,6 +53,7 @@ final class Session {
         syncManager.categoryHydrationStates
     }
     nonisolated var isCurrent: Bool { syncManager.isCurrent }
+    var activeProfileID: UserProfile.ID { UserProfileStore.activeProfileID() }
 
     func hydrationState(for category: Category) -> SyncManager.CategoryHydrationState {
         if let state = syncManager.categoryHydrationStates[category.id] {

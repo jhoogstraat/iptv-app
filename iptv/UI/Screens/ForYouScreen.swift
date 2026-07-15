@@ -92,6 +92,7 @@ struct ForYouSnapshot {
 
     init(
         providerID: Provider.ID,
+        profileID: UserProfile.ID = UserProfileStore.primaryProfileID,
         categories: [Category],
         media: [Media],
         watchActivities: [WatchActivity],
@@ -171,7 +172,7 @@ struct ForYouSnapshot {
         }
 
         var continueWatching: [ContinueWatchingEntry] = []
-        for activity in watchActivities where activity.providerID == providerID && activity.isResumeEligible {
+        for activity in watchActivities where activity.profileID == profileID && activity.providerID == providerID && activity.isResumeEligible {
             let key = LibraryContentKey(mediaType: activity.mediaType, sourceID: activity.sourceID)
             guard let item = mediaByKey[key],
                   Self.isDirectlyPlayable(item),
@@ -196,7 +197,7 @@ struct ForYouSnapshot {
         }
 
         var favoriteEntries: [FavoriteEntry] = []
-        for favorite in favorites where favorite.providerID == providerID {
+        for favorite in favorites where favorite.profileID == profileID && favorite.providerID == providerID {
             let key = LibraryContentKey(mediaType: favorite.mediaType, sourceID: favorite.sourceID)
             guard let item = mediaByKey[key], visibleMediaIDs.contains(item.id) else {
                 continue
@@ -384,6 +385,7 @@ struct ForYouSnapshot {
 }
 
 struct ForYouScreen: View {
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     @Environment(Session.self) private var session
     @Environment(Player.self) private var player
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -456,6 +458,7 @@ struct ForYouScreen: View {
 
         return ForYouSnapshot(
             providerID: session.providerID,
+            profileID: session.activeProfileID,
             categories: categories,
             media: media,
             watchActivities: watchActivities,

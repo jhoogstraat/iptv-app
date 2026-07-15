@@ -7,6 +7,27 @@ import Testing
 @MainActor
 @Suite("Favorites", .serialized)
 struct FavoriteStoreTests {
+    @Test func favoritesAreIsolatedWhenActiveProfileChanges() throws {
+        try withTestDatabase { database in
+            try resetDatabase(database)
+            let defaults = UserDefaults.standard
+            let originalProfileID = UserProfileStore.activeProfileID(defaults: defaults)
+            defer { UserProfileStore.setActive(originalProfileID, defaults: defaults) }
+
+            let providerID = try insertProvider(name: "Primary", isActive: true, database: database)
+            let media = try insertMedia(sourceID: 700, title: "Profile Favorite", categoryID: nil, database: database)
+            UserProfileStore.setActive(UserProfileStore.primaryProfileID, defaults: defaults)
+            _ = try FavoriteStore.add(media, providerID: providerID, database: database, defaults: defaults)
+
+            let second = try UserProfileStore.create(name: "Guest", database: database, defaults: defaults)
+            #expect(UserProfileStore.activeProfileID(defaults: defaults) == second.id)
+            #expect(FavoriteStore.isFavorite(media, providerID: providerID, database: database) == false)
+
+            UserProfileStore.setActive(UserProfileStore.primaryProfileID, defaults: defaults)
+            #expect(FavoriteStore.isFavorite(media, providerID: providerID, database: database))
+        }
+    }
+
     @Test func addToggleAndListFavoritesAreProviderScopedAndJoinedToLocalMedia() throws {
         try withTestDatabase { database in
             try resetDatabase(database)

@@ -50,6 +50,7 @@ private enum PlaybackPreference: String, CaseIterable, Identifiable {
 
 private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
     case provider
+    case profiles
     case library
     case playback
     case about
@@ -59,6 +60,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
             case .provider: "Provider"
+            case .profiles: "Profiles"
             case .library: "Library"
             case .playback: "Playback"
             case .about: "About"
@@ -68,6 +70,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
     var subtitle: String {
         switch self {
             case .provider: "Connection, credentials, and sync status"
+            case .profiles: "Separate favorites and watch progress"
             case .library: "Category visibility and organization"
             case .playback: "Player defaults and media behavior"
             case .about: "Version, help, and legal information"
@@ -77,6 +80,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
     var systemImage: String {
         switch self {
             case .provider: "key.horizontal"
+            case .profiles: "person.2"
             case .library: "square.grid.2x2"
             case .playback: "play.rectangle"
             case .about: "info.circle"
@@ -86,6 +90,7 @@ private enum SettingsDestination: String, CaseIterable, Identifiable, Hashable {
     var tint: Color {
         switch self {
             case .provider: .blue
+            case .profiles: .green
             case .library: .purple
             case .playback: .red
             case .about: .gray
@@ -164,11 +169,18 @@ struct SettingsScreen: View {
     @State private var providerRevisionState = ProviderSettingsRevisionState()
     @State private var showsProviderValidationErrors = false
     @State private var isResyncing = false
+    @State private var newProfileName = ""
+    @State private var profileBeingRenamed: UserProfile?
+    @State private var renamedProfileName = ""
+    @State private var profileErrorMessage: String?
+    @AppStorage(UserProfileStore.activeProfileIDKey) private var activeProfileID = UserProfileStore.primaryProfileID
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
   
     @Dependency(\.defaultDatabase) var database
     
     @FetchOne(Provider.where(\.isActive)) var provider: Provider?
+    @FetchAll(UserProfile.order { $0.createdAt.asc() }) private var profiles: [UserProfile]
     
     @Fetch(MediaCount(provider: nil)) var mediaCount = MediaCount.Value()
     @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var categories: [Category]
@@ -213,6 +225,14 @@ struct SettingsScreen: View {
             }
         } message: {
             Text("This removes the provider, local catalog, favorites, and watch history. This action can’t be undone.")
+        }
+        .alert("Rename Profile", isPresented: Binding(
+            get: { profileBeingRenamed != nil },
+            set: { if !$0 { profileBeingRenamed = nil } }
+        )) {
+            TextField("Profile name", text: $renamedProfileName)
+            Button("Rename", action: renameProfile)
+            Button("Cancel", role: .cancel) { profileBeingRenamed = nil }
         }
     }
     
@@ -271,6 +291,10 @@ struct SettingsScreen: View {
                     providerOverviewSection
                     providerConfigurationSection
                 }
+            case .profiles:
+                settingsDetailForm(title: "Profiles") {
+                    profilesSection
+                }
             case .library:
                 settingsDetailForm(title: "Library") {
                     librarySection
@@ -283,6 +307,92 @@ struct SettingsScreen: View {
                 settingsDetailForm(title: "About") {
                     supportSection
                 }
+        }
+    }
+
+    private var profilesSection: some View {
+        Section {
+            ForEach(profiles) { profile in
+                Button {
+                    UserProfileStore.setActive(profile.id)
+                } label: {
+                    HStack {
+                        Label(profile.name, systemImage: "person.crop.circle")
+                        Spacer()
+                        if profile.id == activeProfileID {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(.tint)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .swipeActions {
+                    Button("Delete", role: .destructive) {
+                        deleteProfile(profile)
+                    }
+                    .disabled(profiles.count == 1)
+                }
+                .contextMenu {
+                    Button("Rename") {
+                        profileBeingRenamed = profile
+                        renamedProfileName = profile.name
+                    }
+                    Button("Delete", role: .destructive) {
+                        deleteProfile(profile)
+                    }
+                    .disabled(profiles.count == 1)
+                }
+            }
+
+            HStack {
+                TextField("New profile name", text: $newProfileName)
+                    .onSubmit(createProfile)
+                Button("Add", action: createProfile)
+                    .disabled(newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let profileErrorMessage {
+                Text(profileErrorMessage)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Viewer Profiles")
+        } footer: {
+            Text("Each profile has independent favorites and watch progress. Catalog and provider settings are shared.")
+        }
+    }
+
+    private func createProfile() {
+        do {
+            _ = try UserProfileStore.create(name: newProfileName, database: database)
+            newProfileName = ""
+            profileErrorMessage = nil
+        } catch {
+            profileErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteProfile(_ profile: UserProfile) {
+        do {
+            try UserProfileStore.delete(profile, database: database)
+            profileErrorMessage = nil
+        } catch {
+            profileErrorMessage = error.localizedDescription
+        }
+    }
+
+    private func renameProfile() {
+        guard let profileBeingRenamed else { return }
+        do {
+            try UserProfileStore.rename(
+                profileBeingRenamed,
+                to: renamedProfileName,
+                database: database
+            )
+            self.profileBeingRenamed = nil
+            profileErrorMessage = nil
+        } catch {
+            profileErrorMessage = error.localizedDescription
         }
     }
     

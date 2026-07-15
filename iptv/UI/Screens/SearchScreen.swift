@@ -11,6 +11,7 @@ import SQLiteData
 struct SearchScreen: View {
 
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
+    @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
     @State private var prefixVisibilityCache = CategoryPrefixVisibilityCache()
     @Environment(Session.self) private var session
     @FetchAll(Category.where { $0.type.eq(MediaType.movie).or($0.type.eq(MediaType.series)) }) private var categories: [Category]
@@ -94,6 +95,7 @@ struct SearchScreen: View {
     var body: some View {
         let indexes = LibrarySearchIndexes(
             providerID: session.providerID,
+            profileID: session.activeProfileID,
             categories: categories,
             favorites: favorites,
             watchActivities: watchActivities
