@@ -836,12 +836,12 @@ struct SeriesDetailScreen: View {
     @ViewBuilder
     private var seasonMenu: some View {
         if seasonNumbers.isEmpty {
-            Menu("Season") {
-                Button("Season data unavailable") {}
-                    .disabled(true)
-            }
-            .buttonStyle(DetailActionStyle(variant: .chip(selected: false)))
-            .disabled(true)
+            Text("Season unavailable")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, DetailSpacing.md)
+                .padding(.vertical, DetailSpacing.sm)
+                .background(.thinMaterial, in: Capsule())
         } else {
             Menu(selectedSeasonTitle) {
                 Button("All Seasons") {

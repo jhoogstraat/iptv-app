@@ -1,87 +1,48 @@
-# Live TV, EPG, and Catch-up Spec
+# Feature: Live TV, EPG, and Catch-up
+
+## Purpose
+
+Provide channel playback with current/upcoming guide context, adjacent-channel zapping, and catch-up where the provider marks a program eligible.
 
 ## Status
-- Version: v1
-- Date: 2026-02-24
-- Priority: Deferred after basic channel-only Live TV.
-- Implementation status (reviewed 2026-07-06): Basic live category/channel sync, local channel browsing, and live channel playback are implemented in `docs/live-tv.md`. EPG program cache, guide timeline, catch-up resolver, zapping state, DVR, and program schema remain planned-only.
 
-## Objective
-Deliver the complete IPTV live experience with channel navigation, guide context, and catch-up where provider support exists.
+Implemented for Xtream short-EPG responses, on-demand guide presentation, eligible catch-up URL resolution, and previous/next channel controls. DVR recording remains out of scope.
 
-## In Scope
-- Existing prerequisite: channel-only Live TV listing and playback is handled by `docs/live-tv.md`.
-- EPG timeline view:
-  - current program
-  - upcoming programs
-  - program details.
-- Channel zapping:
-  - quick previous/next channel actions.
-- Catch-up playback for eligible programs.
-- Continue watching support for live programs with catch-up support.
+## User Experience
 
-## Out of Scope
-- DVR recording.
-- Multi-view mosaic.
-- Advanced parental lock and content filtering.
+- Live remains playable when guide data is missing or fails.
+- Selecting a channel shows current and upcoming programs when available.
+- Eligible past programs offer catch-up playback.
+- Player controls can zap to the previous or next channel in the current channel list.
 
-## Data Requirements
-- Channel entity:
-  - id, name, logo, category, stream URL, language, provider metadata.
-- Program entity:
-  - id, channelID, title, startTime, endTime, description, catchupAvailable.
-- Guide coverage metadata:
-  - last refresh time, duration covered, missing windows.
+## Data and State
 
-## Service Requirements
-- Add provider service methods for:
-  - EPG by channel and time window
-  - catch-up URL resolution for program/time range.
-- Keep live category/channel sync in the channel-only Live TV feature; this spec starts at guide/catch-up data.
-- Cache EPG windows with TTL and background refresh.
+- Live channel rows persist EPG channel ID, catch-up capability, catch-up duration, and current guide metadata.
+- `LiveGuideService` fetches and maps short EPG data on demand and resolves Xtream catch-up URLs.
+- Catch-up uses bounded program start/duration; ordinary live playback remains non-seekable.
 
-## UX Requirements
-- Keep the existing channel-only Live tab as the fallback surface.
-- Add a real guide timeline only after provider-scoped program windows exist; do not show fake guide rows.
-- Program details sheet should include:
-  - watch live
-  - watch from start (if catch-up available).
-- Player should show current channel/program metadata and allow quick channel up/down only after EPG/zapping state exists.
+## Key Files
 
-## Player Integration
-- Live player mode should include:
-  - no fixed duration for pure live streams.
-  - progress timeline only for catch-up sessions.
-- Seek availability depends on catch-up mode and provider support.
+- `iptv/UI/Screens/LiveScreen.swift`
+- `iptv/Model/LiveGuideService.swift`
+- `iptv/State/Player.swift`
+- `iptv/Player/MediaPlaybackSourceResolver.swift`
+- `iptv/Model/Database/Schema.swift`
 
-## Failure Handling
-- Missing EPG data:
-  - still allow live playback through the existing channel list.
-  - show honest missing-guide copy only in real guide surfaces; do not add empty guide shells to channel-only Live.
-- Catch-up resolution failure:
-  - keep live playback available and show retry action.
+## Target Acceptance Criteria
 
-## Testing
+- Missing guide data never blocks live playback.
+- Guide responses are mapped into truthful program rows.
+- Catch-up is offered only for eligible programs and resolution failures are visible.
+- Previous/next controls load adjacent channels without stale playback state.
 
-## Unit
-- EPG window merge and cache TTL logic.
-- Catch-up availability computation.
-- Channel zapping state transitions.
+## Current Gaps / Planned Work
 
-## Integration
-- Channel selection starts live playback through the channel-only Live feature.
-- Program selection starts catch-up playback when available.
-- Fallback from missing EPG to channel-only live view.
+- EPG windows are fetched on demand rather than persisted as a long-lived program cache.
+- DVR recording, multi-view, and parental locking are not implemented.
+- Provider-specific catch-up URL variants may require additional capability mapping.
 
-## UI
-- Timeline navigation and current-time marker behavior.
-- Program details actions and availability badges.
-- Channel up/down controls in player.
+## Notes for Agents
 
-## Acceptance Criteria
-
-- User can browse channels and start live playback before guide data exists.
-- User can view guide data once EPG sync/cache exists.
-- Catch-up works for eligible programs and degrades gracefully when unavailable.
-- Live tab supports day-to-day IPTV usage without fake EPG rows.
-
+- Keep channel-only playback as the fallback when guide calls fail.
+- Do not expose catch-up without provider capability and a valid program time range.

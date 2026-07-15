@@ -6,7 +6,7 @@ Media Details provides the focused destination for a selected movie or series it
 
 ## Status
 
-- Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume for playable rows, and bridges to the shared player; favorite controls persist through the shared provider-scoped favorites store while downloads remain explicit unsupported states.
+- Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume/download for playable rows, and bridges to the shared player; favorite and download controls persist through profile/provider-scoped stores.
 - Implementation status: `MediaDetailDestination` routes movies, series, episodes, and live states explicitly from Browse, Search, Favorites, and For You. Movie and series screens share adaptive hero/backdrop presentation, truthful enrichment state, profile-scoped favorite/resume state, working trailer links, source selection, downloads, and shared full-window playback entry.
 - Series detail keeps its own Episodes/Details content and season selection. Selecting a concrete episode row calls the shared player directly with full-window presentation and surfaces terminal resolution/backend errors in the series detail; standalone `EpisodeDetailTile` routes remain available from other surfaces. `SyncManager.enrichDetails` single-flights detail requests, rejects stale provider ownership, reconciles seasons/episodes, and preserves the last good local snapshot when enrichment fails.
 

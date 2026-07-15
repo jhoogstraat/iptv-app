@@ -8,7 +8,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 
 - Target state: one root gate decides onboarding versus main shell; one canonical tab model defines app surfaces; feature screens own their internal stacks and detail routing.
 - Implementation status (reviewed 2026-07-10): `Tabs` provides stable non-localized customization IDs, `ContentView` renders the `sidebarAdaptable` shell, and every data-backed top-level surface is mounted through `SessionGuard`, including Search. Movies and Series place `SessionGuard` outside the `NavigationStack` that owns browse detail links, so movie, series, and episode destinations inherit the same `Session`. For You, Search, Movies, Series, Live, and Favorites own working local-data experiences; detail routes use `MediaDetailDestination`; player presentation is wired through root full-screen presentation, visionOS window presentation, and macOS `PlayerWindow`.
-- Current gaps: Downloads remains an explicit unsupported screen, and detail navigation still uses feature-local stacks rather than one central route enum or shared `NavigationPath`.
+- Current gaps: detail navigation still uses feature-local stacks rather than one central route enum or shared `NavigationPath`.
 
 ## User Experience
 
@@ -52,7 +52,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 
 ## Current Gaps / Planned Work
 
-- `DownloadsScreen` is mounted from the Downloads tab but remains an explicit not-implemented state.
+- `DownloadsScreen` is mounted from the Downloads tab and presents the profile/provider-scoped download queue.
 - There is no central route enum or shared `NavigationPath` for cross-tab media details.
 - Feature-local navigation is intentional today; a central path should be added only when real cross-tab deep-link requirements exist.
 

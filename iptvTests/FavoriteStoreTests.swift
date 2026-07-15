@@ -105,7 +105,9 @@ struct FavoriteStoreTests {
                     defaults: defaults
                 )
                 Issue.record("Expected favorite insertion to throw.")
-            } catch {}
+            } catch {
+                #expect(error.localizedDescription.contains("forced favorite insert failure"))
+            }
 
             #expect(defaults.integer(forKey: FavoriteStore.revisionKey) == 41)
             #expect(FavoriteStore.isFavorite(media, providerID: providerID, database: database) == false)
@@ -143,7 +145,9 @@ struct FavoriteStoreTests {
                     defaults: defaults
                 )
                 Issue.record("Expected favorite deletion to throw.")
-            } catch {}
+            } catch {
+                #expect(error.localizedDescription.contains("forced favorite delete failure"))
+            }
 
             #expect(defaults.integer(forKey: FavoriteStore.revisionKey) == 42)
             #expect(FavoriteStore.isFavorite(media, providerID: providerID, database: database))

@@ -374,7 +374,7 @@ enum UserProfileStore: Sendable {
             guard try UserProfile.fetchCount(db) > 1 else { throw ProfileError.lastProfile }
             try UserProfile.find(profile.id).delete().execute(db)
             if activeProfileID(defaults: defaults) == profile.id,
-               let replacement = try UserProfile.order { $0.id.asc() }.fetchOne(db) {
+               let replacement = try UserProfile.order(by: { $0.id.asc() }).fetchOne(db) {
                 defaults.set(replacement.id, forKey: activeProfileIDKey)
             }
         }

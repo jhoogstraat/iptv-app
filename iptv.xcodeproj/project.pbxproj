@@ -79,6 +79,11 @@
 			path = iptvTests;
 			sourceTree = "<group>";
 		};
+		1A0D267C2E6728670091AF6A /* iptvUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = iptvUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -118,6 +123,7 @@
 			children = (
 				1A0D26602E6728660091AF6A /* iptv */,
 				1A0D26722E6728670091AF6A /* iptvTests */,
+				1A0D267C2E6728670091AF6A /* iptvUITests */,
 				1A1352572E6B8DD2002345D7 /* Frameworks */,
 				1A0D265F2E6728660091AF6A /* Products */,
 			);
@@ -208,6 +214,9 @@
 			);
 			dependencies = (
 				1A0D267B2E6728670091AF6A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				1A0D267C2E6728670091AF6A /* iptvUITests */,
 			);
 			name = iptvUITests;
 			packageProductDependencies = (

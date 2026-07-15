@@ -153,7 +153,7 @@ nonisolated struct LibraryFilterRequest: Hashable, Sendable {
     let query: String
 }
 
-enum LibraryEmptyCriteria: Equatable, Sendable {
+nonisolated enum LibraryEmptyCriteria: Equatable, Sendable {
     case none
     case queryOnly
     case filtersOnly
@@ -284,7 +284,7 @@ struct LibraryHydrationSnapshot: Sendable {
     }
 }
 
-struct LibraryHydrationCoverage: Equatable, Sendable {
+nonisolated struct LibraryHydrationCoverage: Equatable, Sendable {
     let loadingCount: Int
     let unhydratedCount: Int
     let failedCount: Int
