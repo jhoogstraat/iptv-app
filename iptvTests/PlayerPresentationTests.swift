@@ -19,12 +19,15 @@ struct PlayerPresentationTests {
         #expect(PlayerWindowPresentationAction.action(from: .fullWindow, to: .fullWindow) == .none)
     }
 
-    @Test func presentationLifecycleConsumesCleanupExactlyOnce() {
+    @Test func presentationLifecycleConsumesDismissalExactlyOnce() {
         var lifecycle = PlayerPresentationLifecycle()
 
-        #expect(lifecycle.consumeResetOnDisappear(hasLoadedItem: false) == false)
-        #expect(lifecycle.consumeResetOnDisappear(hasLoadedItem: true) == true)
-        #expect(lifecycle.consumeResetOnDisappear(hasLoadedItem: true) == false)
+        let emptyDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: false)
+        let firstDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: true)
+        let repeatedDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: true)
+        #expect(emptyDismissal == false)
+        #expect(firstDismissal == true)
+        #expect(repeatedDismissal == false)
     }
 
     @Test func tvBackTraversesPanelControlsAndPlayerHierarchy() {

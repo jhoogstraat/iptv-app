@@ -9,11 +9,23 @@ import SwiftUI
 
 struct PlayerRendererContainer: View {
     @Environment(Player.self) private var player
+    @Environment(PlaybackDestinationCoordinator.self) private var destinationCoordinator
+    let host: PlayerRendererHost
+
+    init(host: PlayerRendererHost = .device) {
+        self.host = host
+    }
 
     var body: some View {
-        renderer
-            .id(player.rendererRevision)
-            .background(Color.black)
+        Group {
+            if destinationCoordinator.rendererIsOwned(by: host) {
+                renderer
+                    .id(player.rendererRevision)
+            } else {
+                Color.black
+            }
+        }
+        .background(Color.black)
     }
 
     @ViewBuilder

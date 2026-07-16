@@ -607,6 +607,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
 
     private var timeObserver: Any?
     private var playerStateObservation: NSKeyValueObservation?
+    private var externalPlaybackObservation: NSKeyValueObservation?
     private var itemStatusObservation: NSKeyValueObservation?
     private var failedObserver: NSObjectProtocol?
     private var endedObserver: NSObjectProtocol?
@@ -619,6 +620,10 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     private var cachedQualityDescriptors: [QualityVariantDescriptor]?
     private var cachedChapterMarkers: [ChapterMarker]?
     private var audioSessionIsActive = false
+
+    var isExternalPlaybackActive: Bool {
+        player.isExternalPlaybackActive
+    }
 
     private struct QualityVariantDescriptor {
         let variant: QualityVariant
@@ -636,7 +641,9 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         self.continuation = continuation!
         self.audioSessionCoordinator = audioSessionCoordinator ?? SystemPlaybackAudioSessionCoordinator()
         super.init()
+        player.allowsExternalPlayback = true
         observePlayerState()
+        observeExternalPlaybackState()
     }
 
     deinit {
@@ -661,6 +668,8 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
 
         playerStateObservation?.invalidate()
         playerStateObservation = nil
+        externalPlaybackObservation?.invalidate()
+        externalPlaybackObservation = nil
 
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -898,6 +907,14 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
                 let current = max(0, time.seconds)
                 let duration = self.currentDuration()
                 self.continuation.yield(.progress(currentTime: current, duration: duration))
+            }
+        }
+    }
+
+    private func observeExternalPlaybackState() {
+        externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.continuation.yield(.advancedStateChanged)
             }
         }
     }

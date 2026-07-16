@@ -7,7 +7,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 ## Status
 
 - Target state: one root gate decides onboarding versus main shell; one canonical tab model defines app surfaces; feature screens own their internal stacks and detail routing.
-- Implementation status (reviewed 2026-07-15): `Tabs` provides stable non-localized customization IDs, `ContentView` renders the `sidebarAdaptable` shell, and every data-backed top-level surface is mounted through `SessionGuard`, including Search. Movies, Series, and Live use native category `NavigationLink`s before media/channel destinations, so system back controls and interactive back gestures preserve the category landing context. Movies and Series place `SessionGuard` outside the `NavigationStack`, so category, movie, series, and episode destinations inherit the same `Session`. Detail routes use `MediaDetailDestination`; player presentation is wired through root full-screen presentation, visionOS window presentation, and macOS `PlayerWindow`.
+- Implementation status (reviewed 2026-07-16): `Tabs` provides stable non-localized customization IDs, `ContentView` renders the `sidebarAdaptable` shell, and every data-backed top-level surface is mounted through `SessionGuard`, including Search. Movies, Series, and Live use native category `NavigationLink`s before media/channel destinations, so system back controls and interactive back gestures preserve the category landing context. Movies and Series place `SessionGuard` outside the `NavigationStack`, so category, movie, series, and episode destinations inherit the same `Session`. Detail routes use `MediaDetailDestination`; player presentation is wired through root full-screen presentation, visionOS window presentation, and macOS `PlayerWindow`. Dismissing the expanded controller now leaves logical off-device playback alive, and a compact now-playing bar in the main shell restores it.
 - Current gaps: detail navigation still uses feature-local stacks rather than one central route enum or shared `NavigationPath`.
 
 ## User Experience
@@ -27,7 +27,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 - Movies and Series each use their own `NavigationStack` around `BrowseScreen`; `SessionGuard` wraps that owning stack so every pushed detail destination inherits `Session`.
 - Live owns its feature-local `NavigationStack`. Its category rows push `LiveCategoryScreen` before channel interaction.
 - Settings uses a `NavigationStack` with `SettingsDestination` values for subpages.
-- Player presentation is modeled by `Player.presentation` and is wired at the app root through `IPTVApp`, `withVideoPlayer()`, and macOS `PlayerWindow`.
+- Player presentation is modeled by `Player.presentation` and is wired at the app root through `IPTVApp`, `withVideoPlayer()`, and macOS `PlayerWindow`. `PlaybackDestinationCoordinator` independently owns destination and renderer placement, while `ExternalNowPlayingBar` keeps off-device playback reachable from the tab shell.
 
 ## Key Files
 
@@ -40,6 +40,7 @@ App navigation provides the stable shell that organizes discovery, watch, librar
 - `iptv/UI/Views/ViewModifiers.swift`
 - `iptv/PlayerWindow.swift`
 - `iptv/IPTVApp.swift`
+- `iptv/ExternalDisplay/ExternalNowPlayingBar.swift`
 
 ## Target Acceptance Criteria
 

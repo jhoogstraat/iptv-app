@@ -74,14 +74,17 @@ struct AppRootView: View {
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            if !connectionMonitor.isConnected {
-                Label("Offline — showing saved content", systemImage: "wifi.slash")
-                    .font(.footnote.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(.orange.opacity(0.92))
-                    .foregroundStyle(.black)
-                    .accessibilityIdentifier("connectivity.offline")
+            VStack(spacing: 0) {
+                WiredDisplayConnectionBanner()
+                if !connectionMonitor.isConnected {
+                    Label("Offline — showing saved content", systemImage: "wifi.slash")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .background(.orange.opacity(0.92))
+                        .foregroundStyle(.black)
+                        .accessibilityIdentifier("connectivity.offline")
+                }
             }
         }
         .task(id: refreshEligibility) {

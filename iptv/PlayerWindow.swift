@@ -48,6 +48,7 @@ private struct PlayerWindowContent: View {
             PlayerView()
                 .withPlayerPresentationLifecycle()
                 .environment(runtime.player)
+                .environment(runtime.playbackDestinationCoordinator)
                 .environment(runtime.providerManager)
                 .frame(
                     minWidth: 960,
