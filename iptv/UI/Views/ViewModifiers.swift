@@ -93,7 +93,6 @@ private struct FullScreenCoverModalModifier: ViewModifier {
                 PlayerView()
                     .withPlayerPresentationLifecycle()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
             }
             .onAppear {
                 isPresentingPlayer = player.presentation == .fullWindow

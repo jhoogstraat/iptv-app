@@ -13,7 +13,8 @@ The video player provides stable playback controls and renderer switching across
 ## User Experience
 
 - Playback opens in a stable player UI without replacing the whole shell when the backend changes.
-- The top-left return control uses the native circular Liquid Glass button style while retaining the familiar backward chevron.
+- The top-left return control stays below the status bar inside the device safe area, uses the native circular Liquid Glass button style, and retains the familiar backward chevron.
+- Activating the return control stops and clears local playback before dismissing the full-window player; it does not merely hide the controls overlay.
 - Switching items stops the prior backend before provider/source resolution; failure cannot leave the previous stream audible or its advanced controls visible.
 - Users can play/pause, seek, scrub, view elapsed/duration/remaining time, and close playback.
 - Ten-second skips always calculate from the latest player position rather than a retained scrub/resume value.
@@ -59,6 +60,7 @@ The video player provides stable playback controls and renderer switching across
 - Repeated relative seeks advance from the optimistic current position and clamp to zero/duration.
 - Advanced controls reflect backend capabilities and recover gracefully from unsupported operations.
 - Playback can be launched from movie detail, standalone persisted episode detail, concrete episode rows in series detail, and Live channel rows after URL resolution; series collection rows are intentionally rejected as non-playable.
+- Edge-to-edge video may extend beneath system UI, while the top-left close control remains inside the safe area and closes the logical local playback session.
 
 ## Current Gaps / Planned Work
 
