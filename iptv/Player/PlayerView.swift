@@ -172,25 +172,22 @@ struct PlayerView: View {
             PlayerRendererContainer()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    // The renderer owns background taps so a full-screen gesture
-                    // surface cannot intercept buttons in the controls overlay.
-                    toggleControlsVisibility()
-                }
+
+            controlsBackgroundTapLayer
+                .zIndex(1)
 
             if isShowingControls {
                 overlayBackground
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .ignoresSafeArea()
+                    .allowsHitTesting(false)
                     .transition(.opacity)
+                    .zIndex(2)
 
                 controlsOverlay
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity)
-            } else {
-                showControlsButton
-                    .transition(.opacity)
+                    .zIndex(3)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -277,6 +274,17 @@ struct PlayerView: View {
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var controlsBackgroundTapLayer: some View {
+        Color.clear
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                toggleControlsVisibility()
+            }
+            .accessibilityHidden(true)
     }
 
     private var topBar: some View {
@@ -871,34 +879,6 @@ struct PlayerView: View {
     private var activeOutputRouteName: String {
         player.outputRoutes.first(where: { $0.id == player.selectedOutputRouteID || $0.isActive })?.name
             ?? "System Output"
-    }
-
-    private var showControlsButton: some View {
-        VStack {
-            Spacer()
-            HStack {
-                Spacer()
-                Button {
-                    revealControls()
-                } label: {
-                    Label("Show Controls", systemImage: "slider.horizontal.3")
-                        .font(.headline)
-                        .frame(minHeight: 44)
-                        .padding(.horizontal, 16)
-                        .background(.black.opacity(0.72))
-                        .clipShape(Capsule())
-                }
-                #if os(macOS)
-                .buttonStyle(.plain)
-                #elseif os(tvOS)
-                .focused($focusedControl, equals: .showControls)
-                #endif
-                .accessibilityHint("Reveals playback, timeline, and player options.")
-                .accessibilityIdentifier("player.showControls")
-            }
-        }
-        .padding(24)
-        .foregroundStyle(.white)
     }
 
     private var overlayBackground: some View {
@@ -1609,7 +1589,7 @@ struct PlayerView: View {
             isShowingControls = false
         }
         #if os(tvOS)
-        focusedControl = .showControls
+        focusedControl = nil
         #endif
     }
 
@@ -1749,7 +1729,6 @@ private enum TVControlFocus: Hashable {
     case subtitles
     case more
     case panelClose
-    case showControls
 }
 
 private extension PlayerPanel {
