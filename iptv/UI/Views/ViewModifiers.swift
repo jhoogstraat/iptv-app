@@ -43,22 +43,40 @@ enum PlayerWindowPresentationAction: Equatable {
 struct PlayerPresentationLifecycle: Equatable {
     private(set) var didRequestDismissal = false
 
-    mutating func consumeDismissalOnDisappear(hasLoadedItem: Bool) -> Bool {
-        guard hasLoadedItem, !didRequestDismissal else { return false }
+    mutating func consumeDismissalOnDisappear(
+        hasLoadedItem: Bool,
+        destinationKind: PlaybackDestinationKind
+    ) -> PlayerControllerDismissalAction {
+        guard hasLoadedItem, !didRequestDismissal else { return .none }
         didRequestDismissal = true
-        return true
+        return destinationKind == .device ? .closePlayback : .dismissController
     }
+}
+
+enum PlayerControllerDismissalAction: Equatable {
+    case none
+    case closePlayback
+    case dismissController
 }
 
 private struct PlayerPresentationLifecycleModifier: ViewModifier {
     @Environment(Player.self) private var player
+    @Environment(PlaybackDestinationCoordinator.self) private var destinationCoordinator
     @State private var lifecycle = PlayerPresentationLifecycle()
 
     func body(content: Content) -> some View {
         content
             .onDisappear {
-                if lifecycle.consumeDismissalOnDisappear(hasLoadedItem: player.currentItem != nil) {
+                switch lifecycle.consumeDismissalOnDisappear(
+                    hasLoadedItem: player.currentItem != nil,
+                    destinationKind: destinationCoordinator.selectedDestination.kind
+                ) {
+                case .closePlayback:
+                    player.close()
+                case .dismissController:
                     player.dismissController()
+                case .none:
+                    break
                 }
             }
     }
@@ -71,9 +89,7 @@ private struct FullScreenCoverModalModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            .fullScreenCover(isPresented: $isPresentingPlayer, onDismiss: {
-                player.dismissController()
-            }) {
+            .fullScreenCover(isPresented: $isPresentingPlayer) {
                 PlayerView()
                     .withPlayerPresentationLifecycle()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)

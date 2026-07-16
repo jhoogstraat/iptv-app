@@ -40,6 +40,31 @@ struct PlaybackDestinationCoordinatorTests {
         #expect(coordinator.availableDestinations == [.device])
     }
 
+    @Test func sceneConnectedBeforeRuntimeInstallationIsReplayed() {
+        let bridge = ExternalDisplayRuntimeBridge()
+        let coordinator = PlaybackDestinationCoordinator()
+
+        bridge.externalSceneConnected(id: "cold-launch-screen", name: "Living Room TV")
+        #expect(coordinator.availableDestinations == [.device])
+
+        bridge.replayConnections(to: coordinator)
+
+        #expect(coordinator.availableDestinations.contains {
+            $0.id == "wired:cold-launch-screen" && $0.name == "Living Room TV"
+        })
+    }
+
+    @Test func sceneDisconnectedBeforeRuntimeInstallationIsNotReplayed() {
+        let bridge = ExternalDisplayRuntimeBridge()
+        let coordinator = PlaybackDestinationCoordinator()
+
+        bridge.externalSceneConnected(id: "cold-launch-screen", name: "Living Room TV")
+        bridge.externalSceneDisconnected(id: "cold-launch-screen")
+        bridge.replayConnections(to: coordinator)
+
+        #expect(coordinator.availableDestinations == [.device])
+    }
+
     @Test func staleRendererTeardownCannotDetachReplacementOwner() {
         let deviceOwner = UUID()
         let displayOwner = UUID()
