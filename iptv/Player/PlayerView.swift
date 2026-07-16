@@ -174,6 +174,8 @@ struct PlayerView: View {
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture {
+                    // The renderer owns background taps so a full-screen gesture
+                    // surface cannot intercept buttons in the controls overlay.
                     toggleControlsVisibility()
                 }
 
@@ -266,22 +268,12 @@ struct PlayerView: View {
     @ViewBuilder
     private var controlsOverlay: some View {
         ZStack {
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    hideControls()
-                }
-
             #if os(tvOS)
             tvControlsOverlay
-                .zIndex(1)
             #elseif os(macOS)
             macControlsOverlay
-                .zIndex(1)
             #else
             mobileControlsOverlay
-                .zIndex(1)
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
