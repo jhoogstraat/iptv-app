@@ -23,21 +23,22 @@ struct VLCKitContentView: NSViewRepresentable {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> VLCVideoView {
-        let view = VLCVideoView()
-        view.backColor = .black
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.black.cgColor
         return view
     }
 
-    func updateNSView(_ nsView: VLCVideoView, context: Context) {
+    func updateNSView(_ nsView: NSView, context: Context) {
         guard context.coordinator.backend !== backend else { return }
-        context.coordinator.backend?.detachDrawable(ownerID: context.coordinator.ownerID)
-        backend?.attachDrawable(nsView, ownerID: context.coordinator.ownerID)
+        context.coordinator.backend?.unmountDrawable(ownerID: context.coordinator.ownerID)
+        backend?.mountDrawable(in: nsView, ownerID: context.coordinator.ownerID)
         context.coordinator.backend = backend
     }
 
-    static func dismantleNSView(_ nsView: VLCVideoView, coordinator: Coordinator) {
-        coordinator.backend?.detachDrawable(ownerID: coordinator.ownerID)
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.backend?.unmountDrawable(ownerID: coordinator.ownerID)
         coordinator.backend = nil
     }
 }
@@ -62,13 +63,13 @@ struct VLCKitContentView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         guard context.coordinator.backend !== backend else { return }
-        context.coordinator.backend?.detachDrawable(ownerID: context.coordinator.ownerID)
-        backend?.attachDrawable(uiView, ownerID: context.coordinator.ownerID)
+        context.coordinator.backend?.unmountDrawable(ownerID: context.coordinator.ownerID)
+        backend?.mountDrawable(in: uiView, ownerID: context.coordinator.ownerID)
         context.coordinator.backend = backend
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.backend?.detachDrawable(ownerID: coordinator.ownerID)
+        coordinator.backend?.unmountDrawable(ownerID: coordinator.ownerID)
         coordinator.backend = nil
     }
 }
