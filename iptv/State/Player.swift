@@ -1107,7 +1107,6 @@ final class Player {
 
         currentTime = resumeTime
         backend?.seek(to: resumeTime)
-        controlMessage = "Resumed \(currentStreamDescriptor) at \(Self.formatTime(resumeTime))."
     }
 
     private func processFailure(_ error: Error, from backendID: PlaybackBackendID) {
