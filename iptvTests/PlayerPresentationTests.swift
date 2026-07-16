@@ -1,5 +1,9 @@
 import Testing
 
+#if os(iOS)
+import CoreGraphics
+#endif
+
 @testable import iptv
 
 @MainActor
@@ -87,4 +91,17 @@ struct PlayerPresentationTests {
             isScrubbing: false
         ) == false)
     }
+
+    #if os(iOS)
+    @Test func verticalDistanceEnablesFinerTimelineScrubbing() {
+        let onTrack = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: 0)
+        let oneStepAway = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: 36)
+        let farAway = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: 180)
+
+        #expect(onTrack == 1)
+        #expect(oneStepAway < onTrack)
+        #expect(farAway < oneStepAway)
+        #expect(farAway > 0)
+    }
+    #endif
 }

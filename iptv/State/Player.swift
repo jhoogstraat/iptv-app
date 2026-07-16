@@ -429,6 +429,29 @@ final class Player {
         }
     }
 
+    /// Reloads the current stream in place after a terminal playback failure.
+    func retryCurrentItem() {
+        guard currentItem != nil, let url = currentPlaybackURL else { return }
+
+        let continuePlaying = shouldAutoPlay
+        let retryTime = currentTime.isFinite ? max(0, currentTime) : 0
+        didFallbackForCurrentItem = false
+        pendingHandoffTime = retryTime > 0 ? retryTime : nil
+        handoffProgressFloor = retryTime > 0 ? retryTime : nil
+        isPlaybackComplete = false
+        isPlaying = false
+        isBuffering = true
+        errorMessage = nil
+        playbackState = .loading
+
+        do {
+            try activateBackend(for: url)
+            try backend?.load(url: url, autoplay: continuePlaying)
+        } catch {
+            processTerminalFailure(error)
+        }
+    }
+
     func seek(to seconds: Double) {
         guard currentItem?.type != .live else {
             reportUnsupportedControl("Seeking is unavailable for live channels.")
