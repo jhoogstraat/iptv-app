@@ -441,6 +441,13 @@ final class Player {
         backend?.seek(to: resolvedTime)
     }
 
+    func seek(by offset: Double) {
+        guard offset.isFinite else { return }
+        let unclampedTarget = currentTime + offset
+        let target = duration.map { min(unclampedTarget, $0) } ?? unclampedTarget
+        seek(to: target)
+    }
+
     // MARK: - Advanced controls
 
     func clearControlMessage() {

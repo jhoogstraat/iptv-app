@@ -23,6 +23,26 @@ import VLCKit
 
 private let playbackLogger = Logger(subsystem: "IPTV", category: "Playback")
 
+enum PlaybackBufferPolicy {
+    static let remoteForwardBufferDuration: TimeInterval = 6
+
+    static func vlcMediaOptions(for url: URL) -> [String] {
+        var options = [
+            ":avcodec-hw=any",
+            ":drop-late-frames",
+            ":skip-frames",
+            ":input-fast-seek",
+        ]
+
+        if url.isFileURL {
+            options.append(":file-caching=1000")
+        } else {
+            options.append(":network-caching=2000")
+        }
+        return options
+    }
+}
+
 @MainActor
 protocol PlaybackAudioSessionCoordinating: AnyObject {
     func activatePlayback() throws
@@ -216,7 +236,11 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func load(url: URL, autoplay: Bool) throws {
-        player.media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else {
+            throw PlaybackRuntimeError.backendFailure("VLC could not create media for this stream.")
+        }
+        PlaybackBufferPolicy.vlcMediaOptions(for: url).forEach { media.addOption($0) }
+        player.media = media
         continuation.yield(.ready(duration: mediaDuration()))
         startMetadataProbe()
         if autoplay {
@@ -740,6 +764,9 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         }
 
         let item = AVPlayerItem(url: url)
+        if !url.isFileURL {
+            item.preferredForwardBufferDuration = PlaybackBufferPolicy.remoteForwardBufferDuration
+        }
         observeItemStatus(item)
         observeItemNotifications(item)
         player.replaceCurrentItem(with: item)

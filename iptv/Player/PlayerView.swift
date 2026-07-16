@@ -53,26 +53,6 @@ struct PlayerView: View {
         return 0...upper
     }
 
-    private var outputRouteSelectionBinding: Binding<String> {
-        Binding(
-            get: {
-                if let selectedOutputRouteID = player.selectedOutputRouteID,
-                   SystemOutputRouteID.supportsDirectSelection(selectedOutputRouteID) {
-                    return selectedOutputRouteID
-                }
-                return directlySelectableOutputRoutes.first?.id ?? ""
-            },
-            set: { newID in
-                guard !newID.isEmpty else { return }
-                player.selectOutputRoute(id: newID)
-            }
-        )
-    }
-
-    private var directlySelectableOutputRoutes: [OutputRoute] {
-        player.outputRoutes.filter { SystemOutputRouteID.supportsDirectSelection($0.id) }
-    }
-
     private var isPanelPresented: Bool {
         #if os(tvOS)
         tvPanel != nil
@@ -313,12 +293,14 @@ struct PlayerView: View {
                 Image(systemName: "chevron.backward")
                     .font(.headline.weight(.semibold))
                     .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.5))
-                    .clipShape(Circle())
             }
-            #if os(macOS)
+            #if os(visionOS)
+            .buttonStyle(.bordered)
+            #else
             .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: Circle())
             #endif
+            .buttonBorderShape(.circle)
             #if os(tvOS)
             .focused($focusedControl, equals: .close)
             #endif
@@ -387,9 +369,8 @@ struct PlayerView: View {
         HStack(spacing: 24) {
             if !isLiveStream {
                 Button {
-                    let newTime = max((scrubTime ?? player.currentTime) - 10, 0)
-                    scrubTime = newTime
-                    player.seek(to: newTime)
+                    scrubTime = nil
+                    player.seek(by: -10)
                 } label: {
                     Image(systemName: "10.arrow.trianglehead.counterclockwise")
                         .frame(minWidth: 44, minHeight: 44)
@@ -421,12 +402,8 @@ struct PlayerView: View {
 
             if !isLiveStream {
                 Button {
-                    let current = scrubTime ?? player.currentTime
-                    let fallbackUpper = current + 10
-                    let limit = player.duration ?? fallbackUpper
-                    let newTime = min(current + 10, limit)
-                    scrubTime = newTime
-                    player.seek(to: newTime)
+                    scrubTime = nil
+                    player.seek(by: 10)
                 } label: {
                     Image(systemName: "10.arrow.trianglehead.clockwise")
                         .frame(minWidth: 44, minHeight: 44)
@@ -559,9 +536,9 @@ struct PlayerView: View {
                 let delta = 10.0
                 switch direction {
                 case .increment:
-                    player.seek(to: min(player.currentTime + delta, sliderRange.upperBound))
+                    player.seek(by: delta)
                 case .decrement:
-                    player.seek(to: max(player.currentTime - delta, 0))
+                    player.seek(by: -delta)
                 @unknown default:
                     break
                 }
@@ -601,7 +578,7 @@ struct PlayerView: View {
             VStack(spacing: 0) {
                 topBar
                     .padding(.horizontal, 20)
-                    .padding(.top, 16)
+                    .padding(.top, proxy.safeAreaInsets.top + 16)
 
                 Spacer()
 
@@ -688,11 +665,11 @@ struct PlayerView: View {
                     favoriteControlButton
                         .focused($focusedControl, equals: .favorite)
 
-                    Button("Audio") {
-                        presentTVPanel(.audio)
+                    Button("Source") {
+                        presentTVPanel(.source)
                     }
                     .frame(minHeight: 44)
-                    .focused($focusedControl, equals: .audio)
+                    .focused($focusedControl, equals: .source)
 
                     Button("Subtitles") {
                         presentTVPanel(.subtitles)
@@ -796,7 +773,7 @@ struct PlayerView: View {
     private var mobileControlChipRow: some View {
         HStack(spacing: 10) {
             favoriteControlButton
-            audioControlChip
+            sourceControlChip
             subtitleControlChip
             moreControlChip
 
@@ -809,11 +786,11 @@ struct PlayerView: View {
 
             compactMobileControlGroup {
                 compactIconControlButton(
-                    systemImage: "speaker.wave.2",
-                    accessibilityLabel: "Audio",
-                    accessibilityIdentifier: "player.chip.audio"
+                    systemImage: "airplayvideo",
+                    accessibilityLabel: "Source",
+                    accessibilityIdentifier: "player.chip.source"
                 ) {
-                    mobileSheet = .audio
+                    mobileSheet = .source
                 }
 
                 compactIconControlButton(
@@ -839,11 +816,11 @@ struct PlayerView: View {
         }
     }
 
-    private var audioControlChip: some View {
-        controlChip("Audio", icon: "speaker.wave.2") {
-            mobileSheet = .audio
+    private var sourceControlChip: some View {
+        controlChip("Source", icon: "airplayvideo") {
+            mobileSheet = .source
         }
-        .accessibilityIdentifier("player.chip.audio")
+        .accessibilityIdentifier("player.chip.source")
     }
 
     private var subtitleControlChip: some View {
@@ -992,7 +969,7 @@ struct PlayerView: View {
     @ViewBuilder
     private func mobileSheetView(_ sheet: PlayerPanel) -> some View {
         switch sheet {
-        case .audio:
+        case .source:
             NavigationStack {
                 List {
                     Section("Audio Track") {
@@ -1000,7 +977,7 @@ struct PlayerView: View {
                     }
                     destinationSections
                 }
-                .navigationTitle("Audio & Output")
+                .navigationTitle("Source")
             }
             .presentationDetents([.medium, .large])
 
@@ -1068,7 +1045,7 @@ struct PlayerView: View {
             }
 
             switch panel {
-            case .audio:
+            case .source:
                 List {
                     Section("Audio Track") {
                         audioTrackListRows
@@ -1327,17 +1304,10 @@ struct PlayerView: View {
             HStack {
                 Text("Output Device")
                 Spacer()
-                if player.capabilities.supportsOutputRouteSelection, !directlySelectableOutputRoutes.isEmpty {
-                    Picker("Local Output", selection: outputRouteSelectionBinding) {
-                        ForEach(directlySelectableOutputRoutes) { route in
-                            Text(menuLabel(route.name, selected: route.id == player.selectedOutputRouteID || route.isActive))
-                                .tag(route.id)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .accessibilityLabel("Local audio output")
-                    .accessibilityIdentifier("player.outputRouteSelection")
+                if let activeRoute = player.outputRoutes.first(where: { $0.isActive }) {
+                    Text(activeRoute.name)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 OutputRoutePickerButton()
@@ -1748,7 +1718,7 @@ struct PlayerView: View {
 }
 
 private enum PlayerPanel: String, Identifiable {
-    case audio
+    case source
     case subtitles
     case more
 
@@ -1756,7 +1726,7 @@ private enum PlayerPanel: String, Identifiable {
 
     var title: String {
         switch self {
-        case .audio: "Audio"
+        case .source: "Source"
         case .subtitles: "Subtitles"
         case .more: "More"
         }
@@ -1781,7 +1751,7 @@ private enum TVControlFocus: Hashable {
     case playPause
     case seekForward
     case favorite
-    case audio
+    case source
     case subtitles
     case more
     case panelClose
@@ -1791,7 +1761,7 @@ private enum TVControlFocus: Hashable {
 private extension PlayerPanel {
     var tvLauncherFocus: TVControlFocus {
         switch self {
-        case .audio: .audio
+        case .source: .source
         case .subtitles: .subtitles
         case .more: .more
         }

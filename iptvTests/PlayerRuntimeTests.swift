@@ -24,6 +24,50 @@ struct PlayerRuntimeTests {
         #expect(!backend.canPlay(url: try #require(URL(string: "https://stream.example.com/video.exe"))))
     }
 
+    @Test func playbackBufferPolicyBalancesHighBitratePlaybackAndFastSeeking() throws {
+        let remoteURL = try #require(URL(string: "https://stream.example.com/movie/user/pass/42"))
+        let remoteOptions = PlaybackBufferPolicy.vlcMediaOptions(for: remoteURL)
+
+        #expect(remoteOptions.contains(":avcodec-hw=any"))
+        #expect(remoteOptions.contains(":drop-late-frames"))
+        #expect(remoteOptions.contains(":skip-frames"))
+        #expect(remoteOptions.contains(":input-fast-seek"))
+        #expect(remoteOptions.contains(":network-caching=2000"))
+        #expect(PlaybackBufferPolicy.remoteForwardBufferDuration == 6)
+
+        let fileOptions = PlaybackBufferPolicy.vlcMediaOptions(for: URL(fileURLWithPath: "/tmp/video.mp4"))
+        #expect(fileOptions.contains(":file-caching=1000"))
+        #expect(!fileOptions.contains(where: { $0.hasPrefix(":network-caching=") }))
+    }
+
+    @Test func relativeSeekAlwaysUsesCurrentPlaybackPositionAndClampsToBounds() async throws {
+        try await withRuntimeDatabase { database, credentials in
+            let backend = RuntimePlaybackBackend(id: .av)
+            let player = Player(
+                backendFactory: PlaybackBackendFactory(builders: [{ backend }]),
+                database: database,
+                playbackSourceResolver: RuntimePlaybackSourceResolver(),
+                credentialStore: credentials
+            )
+
+            player.load(makeMedia(sourceID: 100), presentation: .inline)
+            await Task.yield()
+            backend.send(.ready(duration: 120))
+            backend.send(.progress(currentTime: 45, duration: 120))
+            try await eventually { player.currentTime == 45 }
+
+            player.seek(by: 10)
+            player.seek(by: 10)
+            player.seek(by: -80)
+            player.seek(to: 115)
+            player.seek(by: 10)
+
+            #expect(backend.seekTimes == [55, 65, 0, 115, 120])
+            #expect(player.currentTime == 120)
+            await player.closeAndFlush()
+        }
+    }
+
     @Test func vlcFallbackCarriesPositionAndPausedIntentWithoutRegressingAndOnlyRunsOnce() async throws {
         try await withRuntimeDatabase { database, credentials in
             let vlc = RuntimePlaybackBackend(id: .vlc)
