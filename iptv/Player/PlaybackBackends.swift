@@ -9,8 +9,12 @@ import AVFoundation
 import Foundation
 import OSLog
 
-#if os(iOS) || os(tvOS)
+#if canImport(UIKit)
 import UIKit
+#endif
+
+#if os(macOS)
+import AppKit
 #endif
 
 #if canImport(VLCKit)
@@ -176,6 +180,12 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     let id: PlaybackBackendID = .vlc
     let player: VLCPlayerReference = VLCMediaPlayer()
 
+    #if os(macOS)
+    private let drawableSurface = VLCVideoView()
+    #else
+    private let drawableSurface = UIView()
+    #endif
+
     var isAvailable: Bool { true }
 
     private let stream: AsyncStream<PlaybackEvent>
@@ -192,6 +202,12 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         self.continuation = continuation!
         super.init()
         player.delegate = self
+        #if os(macOS)
+        drawableSurface.backColor = .black
+        #else
+        drawableSurface.backgroundColor = .black
+        #endif
+        player.drawable = drawableSurface
     }
 
     func canPlay(url: URL) -> Bool {
@@ -413,15 +429,31 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         adjustFilter.brightness.value = NSNumber(value: clamped * 2.0)
     }
 
-    func attachDrawable(_ drawable: AnyObject, ownerID: UUID) {
+    func mountDrawable(in host: AnyObject, ownerID: UUID) {
         drawableOwner.claim(ownerID)
-        player.drawable = drawable
+        #if os(macOS)
+        guard let host = host as? NSView else { return }
+        if drawableSurface.superview !== host {
+            drawableSurface.removeFromSuperview()
+            drawableSurface.frame = host.bounds
+            drawableSurface.autoresizingMask = [.width, .height]
+            host.addSubview(drawableSurface)
+        }
+        #else
+        guard let host = host as? UIView else { return }
+        if drawableSurface.superview !== host {
+            drawableSurface.removeFromSuperview()
+            drawableSurface.frame = host.bounds
+            drawableSurface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            host.addSubview(drawableSurface)
+        }
+        #endif
         applyAspectRatioMode()
     }
 
-    func detachDrawable(ownerID: UUID) {
+    func unmountDrawable(ownerID: UUID) {
         guard drawableOwner.release(ownerID) else { return }
-        player.drawable = nil
+        drawableSurface.removeFromSuperview()
     }
 
     private func mediaDuration() -> Double? {

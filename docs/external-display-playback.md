@@ -9,7 +9,7 @@ The target experience is one playback session with one authoritative `Player`, o
 ## Status
 
 - Target state: the app detects eligible displays and receivers, lets the user move playback between them without restarting the media, renders clean full-screen video on wired external displays, uses native AVFoundation external playback for AirPlay.
-- Implementation status (reviewed 2026-07-16): the app now creates one `PlaybackDestinationCoordinator` beside `Player`, declares a noninteractive external-display scene, bridges that scene to the existing runtime, arbitrates one renderer host, and provides the wired display surface, device controller mode, and persistent now-playing bar. Controller dismissal no longer resets logical playback. VLC renderer attachment uses owner tokens so a late source-view teardown cannot detach a newly attached display drawable. AVPlayer allows and observes native external playback; route changes can perform a position-preserving VLC-to-AV handoff when the current URL is AV-compatible. Destination loss pauses and requires explicit local continuation.
+- Implementation status (reviewed 2026-07-16): the app now creates one `PlaybackDestinationCoordinator` beside `Player`, declares a noninteractive external-display scene, bridges that scene to the existing runtime, arbitrates one renderer host, and provides the wired display surface, device controller mode, and persistent now-playing bar. Controller dismissal no longer resets logical playback. VLC owns one persistent decoder-bound drawable surface for the playback session and reparents that surface between renderer hosts; owner tokens prevent a late source-view teardown from unmounting the replacement host. AVPlayer allows and observes native external playback; route changes can perform a position-preserving VLC-to-AV handoff when the current URL is AV-compatible. Destination loss pauses and requires explicit local continuation.
 - Product priority: wired HDMI/DisplayPort is the first milestone because it is the strongest differentiator and can reuse both current local playback backends. AirPlay hardening follows on the AV backend.
 
 ## User Experience
@@ -58,7 +58,7 @@ The target experience is one playback session with one authoritative `Player`, o
 
 - Declare a `UIWindowSceneSessionRoleExternalDisplayNonInteractive` scene configuration on iOS/iPadOS and attach an `ExternalDisplaySceneDelegate`. UIKit supplies this scene when a supported physical cable or AirPlay display connects; the scene spans the external screen.
 - Host an `ExternalDisplayView` in that scene using `UIHostingController`. It reads the same `Player` and destination coordinator through a small runtime bridge owned by the existing application bootstrap; it must not create a second `Player`, provider session, or database.
-- Make renderer ownership explicit. `PlayerRendererContainer` gains a host identity, and only the selected host (`device` or a concrete external scene) may attach the VLC drawable or AV presentation surface. Handoff detaches the old host before attaching the new one, which is essential for the current VLC drawable contract.
+- Make renderer ownership explicit. `PlayerRendererContainer` gains a host identity, and only the selected host (`device` or a concrete external scene) may mount the VLC drawable or AV presentation surface. The VLC backend retains one persistent drawable and moves it between host wrapper views during handoff so the active VLC video output is not rebound or recreated.
 - Keep decoding local for wired output. Both VLC and AV backends remain eligible, so extensionless or VLC-only Xtream streams can still use the television. The display scene changes where frames render, not which catalog item or provider session is active.
 - Treat scene connection/disconnection as presentation events. They must not reset the `Player`, write false completion progress, or trigger the existing VLC-to-AV runtime fallback.
 
@@ -124,7 +124,7 @@ The target experience is one playback session with one authoritative `Player`, o
 - A compact now-playing controller remains in the main shell while playback is off-device.
 - The wired noninteractive scene, shared runtime bridge, edge-to-edge TV surface, controller mode, safe pause-on-loss behavior, and sanitized external error copy are implemented.
 - External windows use the screen’s preferred mode, disable UIKit overscan scaling, fill the scene bounds, and update their frame after geometry changes. `Fit` may still letterbox mismatched source/display aspect ratios; `Fill` occupies the display by cropping.
-- VLC and AV renderer surfaces explicitly detach during host replacement.
+- VLC preserves its decoder-bound drawable across host replacement and reparents it to the selected host; AV renderer surfaces explicitly detach during replacement.
 
 ### Remaining wired validation
 
@@ -146,7 +146,7 @@ The target experience is one playback session with one authoritative `Player`, o
 - Preserve `Player` as the single owner of logical playback and watch progress. Do not create a second player model per scene.
 - Destination selection, renderer placement, and decoding backend selection are related but distinct state machines. Keep their transitions explicit and testable.
 - A wired external scene is not an AirPlay audio route. Do not extend the existing `OutputRoute` model until these concepts are separated.
-- Never attach the VLC drawable to two views. Detach the previous renderer host before attaching the next one.
+- Never create or bind a second VLC drawable during active playback. Move the backend-owned persistent surface from the previous host to the next host, and use owner-scoped teardown so stale view destruction cannot remove it.
 - Do not stop a working local backend until a remote AirPlay handoff has succeeded. Rollback must preserve the current item and position.
 - Keep platform SDK imports behind compile guards so macOS, tvOS, visionOS, tests, and previews continue to build.
 - Update this feature spec, `docs/video-player.md`, and `docs/app-navigation.md` when implementation changes playback lifetime, root presentation, or destination ownership.
