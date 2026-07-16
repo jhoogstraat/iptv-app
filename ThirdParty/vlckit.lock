@@ -2,7 +2,7 @@
 # Update intentionally when moving to a newer artifact from:
 # https://artifacts.videolan.org/VLCKit/dev-artifacts-VLCKit/
 
-VLCKIT_ARCHIVE="VLCKit-4.0-20260703-1902.tar.xz"
+VLCKIT_ARCHIVE="VLCKit-4.0-20260713-1829.tar.xz"
 VLCKIT_URL="https://artifacts.videolan.org/VLCKit/dev-artifacts-VLCKit/${VLCKIT_ARCHIVE}"
-VLCKIT_SHA256="26b5c9c98d70d50815978ffc5347f576d10f662290f1d55902d06f45b6331bee"
+VLCKIT_SHA256="f28d93c271cc2d7776cbfe7b4da6792807d55fbe0cdc7c1481cc602d7c315a94"
 VLCKIT_ROOT="VLCKit-binary"

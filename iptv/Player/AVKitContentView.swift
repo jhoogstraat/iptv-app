@@ -27,6 +27,10 @@ struct AVKitContentView: NSViewRepresentable {
         }
         nsView.videoGravity = videoGravity(for: mode)
     }
+
+    static func dismantleNSView(_ nsView: AVPlayerView, coordinator: Void) {
+        nsView.player = nil
+    }
 }
 #else
 struct AVKitContentView: UIViewControllerRepresentable {
@@ -46,6 +50,10 @@ struct AVKitContentView: UIViewControllerRepresentable {
             uiViewController.player = player
         }
         uiViewController.videoGravity = videoGravity(for: mode)
+    }
+
+    static func dismantleUIViewController(_ uiViewController: AVPlayerViewController, coordinator: Void) {
+        uiViewController.player = nil
     }
 }
 #endif

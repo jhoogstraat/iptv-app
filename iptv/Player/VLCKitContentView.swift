@@ -16,23 +16,30 @@ struct VLCKitContentView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var backend: VLCPlaybackBackend?
+        let ownerID = UUID()
     }
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> VLCVideoView {
-        let view = VLCVideoView()
-        view.backColor = .black
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.black.cgColor
         return view
     }
 
-    func updateNSView(_ nsView: VLCVideoView, context: Context) {
+    func updateNSView(_ nsView: NSView, context: Context) {
         guard context.coordinator.backend !== backend else { return }
-        context.coordinator.backend?.attachDrawable(nil)
-        backend?.attachDrawable(nsView)
+        context.coordinator.backend?.unmountDrawable(ownerID: context.coordinator.ownerID)
+        backend?.mountDrawable(in: nsView, ownerID: context.coordinator.ownerID)
         context.coordinator.backend = backend
+    }
+
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) {
+        coordinator.backend?.unmountDrawable(ownerID: coordinator.ownerID)
+        coordinator.backend = nil
     }
 }
 #else
@@ -41,6 +48,7 @@ struct VLCKitContentView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var backend: VLCPlaybackBackend?
+        let ownerID = UUID()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -55,9 +63,14 @@ struct VLCKitContentView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         guard context.coordinator.backend !== backend else { return }
-        context.coordinator.backend?.attachDrawable(nil)
-        backend?.attachDrawable(uiView)
+        context.coordinator.backend?.unmountDrawable(ownerID: context.coordinator.ownerID)
+        backend?.mountDrawable(in: uiView, ownerID: context.coordinator.ownerID)
         context.coordinator.backend = backend
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.backend?.unmountDrawable(ownerID: coordinator.ownerID)
+        coordinator.backend = nil
     }
 }
 #endif

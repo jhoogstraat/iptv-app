@@ -7,16 +7,21 @@ The video player provides stable playback controls and renderer switching across
 ## Status
 
 - Target state: detail/play actions load a playable media URL, choose the best backend, show a stable player shell, expose transport and advanced controls, persist progress/preferences, and recover through one safe fallback path.
-- Implementation status (reviewed 2026-07-14): `Player`, VLC/AV backends, stable renderer container, root presentation, and one-time VLC-to-AV fallback are active. AV accepts extensionless HTTP(S) Xtream streams; runtime fallback carries position and play/pause intent; track preferences apply after metadata arrives; live playback rejects seek/rate mutations at the player boundary; ordered watch writes prevent stale progress regression. Loading another item immediately stops and detaches the prior backend, clears per-item track/quality/chapter state, and releases a newly selected backend on terminal failure, so a failed handoff cannot leave old media playing behind the error surface. Selecting a concrete episode row in series detail loads that episode directly into the shared full-window player, while standalone episode detail routes retain their full-window play action. macOS windows dismiss cleanly, visionOS uses its own player window, and tvOS back/focus behavior is explicit.
+- Implementation status (reviewed 2026-07-16): `Player`, VLC/AV backends, stable renderer container, root presentation, and one-time VLC-to-AV fallback are active. AV accepts extensionless HTTP(S) Xtream streams; runtime fallback carries position and play/pause intent; track preferences apply after metadata arrives; live playback rejects seek/rate mutations at the player boundary; ordered watch writes prevent stale progress regression. Relative seeks use the authoritative current player position, while remote playback uses bounded forward buffering and VLC enables hardware decoding, late-frame recovery, and fast keyframe-oriented seeking. The player shell uses localized edge gradients and a Liquid Glass functional layer for transport and secondary actions, with a prominent primary transport action, direct iOS route picking, consolidated language controls, conditional chapters, transient control HUDs, delayed buffering feedback, and an actionable retry surface for terminal failures. Loading another item immediately stops and detaches the prior backend, clears per-item track/quality/chapter state, and releases a newly selected backend on terminal failure, so a failed handoff cannot leave old media playing behind the error surface. Selecting a concrete episode row in series detail loads that episode directly into the shared full-window player, while standalone episode detail routes retain their full-window play action. macOS windows dismiss cleanly, visionOS uses its own player window, and tvOS back/focus behavior is explicit.
 - Current gaps: profile-scoped preferences, episode quick switching, and DVR live controls remain deferred.
 
 ## User Experience
 
 - Playback opens in a stable player UI without replacing the whole shell when the backend changes.
+- The player keeps video visually dominant with localized top and bottom gradients instead of a full-screen dimming veil.
+- The top-left return control and grouped playback actions use native interactive Liquid Glass while retaining familiar media symbols.
+- Play/pause or replay is visually prominent; skip actions remain adjacent, and secondary actions are separated into a quieter glass group.
 - Switching items stops the prior backend before provider/source resolution; failure cannot leave the previous stream audible or its advanced controls visible.
-- Users can play/pause, seek, scrub, view elapsed/duration/remaining time, and close playback.
-- Player shows backend, quality, buffering, error, and control status where applicable.
-- Advanced controls include audio tracks, subtitles, quality, chapters, output route, speed, aspect ratio, audio delay, volume, brightness where supported, and sleep timer.
+- Users can play/pause, seek, precision-scrub, view elapsed and remaining time, and close playback. A floating target-time label appears during iOS scrubbing.
+- Ten-second skips always calculate from the latest player position rather than a retained scrub/resume value.
+- Buffering appears only after a short delay, ordinary control confirmations use a transient HUD, and terminal failures provide Try Again and Close actions. Backend diagnostics stay out of the primary playback surface.
+- Controls disappear completely over touch playback and return when the user taps the video; tvOS and macOS retain a focusable/pointer-accessible launcher.
+- Advanced controls include audio and subtitle language selection, quality, conditional chapters, output route, speed, aspect ratio, audio delay, volume, brightness where supported, and sleep timer. iOS exposes the native system route picker directly from the overlay.
 - Unsupported controls remain visible or explained rather than failing silently.
 - Live channel playback hides fixed-duration timeline/seek controls and shows explicit copy that EPG, catch-up, zapping, DVR, and seeking are unavailable for basic live streams.
 - Runtime VLC failure should attempt AV fallback once for the same item.
@@ -24,8 +29,10 @@ The video player provides stable playback controls and renderer switching across
 ## Data and State
 
 - `Player` owns current item, playback state, progress, active backend, renderer revision, capabilities, selected tracks, quality, chapters, output routes, speed, aspect ratio, audio delay, volume, brightness, sleep timer, and transient control messages.
+- `Player.retryCurrentItem()` reloads the resolved current URL in place, preserving position and play/pause intent while allowing the normal one-time backend fallback path to run again.
 - `PlaybackBackendFactory` selects VLC before AV by default.
 - `PlaybackEvent` transports ready/playing/paused/buffering/progress/advanced-state/ended/failed updates.
+- `PlaybackBufferPolicy` applies a bounded remote buffer for high-bitrate jitter, hardware decoding and late-frame recovery for VLC, and fast seek behavior that avoids decoding every intervening frame after a distant seek.
 - `PlayerRendererContainer` switches renderer by `activeBackendID` and `rendererRevision`.
 - `PlayerAdvancedModels` defines tracks, quality variants, chapters, output routes, capabilities, aspect ratios, and sleep timer options.
 - `WatchActivity` stores provider-scoped movie/episode progress in SQLite, keyed by active provider ID, media type, and remote source ID. Player progress and ended events write rows asynchronously and throttle routine progress updates.
@@ -53,7 +60,11 @@ The video player provides stable playback controls and renderer switching across
 - Fallback does not loop indefinitely.
 - Renderer swaps do not reset the shared controls shell.
 - Progress events update timeline UI and persisted watch progress policy.
+- Repeated relative seeks advance from the optimistic current position and clamp to zero/duration.
 - Advanced controls reflect backend capabilities and recover gracefully from unsupported operations.
+- Touch controls can fully disappear without leaving an overlay on the video, while assistive and focus interactions prevent inappropriate auto-hide.
+- Moving vertically away from the iOS timeline reduces scrub velocity for precision rather than increasing it.
+- Buffering, transient confirmations, and terminal failures use distinct visual treatments; a terminal failure can retry the same resolved stream.
 - Playback can be launched from movie detail, standalone persisted episode detail, concrete episode rows in series detail, and Live channel rows after URL resolution; series collection rows are intentionally rejected as non-playable.
 
 ## Current Gaps / Planned Work
@@ -63,6 +74,8 @@ The video player provides stable playback controls and renderer switching across
 - Episode quick switching is not active; selecting a persisted episode row in series detail launches the shared full-window player directly without routing through an intermediate detail screen.
 - Live playback supports on-demand EPG context, eligible catch-up programs, and adjacent-channel zapping; DVR remains unimplemented.
 - Completed movie and episode downloads are selected before remote URL resolution.
+- Full-resolution wired external display placement, a persistent VLC drawable that is reparented between owner-scoped renderer hosts, controller persistence, AV external-playback observation, and compatibility-gated VLC-to-AV AirPlay handoff are implemented in `docs/external-display-playback.md`; physical-display/receiver release validation and additional AirPlay rollback hardening remain.
+- Distant seeks on remote progressive streams still depend on provider byte-range support, network throughput, container indexes, codec keyframe spacing, and device decode capability. Fast seeking reduces VLC preroll, but cannot remove provider/network latency or make a non-seekable input seekable.
 
 ## Notes for Agents
 

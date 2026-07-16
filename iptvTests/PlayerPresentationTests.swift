@@ -1,5 +1,9 @@
 import Testing
 
+#if os(iOS)
+import CoreGraphics
+#endif
+
 @testable import iptv
 
 @MainActor
@@ -19,12 +23,15 @@ struct PlayerPresentationTests {
         #expect(PlayerWindowPresentationAction.action(from: .fullWindow, to: .fullWindow) == .none)
     }
 
-    @Test func presentationLifecycleConsumesCleanupExactlyOnce() {
+    @Test func presentationLifecycleConsumesDismissalExactlyOnce() {
         var lifecycle = PlayerPresentationLifecycle()
 
-        #expect(lifecycle.consumeResetOnDisappear(hasLoadedItem: false) == false)
-        #expect(lifecycle.consumeResetOnDisappear(hasLoadedItem: true) == true)
-        #expect(lifecycle.consumeResetOnDisappear(hasLoadedItem: true) == false)
+        let emptyDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: false)
+        let firstDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: true)
+        let repeatedDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: true)
+        #expect(emptyDismissal == false)
+        #expect(firstDismissal == true)
+        #expect(repeatedDismissal == false)
     }
 
     @Test func tvBackTraversesPanelControlsAndPlayerHierarchy() {
@@ -84,4 +91,17 @@ struct PlayerPresentationTests {
             isScrubbing: false
         ) == false)
     }
+
+    #if os(iOS)
+    @Test func verticalDistanceEnablesFinerTimelineScrubbing() {
+        let onTrack = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: 0)
+        let oneStepAway = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: 36)
+        let farAway = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: 180)
+
+        #expect(onTrack == 1)
+        #expect(oneStepAway < onTrack)
+        #expect(farAway < oneStepAway)
+        #expect(farAway > 0)
+    }
+    #endif
 }

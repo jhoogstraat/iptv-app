@@ -18,6 +18,7 @@ struct PlayerView: View {
     static let identifier = "PlayerView"
 
     @Environment(Player.self) private var player
+    @Environment(PlaybackDestinationCoordinator.self) private var destinationCoordinator
     @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
     @Environment(\.accessibilitySwitchControlEnabled) private var isSwitchControlEnabled
     @AppStorage(FavoriteStore.revisionKey) private var favoritesRevision = 0
@@ -25,7 +26,9 @@ struct PlayerView: View {
     @State private var isShowingControls = true
     @State private var scrubTime: Double?
     @State private var hideControlsTask: Task<Void, Never>?
-
+    @State private var bufferingHUDTask: Task<Void, Never>?
+    @State private var controlMessageHUDTask: Task<Void, Never>?
+    @State private var isShowingBufferingHUD = false
 
     #if os(iOS) || os(visionOS)
     @State private var mobileSheet: PlayerPanel?
@@ -50,26 +53,6 @@ struct PlayerView: View {
     private var sliderRange: ClosedRange<Double> {
         let upper = max(player.duration ?? player.currentTime, 1)
         return 0...upper
-    }
-
-    private var outputRouteSelectionBinding: Binding<String> {
-        Binding(
-            get: {
-                if let selectedOutputRouteID = player.selectedOutputRouteID,
-                   SystemOutputRouteID.supportsDirectSelection(selectedOutputRouteID) {
-                    return selectedOutputRouteID
-                }
-                return directlySelectableOutputRoutes.first?.id ?? ""
-            },
-            set: { newID in
-                guard !newID.isEmpty else { return }
-                player.selectOutputRoute(id: newID)
-            }
-        )
-    }
-
-    private var directlySelectableOutputRoutes: [OutputRoute] {
-        player.outputRoutes.filter { SystemOutputRouteID.supportsDirectSelection($0.id) }
     }
 
     private var isPanelPresented: Bool {
@@ -106,48 +89,11 @@ struct PlayerView: View {
     }
 
     private var synopsisText: String? {
+        guard !player.isPlaying else { return nil }
         guard let synopsis = player.currentItem?.synopsis?.trimmingCharacters(in: .whitespacesAndNewlines),
               !synopsis.isEmpty
         else { return nil }
         return synopsis
-    }
-
-    private var selectedQualityBadgeText: String? {
-        guard let selected = player.qualityVariants.first(where: { $0.id == player.selectedQualityVariantID }) else {
-            return nil
-        }
-        return selected.isAuto ? "Auto" : (selected.resolution ?? selected.label)
-    }
-
-    private var streamBadges: [OverlayBadge] {
-        var badges: [OverlayBadge] = []
-
-        if let backend = player.activeBackendID?.rawValue.uppercased() {
-            badges.append(OverlayBadge(label: backend))
-        }
-
-        if let quality = selectedQualityBadgeText {
-            badges.append(OverlayBadge(label: quality))
-        }
-
-        if let audio = preferredAudioBadgeText {
-            badges.append(OverlayBadge(label: audio))
-        }
-
-        return badges
-    }
-
-    private var preferredAudioBadgeText: String? {
-
-        if let selectedTrack = player.audioTracks.first(where: { $0.id == player.selectedAudioTrackID }) {
-            return selectedTrack.label
-        }
-
-        if player.audioTracks.count > 1 {
-            return "Multi Audio"
-        }
-
-        return nil
     }
 
     private var displayTitle: String {
@@ -183,6 +129,14 @@ struct PlayerView: View {
         .easeInOut(duration: 0.28)
     }
 
+    private var shouldShowPersistentControlsLauncher: Bool {
+        #if os(tvOS) || os(macOS)
+        true
+        #else
+        false
+        #endif
+    }
+
     var body: some View {
         ZStack {
             Color.black
@@ -204,19 +158,25 @@ struct PlayerView: View {
                 controlsOverlay
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity)
-            } else {
+            } else if shouldShowPersistentControlsLauncher {
                 showControlsButton
                     .transition(.opacity)
             }
+
+            playbackStateHUD
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black)
         .onAppear {
             scheduleAutoHideIfNeeded()
+            updateBufferingHUD(isBuffering: player.isBuffering)
             player.refreshOutputRoutes()
         }
         .onChange(of: player.isPlaying) { _, _ in
             scheduleAutoHideIfNeeded()
+        }
+        .onChange(of: player.isBuffering) { _, isBuffering in
+            updateBufferingHUD(isBuffering: isBuffering)
         }
         .onChange(of: isVoiceOverEnabled) { _, _ in
             scheduleAutoHideIfNeeded()
@@ -238,13 +198,22 @@ struct PlayerView: View {
             guard isVoiceOverEnabled, let message else { return }
             AccessibilityNotification.Announcement(message).post()
         }
+        .onChange(of: player.controlMessage) { _, message in
+            scheduleControlMessageDismissal(message)
+        }
         #if os(iOS) || os(tvOS)
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            #if os(iOS)
+            player.systemOutputRouteDidChange()
+            #else
             player.refreshOutputRoutes()
+            #endif
         }
         #endif
         .onDisappear {
             hideControlsTask?.cancel()
+            bufferingHUDTask?.cancel()
+            controlMessageHUDTask?.cancel()
         }
         #if os(tvOS)
         .onPlayPauseCommand {
@@ -308,12 +277,14 @@ struct PlayerView: View {
                 Image(systemName: "chevron.backward")
                     .font(.headline.weight(.semibold))
                     .frame(width: 44, height: 44)
-                    .background(.black.opacity(0.5))
-                    .clipShape(Circle())
             }
-            #if os(macOS)
+            #if os(visionOS)
+            .buttonStyle(.bordered)
+            #else
             .buttonStyle(.plain)
+            .glassEffect(.clear.interactive(), in: Circle())
             #endif
+            .buttonBorderShape(.circle)
             #if os(tvOS)
             .focused($focusedControl, equals: .close)
             #endif
@@ -326,7 +297,7 @@ struct PlayerView: View {
     }
 
     private var infoPanel: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 6) {
             if let eyebrowText {
                 Text(eyebrowText)
                     .font(.caption.weight(.semibold))
@@ -345,27 +316,12 @@ struct PlayerView: View {
                 Text(synopsisText)
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.86))
-                    .lineLimit(3)
+                    .lineLimit(2)
                     .multilineTextAlignment(.leading)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-    }
-
-    private var streamBadgeRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(streamBadges) { badge in
-                    Text(badge.label)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.white.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
-        }
-        .scrollDisabled(true)
+        .animation(.easeInOut(duration: 0.2), value: player.isPlaying)
     }
 
     private var titleFont: Font {
@@ -382,13 +338,14 @@ struct PlayerView: View {
         HStack(spacing: 24) {
             if !isLiveStream {
                 Button {
-                    let newTime = max((scrubTime ?? player.currentTime) - 10, 0)
-                    scrubTime = newTime
-                    player.seek(to: newTime)
+                    scrubTime = nil
+                    player.seek(by: -10)
                 } label: {
                     Image(systemName: "10.arrow.trianglehead.counterclockwise")
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(width: 48, height: 48)
                 }
+                .buttonStyle(.plain)
+                .glassEffect(.clear.interactive(), in: Circle())
                 .accessibilityLabel("Seek backward 10 seconds")
                 .accessibilityValue(player.formattedCurrentTime)
                 .accessibilityIdentifier("player.seekBack")
@@ -403,8 +360,11 @@ struct PlayerView: View {
                 player.togglePlayback()
             } label: {
                 Image(systemName: primaryTransportSystemImage)
-                    .frame(minWidth: 44, minHeight: 44)
+                    .font(.title2.weight(.semibold))
+                    .frame(width: 58, height: 58)
             }
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(Color.accentColor).interactive(), in: Circle())
             .accessibilityLabel(primaryTransportTitle)
             .accessibilityValue(primaryTransportValue)
             .accessibilityIdentifier("player.playPause")
@@ -416,16 +376,14 @@ struct PlayerView: View {
 
             if !isLiveStream {
                 Button {
-                    let current = scrubTime ?? player.currentTime
-                    let fallbackUpper = current + 10
-                    let limit = player.duration ?? fallbackUpper
-                    let newTime = min(current + 10, limit)
-                    scrubTime = newTime
-                    player.seek(to: newTime)
+                    scrubTime = nil
+                    player.seek(by: 10)
                 } label: {
                     Image(systemName: "10.arrow.trianglehead.clockwise")
-                        .frame(minWidth: 44, minHeight: 44)
+                        .frame(width: 48, height: 48)
                 }
+                .buttonStyle(.plain)
+                .glassEffect(.clear.interactive(), in: Circle())
                 .accessibilityLabel("Seek forward 10 seconds")
                 .accessibilityValue(player.formattedCurrentTime)
                 .accessibilityIdentifier("player.seekForward")
@@ -467,9 +425,9 @@ struct PlayerView: View {
                     .disabled(player.liveChannelQueue.count < 2)
 
                     Spacer()
-                    Text("Timeline, seeking, catch-up, and DVR are unavailable for live channels.")
+                    Text("Basic live stream · DVR unavailable")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.72))
                         .multilineTextAlignment(.trailing)
                 }
                 .accessibilityIdentifier("player.liveTimelineUnavailable")
@@ -505,12 +463,10 @@ struct PlayerView: View {
                 HStack {
                     Text(player.formattedCurrentTime)
                     Spacer()
-                    Text(player.formattedDuration)
-                    Spacer()
                     Text(player.formattedRemainingTime)
                 }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.72))
             }
         }
     }
@@ -534,6 +490,20 @@ struct PlayerView: View {
                     .fill(.white)
                     .frame(width: 18, height: 18)
                     .offset(x: thumbOffset(in: proxy.size.width, fraction: fraction))
+
+                if let scrubTime {
+                    Text(formatTime(scrubTime))
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .glassEffect(.regular, in: Capsule())
+                        .fixedSize()
+                        .position(
+                            x: min(max(proxy.size.width * fraction, 34), max(proxy.size.width - 34, 34)),
+                            y: 10
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .contentShape(Rectangle())
@@ -554,41 +524,18 @@ struct PlayerView: View {
                 let delta = 10.0
                 switch direction {
                 case .increment:
-                    player.seek(to: min(player.currentTime + delta, sliderRange.upperBound))
+                    player.seek(by: delta)
                 case .decrement:
-                    player.seek(to: max(player.currentTime - delta, 0))
+                    player.seek(by: -delta)
                 @unknown default:
                     break
                 }
             }
         }
-        .frame(height: 44)
+        .frame(height: scrubTime == nil ? 44 : 70)
+        .animation(.easeInOut(duration: 0.16), value: scrubTime != nil)
     }
     #endif
-
-    private var statusMessages: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let errorMessage = player.errorMessage {
-                Text(errorMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
-                    .accessibilityLabel("Playback error. \(errorMessage)")
-            }
-
-            if let controlMessage = player.controlMessage {
-                Text(controlMessage)
-                    .font(.subheadline)
-                    .foregroundStyle(.yellow)
-            }
-
-            if isLiveStream {
-                Text("Use Previous/Next to zap within the selected channel list. EPG, catch-up, DVR, and seeking are unavailable.")
-                    .font(.subheadline)
-                    .foregroundStyle(.yellow)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
 
     #if os(iOS) || os(visionOS)
     private var mobileControlsOverlay: some View {
@@ -596,7 +543,7 @@ struct PlayerView: View {
             VStack(spacing: 0) {
                 topBar
                     .padding(.horizontal, 20)
-                    .padding(.top, 16)
+                    .padding(.top, proxy.safeAreaInsets.top + 16)
 
                 Spacer()
 
@@ -612,8 +559,6 @@ struct PlayerView: View {
                     if player.outputRoutes.count > 1 {
                         outputRouteSummary
                     }
-
-                    statusMessages
                 }
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -636,12 +581,7 @@ struct PlayerView: View {
                 infoPanel
 
                 HStack(alignment: .center, spacing: 20) {
-                    if !streamBadges.isEmpty {
-                        streamBadgeRow
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Spacer(minLength: 0)
-                    }
+                    Spacer(minLength: 0)
 
                     HStack(alignment: .center, spacing: 16) {
                         transportStrip
@@ -655,8 +595,6 @@ struct PlayerView: View {
                 if player.outputRoutes.count > 1 {
                     outputRouteSummary
                 }
-
-                statusMessages
             }
             .padding(.top, 24)
             .padding(.leading, 24)
@@ -683,23 +621,17 @@ struct PlayerView: View {
                     favoriteControlButton
                         .focused($focusedControl, equals: .favorite)
 
-                    Button("Audio") {
-                        presentTVPanel(.audio)
+                    Button("Languages") {
+                        presentTVPanel(.languages)
                     }
                     .frame(minHeight: 44)
-                    .focused($focusedControl, equals: .audio)
+                    .focused($focusedControl, equals: .languages)
 
-                    Button("Subtitles") {
-                        presentTVPanel(.subtitles)
+                    Button("Settings") {
+                        presentTVPanel(.settings)
                     }
                     .frame(minHeight: 44)
-                    .focused($focusedControl, equals: .subtitles)
-
-                    Button("More") {
-                        presentTVPanel(.more)
-                    }
-                    .frame(minHeight: 44)
-                    .focused($focusedControl, equals: .more)
+                    .focused($focusedControl, equals: .settings)
 
 
                 }
@@ -707,16 +639,13 @@ struct PlayerView: View {
                 if player.outputRoutes.count > 1 {
                     outputRouteSummary
                 }
-
-                statusMessages
             }
 
             if let panel = tvPanel {
                 tvPanelView(panel)
                     .frame(width: 360)
                     .padding(18)
-                    .background(.black.opacity(0.72))
-                    .clipShape(.rect(cornerRadius: 16))
+                    .glassEffect(.regular, in: .rect(cornerRadius: 20))
                     .focusSection()
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel("\(panel.title) panel")
@@ -731,12 +660,10 @@ struct PlayerView: View {
     #endif
 
     private var transportStrip: some View {
-        transportControls
-            .font(.title2)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 12)
-            .background(.white.opacity(0.12))
-            .clipShape(Capsule())
+        GlassEffectContainer(spacing: 14) {
+            transportControls
+                .font(.title2)
+        }
     }
 
     private var favoriteControlButton: some View {
@@ -760,12 +687,14 @@ struct PlayerView: View {
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(isFavorite ? .red : .white)
                 .frame(width: 44, height: 44)
-                .background(.white.opacity(0.12))
-                .clipShape(Circle())
         }
-        #if os(macOS)
         .buttonStyle(.plain)
-        #endif
+        .glassEffect(
+            isFavorite
+                ? .regular.tint(.red).interactive()
+                : .clear.interactive(),
+            in: Circle()
+        )
         .disabled(player.currentItem == nil || player.currentProviderID == nil)
         .accessibilityLabel(isFavorite ? "Remove from Favorites" : "Add to Favorites")
         .accessibilityHint("Updates the persisted favorite state for the current provider.")
@@ -789,12 +718,16 @@ struct PlayerView: View {
     }
 
     private var mobileControlChipRow: some View {
-        HStack(spacing: 10) {
-            favoriteControlButton
-            audioControlChip
-            subtitleControlChip
-            moreControlChip
-
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                favoriteControlButton
+                languagesControlChip
+                chaptersControlChip
+                settingsControlChip
+                #if os(iOS)
+                outputRouteGlassButton
+                #endif
+            }
         }
     }
 
@@ -804,56 +737,72 @@ struct PlayerView: View {
 
             compactMobileControlGroup {
                 compactIconControlButton(
-                    systemImage: "speaker.wave.2",
-                    accessibilityLabel: "Audio",
-                    accessibilityIdentifier: "player.chip.audio"
-                ) {
-                    mobileSheet = .audio
-                }
-
-                compactIconControlButton(
                     systemImage: "captions.bubble",
-                    accessibilityLabel: "Subtitles",
-                    accessibilityIdentifier: "player.chip.subtitles"
+                    accessibilityLabel: "Languages",
+                    accessibilityIdentifier: "player.chip.languages"
                 ) {
-                    mobileSheet = .subtitles
+                    mobileSheet = .languages
+                }
+
+                if !player.chapterMarkers.isEmpty {
+                    compactIconControlButton(
+                        systemImage: "list.number",
+                        accessibilityLabel: "Chapters",
+                        accessibilityIdentifier: "player.chip.chapters"
+                    ) {
+                        mobileSheet = .chapters
+                    }
                 }
 
                 compactIconControlButton(
-                    systemImage: "ellipsis",
-                    accessibilityLabel: "More",
-                    accessibilityIdentifier: "player.chip.more"
+                    systemImage: "gearshape",
+                    accessibilityLabel: "Playback Settings",
+                    accessibilityIdentifier: "player.chip.settings"
                 ) {
-                    mobileSheet = .more
+                    mobileSheet = .settings
                 }
             }
 
-
-
+#if os(iOS)
+            outputRouteGlassButton
+#endif
             Spacer(minLength: 0)
         }
     }
 
-    private var audioControlChip: some View {
-        controlChip("Audio", icon: "speaker.wave.2") {
-            mobileSheet = .audio
+    private var languagesControlChip: some View {
+        controlChip("Languages", icon: "captions.bubble") {
+            mobileSheet = .languages
         }
-        .accessibilityIdentifier("player.chip.audio")
+        .accessibilityIdentifier("player.chip.languages")
     }
 
-    private var subtitleControlChip: some View {
-        controlChip("Subtitles", icon: "captions.bubble") {
-            mobileSheet = .subtitles
+    @ViewBuilder
+    private var chaptersControlChip: some View {
+        if !player.chapterMarkers.isEmpty {
+            controlChip("Chapters", icon: "list.number") {
+                mobileSheet = .chapters
+            }
+            .accessibilityIdentifier("player.chip.chapters")
         }
-        .accessibilityIdentifier("player.chip.subtitles")
     }
 
-    private var moreControlChip: some View {
-        controlChip("More", icon: "ellipsis") {
-            mobileSheet = .more
+    private var settingsControlChip: some View {
+        controlChip("Settings", icon: "gearshape") {
+            mobileSheet = .settings
         }
-        .accessibilityIdentifier("player.chip.more")
+        .accessibilityIdentifier("player.chip.settings")
     }
+
+    #if os(iOS)
+    private var outputRouteGlassButton: some View {
+        OutputRoutePickerButton()
+            .frame(width: 44, height: 44)
+            .glassEffect(.clear.interactive(), in: Circle())
+            .disabled(!player.capabilities.supportsOutputRouteSelection)
+            .accessibilityLabel("AirPlay and output device")
+    }
+    #endif
     #endif
 
     #if os(macOS)
@@ -909,12 +858,10 @@ struct PlayerView: View {
                         .font(.headline)
                         .frame(minHeight: 44)
                         .padding(.horizontal, 16)
-                        .background(.black.opacity(0.72))
-                        .clipShape(Capsule())
                 }
-                #if os(macOS)
                 .buttonStyle(.plain)
-                #elseif os(tvOS)
+                .glassEffect(.clear.interactive(), in: Capsule())
+                #if os(tvOS)
                 .focused($focusedControl, equals: .showControls)
                 #endif
                 .accessibilityHint("Reveals playback, timeline, and player options.")
@@ -925,20 +872,94 @@ struct PlayerView: View {
         .foregroundStyle(.white)
     }
 
-    private var overlayBackground: some View {
-        ZStack {
-            Rectangle()
-                .fill(.black.opacity(0.44))
+    @ViewBuilder
+    private var playbackStateHUD: some View {
+        if let errorMessage = player.errorMessage {
+            VStack(spacing: 14) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.yellow)
 
+                Text("Playback Unavailable")
+                    .font(.headline)
+
+                Text(errorMessage)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                HStack(spacing: 10) {
+                    Button("Close") {
+                        Task {
+                            await player.closeAndFlush()
+                        }
+                    }
+                    .buttonStyle(.glass)
+
+                    Button("Try Again") {
+                        player.retryCurrentItem()
+                    }
+                    .buttonStyle(.glassProminent)
+                    .tint(.accentColor)
+                    .accessibilityIdentifier("player.retry")
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: 360)
+            .glassEffect(.regular, in: .rect(cornerRadius: 24))
+            .padding(24)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Playback error. \(errorMessage)")
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        } else if isShowingBufferingHUD {
+            VStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.large)
+                Text("Reconnecting…")
+                    .font(.subheadline.weight(.medium))
+            }
+            .padding(.horizontal, 22)
+            .padding(.vertical, 16)
+            .glassEffect(.regular, in: Capsule())
+            .accessibilityLabel("Playback is buffering")
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+        } else if let controlMessage = player.controlMessage {
+            Text(controlMessage)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .glassEffect(.regular, in: Capsule())
+                .padding(24)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .allowsHitTesting(false)
+        }
+    }
+
+    private var overlayBackground: some View {
+        VStack(spacing: 0) {
             LinearGradient(
                 colors: [
-                    .black.opacity(0.18),
-                    .black.opacity(0.42),
-                    .black.opacity(0.78)
+                    .black.opacity(0.5),
+                    .black.opacity(0)
                 ],
                 startPoint: .top,
                 endPoint: .bottom
             )
+            .frame(height: 180)
+
+            Spacer(minLength: 0)
+
+            LinearGradient(
+                colors: [
+                    .black.opacity(0),
+                    .black.opacity(0.34),
+                    .black.opacity(0.82)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(maxHeight: 480)
         }
     }
 
@@ -950,9 +971,9 @@ struct PlayerView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
                 .frame(minHeight: 44)
-                .background(.white.opacity(0.14))
-                .clipShape(Capsule())
         }
+        .buttonStyle(.plain)
+        .glassEffect(.clear.interactive(), in: Capsule())
     }
 
     private func compactMobileControlGroup<Content: View>(
@@ -963,8 +984,7 @@ struct PlayerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(.white.opacity(0.14))
-        .clipShape(Capsule())
+        .glassEffect(.clear.interactive(), in: Capsule())
     }
 
     private func compactIconControlButton(
@@ -987,25 +1007,30 @@ struct PlayerView: View {
     @ViewBuilder
     private func mobileSheetView(_ sheet: PlayerPanel) -> some View {
         switch sheet {
-        case .audio:
+        case .languages:
             NavigationStack {
                 List {
-                    audioTrackListRows
+                    Section("Audio") {
+                        audioTrackListRows
+                    }
+                    Section("Subtitles") {
+                        subtitleTrackListRows
+                    }
                 }
-                .navigationTitle("Audio")
+                .navigationTitle("Languages")
             }
             .presentationDetents([.medium, .large])
 
-        case .subtitles:
+        case .chapters:
             NavigationStack {
                 List {
-                    subtitleTrackListRows
+                    chapterListRows
                 }
-                .navigationTitle("Subtitles")
+                .navigationTitle("Chapters")
             }
             .presentationDetents([.medium, .large])
 
-        case .more:
+        case .settings:
             NavigationStack {
                 List {
                     Section("Playback") {
@@ -1024,27 +1049,20 @@ struct PlayerView: View {
                         qualityListRows
                     }
 
-                    Section("Chapters") {
-                        chapterListRows
-                    }
-
-                    Section("Output") {
-                        outputRouteRow
-                    }
-
                     Section("Display") {
                         volumeSlider
                         brightnessSlider
                     }
 
+                    destinationSections
+
                     Section("Sleep Timer") {
                         sleepTimerRows
                     }
                 }
-                .navigationTitle("More")
+                .navigationTitle("Playback Settings")
             }
             .presentationDetents([.medium, .large])
-
 
         }
     }
@@ -1065,15 +1083,20 @@ struct PlayerView: View {
             }
 
             switch panel {
-            case .audio:
+            case .languages:
                 List {
-                    audioTrackListRows
+                    Section("Audio") {
+                        audioTrackListRows
+                    }
+                    Section("Subtitles") {
+                        subtitleTrackListRows
+                    }
                 }
-            case .subtitles:
+            case .chapters:
                 List {
-                    subtitleTrackListRows
+                    chapterListRows
                 }
-            case .more:
+            case .settings:
                 List {
                     if isLiveStream {
                         Text("Playback speed, seeking, catch-up, and DVR controls are unavailable for live channels.")
@@ -1085,7 +1108,7 @@ struct PlayerView: View {
                     }
                     volumeSlider
                     brightnessSlider
-                    outputRouteRow
+                    destinationSections
                     sleepTimerRows
                 }
             }
@@ -1322,17 +1345,10 @@ struct PlayerView: View {
             HStack {
                 Text("Output Device")
                 Spacer()
-                if player.capabilities.supportsOutputRouteSelection, !directlySelectableOutputRoutes.isEmpty {
-                    Picker("Local Output", selection: outputRouteSelectionBinding) {
-                        ForEach(directlySelectableOutputRoutes) { route in
-                            Text(menuLabel(route.name, selected: route.id == player.selectedOutputRouteID || route.isActive))
-                                .tag(route.id)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .accessibilityLabel("Local audio output")
-                    .accessibilityIdentifier("player.outputRouteSelection")
+                if let activeRoute = player.outputRoutes.first(where: { $0.isActive }) {
+                    Text(activeRoute.name)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
 
                 OutputRoutePickerButton()
@@ -1354,6 +1370,34 @@ struct PlayerView: View {
         Text("Output route picker unavailable on this platform")
             .foregroundStyle(.secondary)
         #endif
+    }
+
+    @ViewBuilder
+    private var destinationSections: some View {
+        Section("Playback Destination") {
+            ForEach(destinationCoordinator.availableDestinations) { destination in
+                Button {
+                    player.movePlayback(to: destination)
+                    #if os(iOS) || os(visionOS)
+                    mobileSheet = nil
+                    #endif
+                } label: {
+                    HStack {
+                        Image(systemName: destination.kind == .device ? "iphone" : "display")
+                        Text(destination.name)
+                        Spacer()
+                        if destination.id == destinationCoordinator.selectedDestination.id {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+                .accessibilityValue(destination.id == destinationCoordinator.selectedDestination.id ? "Selected" : "")
+            }
+        }
+
+        Section("System Audio & AirPlay") {
+            outputRouteRow
+        }
     }
 
     @ViewBuilder
@@ -1597,6 +1641,38 @@ struct PlayerView: View {
         }
     }
 
+    private func updateBufferingHUD(isBuffering: Bool) {
+        bufferingHUDTask?.cancel()
+
+        guard isBuffering else {
+            withAnimation(.easeOut(duration: 0.16)) {
+                isShowingBufferingHUD = false
+            }
+            return
+        }
+
+        bufferingHUDTask = Task {
+            try? await Task.sleep(for: .milliseconds(550))
+            guard !Task.isCancelled, player.isBuffering else { return }
+            withAnimation(.easeIn(duration: 0.18)) {
+                isShowingBufferingHUD = true
+            }
+        }
+    }
+
+    private func scheduleControlMessageDismissal(_ message: String?) {
+        controlMessageHUDTask?.cancel()
+        guard message != nil else { return }
+
+        controlMessageHUDTask = Task {
+            try? await Task.sleep(for: .seconds(2.8))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.18)) {
+                player.clearControlMessage()
+            }
+        }
+    }
+
     private func toggleControlsVisibility() {
         if isShowingControls {
             hideControls()
@@ -1681,7 +1757,7 @@ struct PlayerView: View {
 
         guard let session = iOSScrubSession else { return }
         let verticalDistance = abs(location.y - session.trackCenterY)
-        let speedMultiplier = scrubVelocityMultiplier(for: verticalDistance)
+        let speedMultiplier = IOSScrubPrecisionPolicy.multiplier(forVerticalDistance: verticalDistance)
         let horizontalDelta = Double(clampedX - session.anchorLocation.x)
         let secondsPerPoint = sliderRange.upperBound / Double(session.trackWidth)
         let nextValue = session.anchorTime + (horizontalDelta * secondsPerPoint * speedMultiplier)
@@ -1696,10 +1772,6 @@ struct PlayerView: View {
         scheduleAutoHideIfNeeded()
     }
 
-    private func scrubVelocityMultiplier(for verticalDistance: CGFloat) -> Double {
-        let normalized = min(max(verticalDistance / 36, 0), 5)
-        return 1 + Double(normalized * 1.4)
-    }
     #endif
 
     private func formatTime(_ rawSeconds: Double) -> String {
@@ -1715,17 +1787,17 @@ struct PlayerView: View {
 }
 
 private enum PlayerPanel: String, Identifiable {
-    case audio
-    case subtitles
-    case more
+    case languages
+    case chapters
+    case settings
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .audio: "Audio"
-        case .subtitles: "Subtitles"
-        case .more: "More"
+        case .languages: "Languages"
+        case .chapters: "Chapters"
+        case .settings: "Playback Settings"
         }
     }
 }
@@ -1748,9 +1820,9 @@ private enum TVControlFocus: Hashable {
     case playPause
     case seekForward
     case favorite
-    case audio
-    case subtitles
-    case more
+    case languages
+    case chapters
+    case settings
     case panelClose
     case showControls
 }
@@ -1758,9 +1830,9 @@ private enum TVControlFocus: Hashable {
 private extension PlayerPanel {
     var tvLauncherFocus: TVControlFocus {
         switch self {
-        case .audio: .audio
-        case .subtitles: .subtitles
-        case .more: .more
+        case .languages: .languages
+        case .chapters: .chapters
+        case .settings: .settings
         }
     }
 }
@@ -1798,10 +1870,14 @@ enum TVPlayerExitAction: Equatable {
     }
 }
 
-private struct OverlayBadge: Identifiable {
-    let id = UUID()
-    let label: String
+#if os(iOS)
+struct IOSScrubPrecisionPolicy {
+    static func multiplier(forVerticalDistance distance: CGFloat) -> Double {
+        let normalized = min(max(distance / 36, 0), 5)
+        return 1 / (1 + Double(normalized * 1.4))
+    }
 }
+#endif
 
 #if os(iOS) || os(tvOS)
 private struct OutputRoutePickerButton: UIViewRepresentable {

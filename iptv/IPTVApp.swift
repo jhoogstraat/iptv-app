@@ -16,6 +16,7 @@ import Sharing
 struct ApplicationRuntime {
     let providerManager: ProviderManager
     let player: Player
+    let playbackDestinationCoordinator: PlaybackDestinationCoordinator
 }
 
 private struct ApplicationContentView: View {
@@ -27,6 +28,7 @@ private struct ApplicationContentView: View {
             AppRootView()
                 .withVideoPlayer()
                 .environment(runtime.player)
+                .environment(runtime.playbackDestinationCoordinator)
                 .environment(runtime.providerManager)
         } else if let errorMessage = bootstrap.errorMessage {
             BootstrapFailureView(
@@ -108,10 +110,16 @@ struct IPTVApp: App {
             )
             try providerManager.loadActive()
 
-            return ApplicationRuntime(
+            let player = Player(database: database, credentialStore: credentialStore)
+            let playbackDestinationCoordinator = PlaybackDestinationCoordinator()
+            playbackDestinationCoordinator.bind(player: player)
+            let runtime = ApplicationRuntime(
                 providerManager: providerManager,
-                player: Player(database: database, credentialStore: credentialStore)
+                player: player,
+                playbackDestinationCoordinator: playbackDestinationCoordinator
             )
+            ExternalDisplayRuntimeBridge.shared.install(runtime)
+            return runtime
         }
 
         bootstrap.startIfNeeded()

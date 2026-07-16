@@ -9,8 +9,12 @@ import AVFoundation
 import Foundation
 import OSLog
 
-#if os(iOS) || os(tvOS)
+#if canImport(UIKit)
 import UIKit
+#endif
+
+#if os(macOS)
+import AppKit
 #endif
 
 #if canImport(VLCKit)
@@ -18,6 +22,26 @@ import VLCKit
 #endif
 
 private let playbackLogger = Logger(subsystem: "IPTV", category: "Playback")
+
+enum PlaybackBufferPolicy {
+    static let remoteForwardBufferDuration: TimeInterval = 6
+
+    static func vlcMediaOptions(for url: URL) -> [String] {
+        var options = [
+            ":avcodec-hw=any",
+            ":drop-late-frames",
+            ":skip-frames",
+            ":input-fast-seek",
+        ]
+
+        if url.isFileURL {
+            options.append(":file-caching=1000")
+        } else {
+            options.append(":network-caching=2000")
+        }
+        return options
+    }
+}
 
 @MainActor
 protocol PlaybackAudioSessionCoordinating: AnyObject {
@@ -176,6 +200,12 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     let id: PlaybackBackendID = .vlc
     let player: VLCPlayerReference = VLCMediaPlayer()
 
+    #if os(macOS)
+    private let drawableSurface = VLCVideoView()
+    #else
+    private let drawableSurface = UIView()
+    #endif
+
     var isAvailable: Bool { true }
 
     private let stream: AsyncStream<PlaybackEvent>
@@ -184,6 +214,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
     private var currentAspectRatioMode: PlayerAspectRatioMode = .fit
+    private var drawableOwner = RendererAttachmentOwner()
 
     override init() {
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
@@ -191,6 +222,12 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         self.continuation = continuation!
         super.init()
         player.delegate = self
+        #if os(macOS)
+        drawableSurface.backColor = .black
+        #else
+        drawableSurface.backgroundColor = .black
+        #endif
+        player.drawable = drawableSurface
     }
 
     func canPlay(url: URL) -> Bool {
@@ -199,7 +236,11 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     }
 
     func load(url: URL, autoplay: Bool) throws {
-        player.media = VLCMedia(url: url)
+        guard let media = VLCMedia(url: url) else {
+            throw PlaybackRuntimeError.backendFailure("VLC could not create media for this stream.")
+        }
+        PlaybackBufferPolicy.vlcMediaOptions(for: url).forEach { media.addOption($0) }
+        player.media = media
         continuation.yield(.ready(duration: mediaDuration()))
         startMetadataProbe()
         if autoplay {
@@ -412,9 +453,31 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         adjustFilter.brightness.value = NSNumber(value: clamped * 2.0)
     }
 
-    func attachDrawable(_ drawable: AnyObject?) {
-        player.drawable = drawable
+    func mountDrawable(in host: AnyObject, ownerID: UUID) {
+        drawableOwner.claim(ownerID)
+        #if os(macOS)
+        guard let host = host as? NSView else { return }
+        if drawableSurface.superview !== host {
+            drawableSurface.removeFromSuperview()
+            drawableSurface.frame = host.bounds
+            drawableSurface.autoresizingMask = [.width, .height]
+            host.addSubview(drawableSurface)
+        }
+        #else
+        guard let host = host as? UIView else { return }
+        if drawableSurface.superview !== host {
+            drawableSurface.removeFromSuperview()
+            drawableSurface.frame = host.bounds
+            drawableSurface.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            host.addSubview(drawableSurface)
+        }
+        #endif
         applyAspectRatioMode()
+    }
+
+    func unmountDrawable(ownerID: UUID) {
+        guard drawableOwner.release(ownerID) else { return }
+        drawableSurface.removeFromSuperview()
     }
 
     private func mediaDuration() -> Double? {
@@ -607,6 +670,7 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
 
     private var timeObserver: Any?
     private var playerStateObservation: NSKeyValueObservation?
+    private var externalPlaybackObservation: NSKeyValueObservation?
     private var itemStatusObservation: NSKeyValueObservation?
     private var failedObserver: NSObjectProtocol?
     private var endedObserver: NSObjectProtocol?
@@ -619,6 +683,10 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
     private var cachedQualityDescriptors: [QualityVariantDescriptor]?
     private var cachedChapterMarkers: [ChapterMarker]?
     private var audioSessionIsActive = false
+
+    var isExternalPlaybackActive: Bool {
+        player.isExternalPlaybackActive
+    }
 
     private struct QualityVariantDescriptor {
         let variant: QualityVariant
@@ -636,7 +704,9 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         self.continuation = continuation!
         self.audioSessionCoordinator = audioSessionCoordinator ?? SystemPlaybackAudioSessionCoordinator()
         super.init()
+        player.allowsExternalPlayback = true
         observePlayerState()
+        observeExternalPlaybackState()
     }
 
     deinit {
@@ -661,6 +731,8 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
 
         playerStateObservation?.invalidate()
         playerStateObservation = nil
+        externalPlaybackObservation?.invalidate()
+        externalPlaybackObservation = nil
 
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -692,6 +764,9 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
         }
 
         let item = AVPlayerItem(url: url)
+        if !url.isFileURL {
+            item.preferredForwardBufferDuration = PlaybackBufferPolicy.remoteForwardBufferDuration
+        }
         observeItemStatus(item)
         observeItemNotifications(item)
         player.replaceCurrentItem(with: item)
@@ -898,6 +973,14 @@ final class AVPlaybackBackend: NSObject, PlaybackBackend {
                 let current = max(0, time.seconds)
                 let duration = self.currentDuration()
                 self.continuation.yield(.progress(currentTime: current, duration: duration))
+            }
+        }
+    }
+
+    private func observeExternalPlaybackState() {
+        externalPlaybackObservation = player.observe(\.isExternalPlaybackActive, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.continuation.yield(.advancedStateChanged)
             }
         }
     }

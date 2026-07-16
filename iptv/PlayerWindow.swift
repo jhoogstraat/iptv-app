@@ -48,6 +48,7 @@ private struct PlayerWindowContent: View {
             PlayerView()
                 .withPlayerPresentationLifecycle()
                 .environment(runtime.player)
+                .environment(runtime.playbackDestinationCoordinator)
                 .environment(runtime.providerManager)
                 .frame(
                     minWidth: 960,
@@ -84,15 +85,14 @@ private struct PlayerCommands: Commands {
 
             Button("Seek Backward 10s") {
                 guard let player else { return }
-                player.seek(to: max(player.currentTime - 10, 0))
+                player.seek(by: -10)
             }
             .keyboardShortcut(.leftArrow, modifiers: [.command])
             .disabled(player?.currentItem == nil || player?.currentItem?.type == .live)
 
             Button("Seek Forward 10s") {
                 guard let player else { return }
-                let limit = player.duration ?? (player.currentTime + 10)
-                player.seek(to: min(player.currentTime + 10, limit))
+                player.seek(by: 10)
             }
             .keyboardShortcut(.rightArrow, modifiers: [.command])
             .disabled(player?.currentItem == nil || player?.currentItem?.type == .live)
