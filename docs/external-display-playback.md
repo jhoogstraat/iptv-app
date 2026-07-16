@@ -16,8 +16,8 @@ The target experience is one playback session with one authoritative `Player`, o
 
 ### Destination selection
 
-- A single destination control appears with the other bottom-left player menus inside `Audio & Output`. It reports the active app-owned destination (`This Device`, `External Display`) and groups the system `AVRoutePickerView` beneath it instead of presenting separate, competing controls.
-- Connecting a wired display does not add an app-level banner or top bar. The display becomes available in `Audio & Output`, and the initial default remains the device to avoid exposing private content unexpectedly.
+- A single `Source` control appears with the other bottom-left player menus. It reports the active app-owned destination (`This Device`, `External Display`), contains audio-track selection, and groups the system `AVRoutePickerView` beneath it instead of presenting separate, competing controls.
+- Connecting a wired display does not add an app-level banner or top bar. The display becomes available in `Source`, and the initial default remains the device to avoid exposing private content unexpectedly.
 - Starting an item while a previously selected destination is available sends it directly to that destination. Changing destination during playback preserves position, play/pause intent, selected item, and supported preferences.
 
 ### Device-as-controller mode
