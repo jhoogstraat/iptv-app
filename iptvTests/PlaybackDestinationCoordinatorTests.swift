@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import iptv
@@ -37,5 +38,21 @@ struct PlaybackDestinationCoordinatorTests {
         coordinator.externalSceneDisconnected(id: "screen")
         coordinator.externalSceneDisconnected(id: "screen")
         #expect(coordinator.availableDestinations == [.device])
+    }
+
+    @Test func staleRendererTeardownCannotDetachReplacementOwner() {
+        let deviceOwner = UUID()
+        let displayOwner = UUID()
+        var owner = RendererAttachmentOwner()
+
+        owner.claim(deviceOwner)
+        owner.claim(displayOwner)
+        let staleReleaseSucceeded = owner.release(deviceOwner)
+
+        #expect(staleReleaseSucceeded == false)
+        #expect(owner.ownerID == displayOwner)
+        let activeReleaseSucceeded = owner.release(displayOwner)
+        #expect(activeReleaseSucceeded)
+        #expect(owner.ownerID == nil)
     }
 }

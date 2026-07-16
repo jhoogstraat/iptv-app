@@ -9,16 +9,15 @@ The target experience is one playback session with one authoritative `Player`, o
 ## Status
 
 - Target state: the app detects eligible displays and receivers, lets the user move playback between them without restarting the media, renders clean full-screen video on wired external displays, uses native AVFoundation external playback for AirPlay.
-- Implementation status (reviewed 2026-07-16): the app now creates one `PlaybackDestinationCoordinator` beside `Player`, declares a noninteractive external-display scene, bridges that scene to the existing runtime, arbitrates one renderer host, and provides the wired display surface, connection choice banner, device controller mode, and persistent now-playing bar. Controller dismissal no longer resets logical playback. AVPlayer allows and observes native external playback; route changes can perform a position-preserving VLC-to-AV handoff when the current URL is AV-compatible. Destination loss pauses and requires explicit local continuation.
+- Implementation status (reviewed 2026-07-16): the app now creates one `PlaybackDestinationCoordinator` beside `Player`, declares a noninteractive external-display scene, bridges that scene to the existing runtime, arbitrates one renderer host, and provides the wired display surface, device controller mode, and persistent now-playing bar. Controller dismissal no longer resets logical playback. VLC renderer attachment uses owner tokens so a late source-view teardown cannot detach a newly attached display drawable. AVPlayer allows and observes native external playback; route changes can perform a position-preserving VLC-to-AV handoff when the current URL is AV-compatible. Destination loss pauses and requires explicit local continuation.
 - Product priority: wired HDMI/DisplayPort is the first milestone because it is the strongest differentiator and can reuse both current local playback backends. AirPlay hardening follows on the AV backend.
 
 ## User Experience
 
 ### Destination selection
 
-- A single destination button appears in the player’s primary controls. It reports the active state (`This iPhone`, `Living Room TV`, `HDMI Display`) instead of presenting separate, competing route controls.
-- Apple routes use the system `AVRoutePickerView`. A small app-owned destination sheet explains the difference and brings both entry points together.
-- When a wired display scene connects, the app shows a nonblocking “Display connected” banner with `Play on Display` and `Keep on Device`. The choice remains sticky for that physical connection. A Settings option may enable automatic use of a newly connected wired display, but the initial default is an explicit move to avoid exposing private content unexpectedly.
+- A single destination control appears with the other bottom-left player menus inside `Audio & Output`. It reports the active app-owned destination (`This Device`, `External Display`) and groups the system `AVRoutePickerView` beneath it instead of presenting separate, competing controls.
+- Connecting a wired display does not add an app-level banner or top bar. The display becomes available in `Audio & Output`, and the initial default remains the device to avoid exposing private content unexpectedly.
 - Starting an item while a previously selected destination is available sends it directly to that destination. Changing destination during playback preserves position, play/pause intent, selected item, and supported preferences.
 
 ### Device-as-controller mode
@@ -123,7 +122,8 @@ The target experience is one playback session with one authoritative `Player`, o
 - `PlaybackDestinationCoordinator`, destination/capability models, renderer-host arbitration, and duplicate/disconnect tests are active.
 - Logical playback lifetime is separate from full-screen controller presentation lifetime.
 - A compact now-playing controller remains in the main shell while playback is off-device.
-- The wired noninteractive scene, shared runtime bridge, edge-to-edge TV surface, connection banner, controller mode, safe pause-on-loss behavior, and sanitized external error copy are implemented.
+- The wired noninteractive scene, shared runtime bridge, edge-to-edge TV surface, controller mode, safe pause-on-loss behavior, and sanitized external error copy are implemented.
+- External windows use the screen’s preferred mode, disable UIKit overscan scaling, fill the scene bounds, and update their frame after geometry changes. `Fit` may still letterbox mismatched source/display aspect ratios; `Fill` occupies the display by cropping.
 - VLC and AV renderer surfaces explicitly detach during host replacement.
 
 ### Remaining wired validation

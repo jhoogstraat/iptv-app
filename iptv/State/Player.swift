@@ -1106,10 +1106,12 @@ final class Player {
     private func processFailure(_ error: Error, from backendID: PlaybackBackendID) {
         logger.error("Playback backend \(backendID.rawValue, privacy: .public) failed category=\(String(describing: type(of: error)), privacy: .public)")
 
+        #if os(iOS)
         if backendID == .av, isAirPlayHandoffInProgress {
             rollbackAirPlayHandoff()
             return
         }
+        #endif
 
         guard backendID == .vlc,
               !didFallbackForCurrentItem,

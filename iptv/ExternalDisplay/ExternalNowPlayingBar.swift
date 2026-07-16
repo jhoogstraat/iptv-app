@@ -52,29 +52,3 @@ struct ExternalNowPlayingBar: View {
         player.showController()
     }
 }
-
-struct WiredDisplayConnectionBanner: View {
-    @Environment(PlaybackDestinationCoordinator.self) private var destinationCoordinator
-
-    var body: some View {
-        if let destination = destinationCoordinator.pendingWiredDestination {
-            HStack(spacing: 12) {
-                Label("\(destination.name) connected", systemImage: "display")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button("Keep on Device") {
-                    destinationCoordinator.keepPlaybackOnDevice()
-                }
-                .buttonStyle(.bordered)
-                Button("Play on Display") {
-                    destinationCoordinator.playOnPendingWiredDisplay()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-            .padding(12)
-            .background(.ultraThinMaterial)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Display connected. \(destination.name)")
-        }
-    }
-}

@@ -184,6 +184,7 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
     private var metadataProbeTask: Task<Void, Never>?
     private let outputRouteController = SystemOutputRouteController()
     private var currentAspectRatioMode: PlayerAspectRatioMode = .fit
+    private var drawableOwner = RendererAttachmentOwner()
 
     override init() {
         var continuation: AsyncStream<PlaybackEvent>.Continuation?
@@ -412,9 +413,15 @@ final class VLCPlaybackBackend: NSObject, PlaybackBackend {
         adjustFilter.brightness.value = NSNumber(value: clamped * 2.0)
     }
 
-    func attachDrawable(_ drawable: AnyObject?) {
+    func attachDrawable(_ drawable: AnyObject, ownerID: UUID) {
+        drawableOwner.claim(ownerID)
         player.drawable = drawable
         applyAspectRatioMode()
+    }
+
+    func detachDrawable(ownerID: UUID) {
+        guard drawableOwner.release(ownerID) else { return }
+        player.drawable = nil
     }
 
     private func mediaDuration() -> Double? {

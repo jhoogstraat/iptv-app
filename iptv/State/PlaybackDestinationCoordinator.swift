@@ -99,7 +99,6 @@ final class PlaybackDestinationCoordinator {
     private(set) var selectedDestination: PlaybackDestination = .device
     private(set) var connectionState: PlaybackDestinationConnectionState = .connected
     private(set) var rendererHost: PlayerRendererHost? = .device
-    private(set) var pendingWiredDestination: PlaybackDestination?
     private(set) var needsLocalContinuation = false
     private(set) var isAVExternalPlaybackActive = false
 
@@ -134,7 +133,6 @@ final class PlaybackDestinationCoordinator {
         )
         sceneDestinations[id] = destination
         rebuildAvailableDestinations()
-        pendingWiredDestination = destination
         destinationLogger.info("Destination connected kind=wired")
 
         if selectedDestination.id == destination.id {
@@ -146,10 +144,6 @@ final class PlaybackDestinationCoordinator {
     func externalSceneDisconnected(id: String) {
         guard let destination = sceneDestinations.removeValue(forKey: id) else { return }
         rebuildAvailableDestinations()
-        if pendingWiredDestination?.id == destination.id {
-            pendingWiredDestination = nil
-        }
-
         let wasSelected = selectedDestination.id == destination.id
         if hostArbiter.disconnectExternalScene(id: id) {
             rendererHost = hostArbiter.selectedHost
@@ -160,18 +154,6 @@ final class PlaybackDestinationCoordinator {
         connectionState = .disconnected
         needsLocalContinuation = true
         destinationLogger.info("Destination disconnected kind=wired result=paused")
-    }
-
-    func playOnPendingWiredDisplay() {
-        guard let pendingWiredDestination else { return }
-        requestSelection(pendingWiredDestination)
-        self.pendingWiredDestination = nil
-    }
-
-    func keepPlaybackOnDevice() {
-        pendingWiredDestination = nil
-        if selectedDestination.kind == .device { return }
-        requestDevicePlayback(autoplay: false)
     }
 
     func requestSelection(_ destination: PlaybackDestination) {

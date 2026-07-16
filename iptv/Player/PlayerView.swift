@@ -327,23 +327,6 @@ struct PlayerView: View {
             .accessibilityIdentifier("player.close")
 
             Spacer()
-
-            #if os(iOS) || os(visionOS)
-            Button {
-                mobileSheet = .destination
-            } label: {
-                Label(destinationCoordinator.selectedDestinationName, systemImage: "airplayvideo")
-                    .font(.subheadline.weight(.semibold))
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 44)
-                    .background(.black.opacity(0.5))
-                    .clipShape(Capsule())
-            }
-            .accessibilityLabel("Playback destination, \(destinationCoordinator.selectedDestinationName)")
-            .accessibilityValue(destinationCoordinator.connectionState.accessibilityLabel)
-            .accessibilityHint("Shows available displays and AirPlay controls.")
-            .accessibilityIdentifier("player.destination")
-            #endif
         }
     }
 
@@ -1012,9 +995,12 @@ struct PlayerView: View {
         case .audio:
             NavigationStack {
                 List {
-                    audioTrackListRows
+                    Section("Audio Track") {
+                        audioTrackListRows
+                    }
+                    destinationSections
                 }
-                .navigationTitle("Audio")
+                .navigationTitle("Audio & Output")
             }
             .presentationDetents([.medium, .large])
 
@@ -1050,10 +1036,6 @@ struct PlayerView: View {
                         chapterListRows
                     }
 
-                    Section("Output") {
-                        outputRouteRow
-                    }
-
                     Section("Display") {
                         volumeSlider
                         brightnessSlider
@@ -1066,48 +1048,6 @@ struct PlayerView: View {
                 .navigationTitle("More")
             }
             .presentationDetents([.medium, .large])
-
-        case .destination:
-            NavigationStack {
-                List {
-                    Section("Playback Destination") {
-                        ForEach(destinationCoordinator.availableDestinations) { destination in
-                            Button {
-                                player.movePlayback(to: destination)
-                                mobileSheet = nil
-                            } label: {
-                                HStack {
-                                    Image(systemName: destination.kind == .device ? "iphone" : "display")
-                                    Text(destination.name)
-                                    Spacer()
-                                    if destination.id == destinationCoordinator.selectedDestination.id {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    #if os(iOS)
-                    Section("AirPlay") {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Choose an AirPlay Receiver")
-                                Text("Compatible video plays using the receiver's native presentation.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            OutputRoutePickerButton()
-                                .frame(width: 44, height: 44)
-                        }
-                    }
-                    #endif
-                }
-                .navigationTitle("Destination")
-            }
-            .presentationDetents([.medium, .large])
-
 
         }
     }
@@ -1130,7 +1070,10 @@ struct PlayerView: View {
             switch panel {
             case .audio:
                 List {
-                    audioTrackListRows
+                    Section("Audio Track") {
+                        audioTrackListRows
+                    }
+                    destinationSections
                 }
             case .subtitles:
                 List {
@@ -1148,16 +1091,7 @@ struct PlayerView: View {
                     }
                     volumeSlider
                     brightnessSlider
-                    outputRouteRow
                     sleepTimerRows
-                }
-            case .destination:
-                List {
-                    ForEach(destinationCoordinator.availableDestinations) { destination in
-                        Button(destination.name) {
-                            player.movePlayback(to: destination)
-                        }
-                    }
                 }
             }
         }
@@ -1425,6 +1359,34 @@ struct PlayerView: View {
         Text("Output route picker unavailable on this platform")
             .foregroundStyle(.secondary)
         #endif
+    }
+
+    @ViewBuilder
+    private var destinationSections: some View {
+        Section("Playback Destination") {
+            ForEach(destinationCoordinator.availableDestinations) { destination in
+                Button {
+                    player.movePlayback(to: destination)
+                    #if os(iOS) || os(visionOS)
+                    mobileSheet = nil
+                    #endif
+                } label: {
+                    HStack {
+                        Image(systemName: destination.kind == .device ? "iphone" : "display")
+                        Text(destination.name)
+                        Spacer()
+                        if destination.id == destinationCoordinator.selectedDestination.id {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+                .accessibilityValue(destination.id == destinationCoordinator.selectedDestination.id ? "Selected" : "")
+            }
+        }
+
+        Section("System Audio & AirPlay") {
+            outputRouteRow
+        }
     }
 
     @ViewBuilder
@@ -1789,7 +1751,6 @@ private enum PlayerPanel: String, Identifiable {
     case audio
     case subtitles
     case more
-    case destination
 
     var id: String { rawValue }
 
@@ -1798,7 +1759,6 @@ private enum PlayerPanel: String, Identifiable {
         case .audio: "Audio"
         case .subtitles: "Subtitles"
         case .more: "More"
-        case .destination: "Destination"
         }
     }
 }
@@ -1834,7 +1794,6 @@ private extension PlayerPanel {
         case .audio: .audio
         case .subtitles: .subtitles
         case .more: .more
-        case .destination: .more
         }
     }
 }

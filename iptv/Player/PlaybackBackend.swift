@@ -7,6 +7,21 @@
 
 import Foundation
 
+struct RendererAttachmentOwner: Equatable, Sendable {
+    private(set) var ownerID: UUID?
+
+    mutating func claim(_ ownerID: UUID) {
+        self.ownerID = ownerID
+    }
+
+    @discardableResult
+    mutating func release(_ ownerID: UUID) -> Bool {
+        guard self.ownerID == ownerID else { return false }
+        self.ownerID = nil
+        return true
+    }
+}
+
 enum PlaybackBackendID: String {
     case vlc
     case av
