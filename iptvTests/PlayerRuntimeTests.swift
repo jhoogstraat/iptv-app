@@ -240,6 +240,28 @@ struct PlayerRuntimeTests {
         }
     }
 
+    @Test func closeImmediatelyEndsLocalPlayback() async throws {
+        try await withRuntimeDatabase { database, credentials in
+            let backend = RuntimePlaybackBackend(id: .av)
+            let player = Player(
+                backendFactory: PlaybackBackendFactory(builders: [{ backend }]),
+                database: database,
+                playbackSourceResolver: RuntimePlaybackSourceResolver(),
+                credentialStore: credentials
+            )
+
+            player.load(makeMedia(sourceID: 108), presentation: .fullWindow)
+            await Task.yield()
+            player.close()
+
+            #expect(player.currentItem == nil)
+            #expect(player.presentation == .inline)
+            #expect(player.playbackState == .idle)
+            #expect(player.activeBackendID == nil)
+            #expect(backend.stopCount == 1)
+        }
+    }
+
     @Test func failedItemHandoffStopsPreviousPlaybackAndClearsPerItemState() async throws {
         try await withRuntimeDatabase { database, credentials in
             let backend = RuntimePlaybackBackend(id: .av)

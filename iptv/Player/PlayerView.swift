@@ -275,10 +275,13 @@ struct PlayerView: View {
 
             #if os(tvOS)
             tvControlsOverlay
+                .zIndex(1)
             #elseif os(macOS)
             macControlsOverlay
+                .zIndex(1)
             #else
             mobileControlsOverlay
+                .zIndex(1)
             #endif
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -287,9 +290,7 @@ struct PlayerView: View {
     private var topBar: some View {
         HStack(spacing: 12) {
             Button {
-                Task {
-                    await player.closeAndFlush()
-                }
+                player.close()
             } label: {
                 Image(systemName: "chevron.backward")
                     .font(.headline.weight(.semibold))
