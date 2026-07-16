@@ -6,23 +6,26 @@ struct ExternalDisplayView: View {
     let sceneID: String
 
     var body: some View {
-        ZStack {
-            Color.black
+        GeometryReader { proxy in
+            ZStack {
+                Color.black
 
-            if player.currentItem == nil {
-                ExternalDisplayReadyView(message: "Ready to Play")
-            } else if destinationCoordinator.rendererIsOwned(by: .externalScene(sceneID)) {
-                PlayerRendererContainer(host: .externalScene(sceneID))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if player.currentItem == nil {
+                    ExternalDisplayReadyView(message: "Ready to Play")
+                } else if destinationCoordinator.rendererIsOwned(by: .externalScene(sceneID)) {
+                    PlayerRendererContainer(host: .externalScene(sceneID))
+                        .frame(width: proxy.size.width, height: proxy.size.height)
 
-                if player.isBuffering || player.playbackState == .loading {
-                    externalStatus("Loading…", systemImage: "arrow.triangle.2.circlepath")
-                } else if let error = player.errorMessage {
-                    externalStatus(sanitized(error), systemImage: "exclamationmark.triangle")
+                    if player.isBuffering || player.playbackState == .loading {
+                        externalStatus("Loading…", systemImage: "arrow.triangle.2.circlepath")
+                    } else if let error = player.errorMessage {
+                        externalStatus(sanitized(error), systemImage: "exclamationmark.triangle")
+                    }
+                } else {
+                    ExternalDisplayReadyView(message: "Ready to Play")
                 }
-            } else {
-                ExternalDisplayReadyView(message: "Ready to Play")
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .ignoresSafeArea()
         .background(Color.black)

@@ -63,7 +63,7 @@ The video player provides stable playback controls and renderer switching across
 - Episode quick switching is not active; selecting a persisted episode row in series detail launches the shared full-window player directly without routing through an intermediate detail screen.
 - Live playback supports on-demand EPG context, eligible catch-up programs, and adjacent-channel zapping; DVR remains unimplemented.
 - Completed movie and episode downloads are selected before remote URL resolution.
-- Full-resolution wired external display placement, controller persistence, AV external-playback observation, and compatibility-gated VLC-to-AV AirPlay handoff are implemented in `docs/external-display-playback.md`; physical-display/receiver release validation and additional AirPlay rollback hardening remain.
+- Full-resolution wired external display placement, stale-detach-safe renderer ownership, controller persistence, AV external-playback observation, and compatibility-gated VLC-to-AV AirPlay handoff are implemented in `docs/external-display-playback.md`; physical-display/receiver release validation and additional AirPlay rollback hardening remain.
 
 ## Notes for Agents
 

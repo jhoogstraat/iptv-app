@@ -30,11 +30,20 @@ final class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
         let sceneID = session.persistentIdentifier
         self.sceneID = sceneID
 
+        configure(screen: windowScene.screen)
+
         let window = UIWindow(windowScene: windowScene)
+        window.frame = windowScene.screen.bounds
         window.backgroundColor = .black
-        window.rootViewController = UIHostingController(
+        let hostingController = UIHostingController(
             rootView: ExternalDisplayBootstrapView(sceneID: sceneID)
         )
+        hostingController.view.backgroundColor = .black
+        hostingController.view.frame = window.bounds
+        hostingController.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        hostingController.view.insetsLayoutMarginsFromSafeArea = false
+        hostingController.viewRespectsSystemMinimumLayoutMargins = false
+        window.rootViewController = hostingController
         window.makeKeyAndVisible()
         self.window = window
 
@@ -49,6 +58,24 @@ final class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
         window?.rootViewController = nil
         window = nil
         self.sceneID = nil
+    }
+
+    func windowScene(
+        _ windowScene: UIWindowScene,
+        didUpdate previousCoordinateSpace: any UICoordinateSpace,
+        interfaceOrientation previousInterfaceOrientation: UIInterfaceOrientation,
+        traitCollection previousTraitCollection: UITraitCollection
+    ) {
+        window?.frame = windowScene.screen.bounds
+        window?.rootViewController?.view.frame = windowScene.screen.bounds
+    }
+
+    private func configure(screen: UIScreen) {
+        // UIKit defaults to scaling external output inward for televisions that
+        // report overscan. The playback scene intentionally uses the complete
+        // framebuffer; users can still choose Fit or Fill for source aspect.
+        screen.currentMode = screen.preferredMode
+        screen.overscanCompensation = .none
     }
 }
 

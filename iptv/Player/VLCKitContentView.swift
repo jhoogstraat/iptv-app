@@ -16,6 +16,7 @@ struct VLCKitContentView: NSViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var backend: VLCPlaybackBackend?
+        let ownerID = UUID()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -30,13 +31,13 @@ struct VLCKitContentView: NSViewRepresentable {
 
     func updateNSView(_ nsView: VLCVideoView, context: Context) {
         guard context.coordinator.backend !== backend else { return }
-        context.coordinator.backend?.attachDrawable(nil)
-        backend?.attachDrawable(nsView)
+        context.coordinator.backend?.detachDrawable(ownerID: context.coordinator.ownerID)
+        backend?.attachDrawable(nsView, ownerID: context.coordinator.ownerID)
         context.coordinator.backend = backend
     }
 
     static func dismantleNSView(_ nsView: VLCVideoView, coordinator: Coordinator) {
-        coordinator.backend?.attachDrawable(nil)
+        coordinator.backend?.detachDrawable(ownerID: coordinator.ownerID)
         coordinator.backend = nil
     }
 }
@@ -46,6 +47,7 @@ struct VLCKitContentView: UIViewRepresentable {
 
     final class Coordinator: NSObject {
         weak var backend: VLCPlaybackBackend?
+        let ownerID = UUID()
     }
 
     func makeCoordinator() -> Coordinator {
@@ -60,13 +62,13 @@ struct VLCKitContentView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIView, context: Context) {
         guard context.coordinator.backend !== backend else { return }
-        context.coordinator.backend?.attachDrawable(nil)
-        backend?.attachDrawable(uiView)
+        context.coordinator.backend?.detachDrawable(ownerID: context.coordinator.ownerID)
+        backend?.attachDrawable(uiView, ownerID: context.coordinator.ownerID)
         context.coordinator.backend = backend
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
-        coordinator.backend?.attachDrawable(nil)
+        coordinator.backend?.detachDrawable(ownerID: coordinator.ownerID)
         coordinator.backend = nil
     }
 }
