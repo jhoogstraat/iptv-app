@@ -128,6 +128,9 @@ struct ContentView: View {
 //#endif
             }
             .tabViewStyle(.sidebarAdaptable)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                ExternalNowPlayingBar()
+            }
 #if !os(macOS) && !os(tvOS)
             .tabViewCustomization($tabViewCustomization)
 #endif

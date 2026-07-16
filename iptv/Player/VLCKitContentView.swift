@@ -34,6 +34,11 @@ struct VLCKitContentView: NSViewRepresentable {
         backend?.attachDrawable(nsView)
         context.coordinator.backend = backend
     }
+
+    static func dismantleNSView(_ nsView: VLCVideoView, coordinator: Coordinator) {
+        coordinator.backend?.attachDrawable(nil)
+        coordinator.backend = nil
+    }
 }
 #else
 struct VLCKitContentView: UIViewRepresentable {
@@ -58,6 +63,11 @@ struct VLCKitContentView: UIViewRepresentable {
         context.coordinator.backend?.attachDrawable(nil)
         backend?.attachDrawable(uiView)
         context.coordinator.backend = backend
+    }
+
+    static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
+        coordinator.backend?.attachDrawable(nil)
+        coordinator.backend = nil
     }
 }
 #endif

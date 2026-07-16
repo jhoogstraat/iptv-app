@@ -18,6 +18,7 @@ struct PlayerView: View {
     static let identifier = "PlayerView"
 
     @Environment(Player.self) private var player
+    @Environment(PlaybackDestinationCoordinator.self) private var destinationCoordinator
     @Environment(\.accessibilityVoiceOverEnabled) private var isVoiceOverEnabled
     @Environment(\.accessibilitySwitchControlEnabled) private var isSwitchControlEnabled
     @AppStorage(FavoriteStore.revisionKey) private var favoritesRevision = 0
@@ -240,7 +241,11 @@ struct PlayerView: View {
         }
         #if os(iOS) || os(tvOS)
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            #if os(iOS)
+            player.systemOutputRouteDidChange()
+            #else
             player.refreshOutputRoutes()
+            #endif
         }
         #endif
         .onDisappear {
@@ -322,6 +327,23 @@ struct PlayerView: View {
             .accessibilityIdentifier("player.close")
 
             Spacer()
+
+            #if os(iOS) || os(visionOS)
+            Button {
+                mobileSheet = .destination
+            } label: {
+                Label(destinationCoordinator.selectedDestinationName, systemImage: "airplayvideo")
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(.black.opacity(0.5))
+                    .clipShape(Capsule())
+            }
+            .accessibilityLabel("Playback destination, \(destinationCoordinator.selectedDestinationName)")
+            .accessibilityValue(destinationCoordinator.connectionState.accessibilityLabel)
+            .accessibilityHint("Shows available displays and AirPlay controls.")
+            .accessibilityIdentifier("player.destination")
+            #endif
         }
     }
 
@@ -1045,6 +1067,47 @@ struct PlayerView: View {
             }
             .presentationDetents([.medium, .large])
 
+        case .destination:
+            NavigationStack {
+                List {
+                    Section("Playback Destination") {
+                        ForEach(destinationCoordinator.availableDestinations) { destination in
+                            Button {
+                                player.movePlayback(to: destination)
+                                mobileSheet = nil
+                            } label: {
+                                HStack {
+                                    Image(systemName: destination.kind == .device ? "iphone" : "display")
+                                    Text(destination.name)
+                                    Spacer()
+                                    if destination.id == destinationCoordinator.selectedDestination.id {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    #if os(iOS)
+                    Section("AirPlay") {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Choose an AirPlay Receiver")
+                                Text("Compatible video plays using the receiver's native presentation.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            OutputRoutePickerButton()
+                                .frame(width: 44, height: 44)
+                        }
+                    }
+                    #endif
+                }
+                .navigationTitle("Destination")
+            }
+            .presentationDetents([.medium, .large])
+
 
         }
     }
@@ -1087,6 +1150,14 @@ struct PlayerView: View {
                     brightnessSlider
                     outputRouteRow
                     sleepTimerRows
+                }
+            case .destination:
+                List {
+                    ForEach(destinationCoordinator.availableDestinations) { destination in
+                        Button(destination.name) {
+                            player.movePlayback(to: destination)
+                        }
+                    }
                 }
             }
         }
@@ -1718,6 +1789,7 @@ private enum PlayerPanel: String, Identifiable {
     case audio
     case subtitles
     case more
+    case destination
 
     var id: String { rawValue }
 
@@ -1726,6 +1798,7 @@ private enum PlayerPanel: String, Identifiable {
         case .audio: "Audio"
         case .subtitles: "Subtitles"
         case .more: "More"
+        case .destination: "Destination"
         }
     }
 }
@@ -1761,6 +1834,7 @@ private extension PlayerPanel {
         case .audio: .audio
         case .subtitles: .subtitles
         case .more: .more
+        case .destination: .more
         }
     }
 }

@@ -127,6 +127,7 @@ final class Player {
     private var eventTask: Task<Void, Never>?
     private var sleepTimerTask: Task<Void, Never>?
     private var didFallbackForCurrentItem = false
+    private var isAirPlayHandoffInProgress = false
     private var lastScheduledProgressByVideoKey: [String: (time: Double, fraction: Double)] = [:]
     private var lastPersistedProgressByVideoKey: [String: (time: Double, fraction: Double)] = [:]
     private var progressWriteTask: Task<Void, Never>?
@@ -140,10 +141,13 @@ final class Player {
     private(set) var currentProviderID: Provider.ID?
     private var pendingResumeTime: Double?
     private var pendingHandoffTime: Double?
+    private var currentPlaybackURL: URL?
     private var handoffProgressFloor: Double?
     private var lastEpisodeSwitchAttemptID: Int?
     @ObservationIgnored
     private let credentialStore: any ProviderCredentialStoring
+    @ObservationIgnored
+    private weak var destinationCoordinator: PlaybackDestinationCoordinator?
 
     init(
         backendFactory: PlaybackBackendFactory? = nil,
@@ -182,12 +186,14 @@ final class Player {
     ) {
         persistProgressIfNeeded(force: true)
         deactivateBackend()
+        currentPlaybackURL = nil
         currentItem = media
         isCatchupPlayback = sourceURL != nil && media.type == .live
         currentProviderID = nil
         pendingResumeTime = nil
         shouldAutoPlay = autoplay
         didFallbackForCurrentItem = false
+        isAirPlayHandoffInProgress = false
         isPlaybackComplete = false
         isPlaying = false
         isBuffering = false
@@ -241,6 +247,7 @@ final class Player {
             } else {
                 url = try playbackSourceResolver.playbackURL(for: media, provider: provider)
             }
+            currentPlaybackURL = url
             try activateBackend(for: url)
             try backend?.load(url: url, autoplay: autoplay)
             logger.info("Playback started with backend \(self.activeBackendID?.rawValue ?? "unknown", privacy: .public)")
@@ -304,9 +311,11 @@ final class Player {
         currentProviderID = nil
         pendingResumeTime = nil
         pendingHandoffTime = nil
+        currentPlaybackURL = nil
         handoffProgressFloor = nil
         shouldAutoPlay = true
         didFallbackForCurrentItem = false
+        isAirPlayHandoffInProgress = false
         isPlaybackComplete = false
         isPlaying = false
         isBuffering = false
@@ -346,6 +355,47 @@ final class Player {
 
     func close() {
         reset()
+    }
+
+    /// Dismisses the expanded controller without ending logical playback.
+    func dismissController() {
+        presentation = .inline
+    }
+
+    func showController() {
+        guard currentItem != nil else { return }
+        presentation = .fullWindow
+    }
+
+    func bind(destinationCoordinator: PlaybackDestinationCoordinator) {
+        self.destinationCoordinator = destinationCoordinator
+    }
+
+    func movePlayback(to destination: PlaybackDestination) {
+        destinationCoordinator?.requestSelection(destination)
+    }
+
+    func continuePlaybackOnDevice() {
+        destinationCoordinator?.continueOnDevice()
+        presentation = .fullWindow
+    }
+
+    func rendererHostDidChange() {
+        rendererRevision += 1
+    }
+
+    func pauseForDestinationLoss() {
+        shouldAutoPlay = false
+        backend?.pause()
+    }
+
+    func completeRendererHandoff(autoplay: Bool) {
+        shouldAutoPlay = autoplay
+        if autoplay {
+            backend?.play()
+        } else {
+            backend?.pause()
+        }
     }
 
     func closeAndFlush() async {
@@ -564,6 +614,17 @@ final class Player {
         }
     }
 
+    #if os(iOS)
+    func systemOutputRouteDidChange() {
+        refreshOutputRoutes()
+        let isAirPlayRoute = AVAudioSession.sharedInstance().currentRoute.outputs.contains {
+            $0.portType == .airPlay
+        }
+        guard isAirPlayRoute, activeBackendID == .vlc else { return }
+        handoffToAVForAirPlayIfPossible()
+    }
+    #endif
+
     func setVolume(_ value: Double) {
         let clamped = max(0, min(value, 1))
         volume = clamped
@@ -671,6 +732,7 @@ final class Player {
         backend = nil
         activeBackendID = nil
         rendererRevision += 1
+        destinationCoordinator?.logicalPlaybackEnded()
     }
 
     private func bindEvents(for backend: any PlaybackBackend) {
@@ -689,6 +751,7 @@ final class Player {
 
         switch event {
         case .ready(let duration):
+            isAirPlayHandoffInProgress = false
             self.duration = duration ?? self.duration
             playbackState = .ready
             isBuffering = false
@@ -731,6 +794,11 @@ final class Player {
         case .advancedStateChanged:
             refreshAdvancedStateFromBackend()
             applySavedPreferencesIfPossible()
+            if let avBackend = backend as? AVPlaybackBackend {
+                destinationCoordinator?.avExternalPlaybackChanged(
+                    isActive: avBackend.isExternalPlaybackActive
+                )
+            }
 
         case .ended:
             shouldAutoPlay = false
@@ -1036,7 +1104,12 @@ final class Player {
     }
 
     private func processFailure(_ error: Error, from backendID: PlaybackBackendID) {
-        logger.error("Playback backend \(backendID.rawValue, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+        logger.error("Playback backend \(backendID.rawValue, privacy: .public) failed category=\(String(describing: type(of: error)), privacy: .public)")
+
+        if backendID == .av, isAirPlayHandoffInProgress {
+            rollbackAirPlayHandoff()
+            return
+        }
 
         guard backendID == .vlc,
               !didFallbackForCurrentItem,
@@ -1054,7 +1127,7 @@ final class Player {
         logger.info("Attempting automatic playback fallback to AV backend.")
 
         do {
-            let url = try playbackURL(for: currentItem)
+            let url = try currentPlaybackURL ?? playbackURL(for: currentItem)
             try activateBackend(for: url, excluding: [.vlc])
             try backend?.load(url: url, autoplay: continuePlaying)
             isPlaying = false
@@ -1065,14 +1138,79 @@ final class Player {
         }
     }
 
+
+    #if os(iOS)
+    private func handoffToAVForAirPlayIfPossible() {
+        guard let url = currentPlaybackURL,
+              backendFactory.selectBackend(for: url, excluding: [.vlc], preferred: .av) != nil
+        else {
+            reportControlMessage("This stream is not compatible with AirPlay video. Playback remains on this device.")
+            return
+        }
+
+        let handoffTime = currentTime.isFinite ? max(0, currentTime) : 0
+        let continuePlaying = shouldAutoPlay
+        pendingHandoffTime = handoffTime > 0 ? handoffTime : nil
+        handoffProgressFloor = handoffTime > 0 ? handoffTime : nil
+
+        do {
+            isAirPlayHandoffInProgress = true
+            try activateBackend(for: url, excluding: [.vlc])
+            try backend?.load(url: url, autoplay: continuePlaying)
+            isPlaying = false
+            playbackState = .loading
+            errorMessage = nil
+            reportControlMessage("Connecting AirPlay video…")
+        } catch {
+            isAirPlayHandoffInProgress = false
+            do {
+                try activateBackend(for: url, excluding: [.av])
+                try backend?.load(url: url, autoplay: continuePlaying)
+                reportControlMessage("AirPlay video is unavailable for this stream. Playback remains on this device.")
+            } catch {
+                processTerminalFailure(error)
+            }
+        }
+    }
+
+    private func rollbackAirPlayHandoff() {
+        isAirPlayHandoffInProgress = false
+        didFallbackForCurrentItem = true
+        guard let url = currentPlaybackURL else {
+            processTerminalFailure(PlaybackRuntimeError.missingPlaybackURL)
+            return
+        }
+
+        let continuePlaying = shouldAutoPlay
+        pendingHandoffTime = currentTime > 0 ? currentTime : nil
+        do {
+            try activateBackend(for: url, excluding: [.av])
+            try backend?.load(url: url, autoplay: continuePlaying)
+            playbackState = .loading
+            errorMessage = nil
+            reportControlMessage("AirPlay video could not start. Playback returned to this device.")
+        } catch {
+            processTerminalFailure(error)
+        }
+    }
+    #endif
+
     private func processTerminalFailure(_ error: Error) {
         deactivateBackend()
         isPlaying = false
         isBuffering = false
-        let message = error.localizedDescription
+        let message: String
+        switch error {
+        case let error as MediaPlaybackSourceResolutionError:
+            message = error.localizedDescription
+        case let error as PlaybackRuntimeError:
+            message = error.localizedDescription
+        default:
+            message = "Playback failed for the current stream."
+        }
         errorMessage = message
         playbackState = .failed(message)
-        logger.error("Terminal playback failure: \(message, privacy: .public)")
+        logger.error("Terminal playback failure category=\(String(describing: type(of: error)), privacy: .public)")
     }
 
     private func beginProgressWriteSession() {

@@ -17,7 +17,7 @@ extension View {
         #endif
     }
 
-    /// Owns playback cleanup for one concrete player presentation.
+    /// Detaches one controller presentation without ending logical playback.
     func withPlayerPresentationLifecycle() -> some View {
         modifier(PlayerPresentationLifecycleModifier())
     }
@@ -41,11 +41,11 @@ enum PlayerWindowPresentationAction: Equatable {
 }
 
 struct PlayerPresentationLifecycle: Equatable {
-    private(set) var didRequestReset = false
+    private(set) var didRequestDismissal = false
 
-    mutating func consumeResetOnDisappear(hasLoadedItem: Bool) -> Bool {
-        guard hasLoadedItem, !didRequestReset else { return false }
-        didRequestReset = true
+    mutating func consumeDismissalOnDisappear(hasLoadedItem: Bool) -> Bool {
+        guard hasLoadedItem, !didRequestDismissal else { return false }
+        didRequestDismissal = true
         return true
     }
 }
@@ -57,8 +57,8 @@ private struct PlayerPresentationLifecycleModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onDisappear {
-                if lifecycle.consumeResetOnDisappear(hasLoadedItem: player.currentItem != nil) {
-                    player.reset()
+                if lifecycle.consumeDismissalOnDisappear(hasLoadedItem: player.currentItem != nil) {
+                    player.dismissController()
                 }
             }
     }
@@ -71,7 +71,9 @@ private struct FullScreenCoverModalModifier: ViewModifier {
     
     func body(content: Content) -> some View {
         content
-            .fullScreenCover(isPresented: $isPresentingPlayer) {
+            .fullScreenCover(isPresented: $isPresentingPlayer, onDismiss: {
+                player.dismissController()
+            }) {
                 PlayerView()
                     .withPlayerPresentationLifecycle()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
