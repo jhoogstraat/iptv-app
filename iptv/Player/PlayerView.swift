@@ -302,6 +302,7 @@ struct PlayerView: View {
             .buttonStyle(.plain)
             .glassEffect(.regular.interactive(), in: Circle())
             #endif
+            .contentShape(.interaction, Circle())
             .buttonBorderShape(.circle)
             #if os(tvOS)
             .focused($focusedControl, equals: .close)
