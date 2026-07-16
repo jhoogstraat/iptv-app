@@ -171,6 +171,7 @@ struct PlayerView: View {
 
             PlayerRendererContainer()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture {
                     toggleControlsVisibility()

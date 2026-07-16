@@ -226,6 +226,12 @@ struct PlayerRuntimeTests {
 
             await player.closeAndFlush()
 
+            #expect(player.currentItem == nil)
+            #expect(player.presentation == .inline)
+            #expect(player.playbackState == .idle)
+            #expect(player.activeBackendID == nil)
+            #expect(backend.stopCount == 1)
+
             let activity = try #require(
                 WatchActivityStore.activity(for: media, providerID: providerID, database: database)
             )
