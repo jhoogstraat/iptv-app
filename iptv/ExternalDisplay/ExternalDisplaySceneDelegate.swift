@@ -6,11 +6,30 @@ import Observation
 final class ExternalDisplayRuntimeBridge {
     static let shared = ExternalDisplayRuntimeBridge()
     private(set) var runtime: ApplicationRuntime?
+    @ObservationIgnored
+    private var connectedScenes: [String: String] = [:]
 
-    private init() {}
+    init() {}
 
     func install(_ runtime: ApplicationRuntime) {
         self.runtime = runtime
+        replayConnections(to: runtime.playbackDestinationCoordinator)
+    }
+
+    func externalSceneConnected(id: String, name: String) {
+        connectedScenes[id] = name
+        runtime?.playbackDestinationCoordinator.externalSceneConnected(id: id, name: name)
+    }
+
+    func externalSceneDisconnected(id: String) {
+        connectedScenes.removeValue(forKey: id)
+        runtime?.playbackDestinationCoordinator.externalSceneDisconnected(id: id)
+    }
+
+    func replayConnections(to coordinator: PlaybackDestinationCoordinator) {
+        for (id, name) in connectedScenes {
+            coordinator.externalSceneConnected(id: id, name: name)
+        }
     }
 }
 
@@ -47,14 +66,15 @@ final class ExternalDisplaySceneDelegate: UIResponder, UIWindowSceneDelegate {
         window.makeKeyAndVisible()
         self.window = window
 
-        ExternalDisplayRuntimeBridge.shared.runtime?.playbackDestinationCoordinator
-            .externalSceneConnected(id: sceneID, name: "External Display")
+        ExternalDisplayRuntimeBridge.shared.externalSceneConnected(
+            id: sceneID,
+            name: "External Display"
+        )
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {
         guard let sceneID else { return }
-        ExternalDisplayRuntimeBridge.shared.runtime?.playbackDestinationCoordinator
-            .externalSceneDisconnected(id: sceneID)
+        ExternalDisplayRuntimeBridge.shared.externalSceneDisconnected(id: sceneID)
         window?.rootViewController = nil
         window = nil
         self.sceneID = nil

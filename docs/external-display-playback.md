@@ -9,7 +9,7 @@ The target experience is one playback session with one authoritative `Player`, o
 ## Status
 
 - Target state: the app detects eligible displays and receivers, lets the user move playback between them without restarting the media, renders clean full-screen video on wired external displays, uses native AVFoundation external playback for AirPlay.
-- Implementation status (reviewed 2026-07-16): the app now creates one `PlaybackDestinationCoordinator` beside `Player`, declares a noninteractive external-display scene, bridges that scene to the existing runtime, arbitrates one renderer host, and provides the wired display surface, device controller mode, and persistent now-playing bar. Controller dismissal no longer resets logical playback. VLC owns one persistent decoder-bound drawable surface for the playback session and reparents that surface between renderer hosts; owner tokens prevent a late source-view teardown from unmounting the replacement host. AVPlayer allows and observes native external playback; route changes can perform a position-preserving VLC-to-AV handoff when the current URL is AV-compatible. Destination loss pauses and requires explicit local continuation.
+- Implementation status (reviewed 2026-07-16): the app now creates one `PlaybackDestinationCoordinator` beside `Player`, declares a noninteractive external-display scene, bridges that scene to the existing runtime, arbitrates one renderer host, and provides the wired display surface, device controller mode, and persistent now-playing bar. The runtime bridge buffers external-scene connections during cold launch and replays them after bootstrap. Controller dismissal preserves off-device playback but closes local playback so no session becomes unreachable. VLC owns one persistent decoder-bound drawable surface for the playback session and reparents that surface between renderer hosts; owner tokens prevent a late source-view teardown from unmounting the replacement host. AVPlayer allows and observes native external playback; route changes can perform a position-preserving VLC-to-AV handoff when the current URL is AV-compatible. Destination loss pauses and requires explicit local continuation.
 - Product priority: wired HDMI/DisplayPort is the first milestone because it is the strongest differentiator and can reuse both current local playback backends. AirPlay hardening follows on the AV backend.
 
 ## User Experience
@@ -24,7 +24,7 @@ The target experience is one playback session with one authoritative `Player`, o
 
 - After video moves off-device, the iPhone or iPad shows a controller surface rather than a duplicate video renderer: artwork, title/episode/channel information, destination name, connection/buffering state, play/pause, seek where supported, channel or episode navigation when available, audio/subtitle controls, and `Play on This Device`.
 - The user can dismiss the expanded controller and continue browsing the local library. A persistent compact now-playing bar above the tab bar/sidebar restores the controller and exposes play/pause plus the active destination.
-- The current `PlayerPresentationLifecycleModifier` must not reset playback merely because the local full-screen controller disappears. Playback lifetime becomes owned by `Player`; a presentation only detaches its renderer or controller UI.
+- `PlayerPresentationLifecycleModifier` preserves playback when an off-device controller disappears because the compact now-playing bar can restore it. Dismissing a local full-screen player closes that session because there is no local now-playing affordance outside the presentation.
 - Device volume controls local wired/AirPlay output where the platform supports it.
 
 ### Television/monitor surface
@@ -120,7 +120,8 @@ The target experience is one playback session with one authoritative `Player`, o
 ### Completed architecture and wired MVP
 
 - `PlaybackDestinationCoordinator`, destination/capability models, renderer-host arbitration, and duplicate/disconnect tests are active.
-- Logical playback lifetime is separate from full-screen controller presentation lifetime.
+- Logical off-device playback lifetime is separate from full-screen controller presentation lifetime; local dismissal closes playback to keep it reachable and user-controlled.
+- External-scene notifications arriving before database/runtime bootstrap are buffered and replayed, with cold-launch and pre-install disconnect coverage.
 - A compact now-playing controller remains in the main shell while playback is off-device.
 - The wired noninteractive scene, shared runtime bridge, edge-to-edge TV surface, controller mode, safe pause-on-loss behavior, and sanitized external error copy are implemented.
 - External windows use the screen’s preferred mode, disable UIKit overscan scaling, fill the scene bounds, and update their frame after geometry changes. `Fit` may still letterbox mismatched source/display aspect ratios; `Fill` occupies the display by cropping.

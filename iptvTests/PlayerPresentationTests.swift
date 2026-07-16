@@ -22,12 +22,35 @@ struct PlayerPresentationTests {
     @Test func presentationLifecycleConsumesDismissalExactlyOnce() {
         var lifecycle = PlayerPresentationLifecycle()
 
-        let emptyDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: false)
-        let firstDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: true)
-        let repeatedDismissal = lifecycle.consumeDismissalOnDisappear(hasLoadedItem: true)
-        #expect(emptyDismissal == false)
-        #expect(firstDismissal == true)
-        #expect(repeatedDismissal == false)
+        let emptyDismissal = lifecycle.consumeDismissalOnDisappear(
+            hasLoadedItem: false,
+            destinationKind: .device
+        )
+        let firstDismissal = lifecycle.consumeDismissalOnDisappear(
+            hasLoadedItem: true,
+            destinationKind: .device
+        )
+        let repeatedDismissal = lifecycle.consumeDismissalOnDisappear(
+            hasLoadedItem: true,
+            destinationKind: .wiredDisplay
+        )
+        #expect(emptyDismissal == .none)
+        #expect(firstDismissal == .closePlayback)
+        #expect(repeatedDismissal == .none)
+    }
+
+    @Test func controllerDismissalPreservesOnlyOffDevicePlayback() {
+        var localLifecycle = PlayerPresentationLifecycle()
+        var externalLifecycle = PlayerPresentationLifecycle()
+
+        #expect(localLifecycle.consumeDismissalOnDisappear(
+            hasLoadedItem: true,
+            destinationKind: .device
+        ) == .closePlayback)
+        #expect(externalLifecycle.consumeDismissalOnDisappear(
+            hasLoadedItem: true,
+            destinationKind: .wiredDisplay
+        ) == .dismissController)
     }
 
     @Test func tvBackTraversesPanelControlsAndPlayerHierarchy() {
