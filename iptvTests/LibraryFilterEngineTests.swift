@@ -244,6 +244,25 @@ struct LibraryFilterEngineTests {
         #expect(CategoryGrouping.key(for: "  |NL| Movies") == CategoryGrouping.ungroupedKey)
     }
 
+    @Test func categoryGroupingRecognizesSupportedLeadingConventions() {
+        #expect(CategoryGrouping.extraction(for: "| DE | Movies").key == "DE")
+        #expect(CategoryGrouping.extraction(for: "| DE | Movies").displayTitle == "Movies")
+        #expect(CategoryGrouping.extraction(for: "DE| XYZ").key == "DE")
+        #expect(CategoryGrouping.extraction(for: "LAT|XYZ").displayTitle == "XYZ")
+        #expect(CategoryGrouping.extraction(for: "[DE] Movies").key == "DE")
+        #expect(CategoryGrouping.key(for: "Sports | Live") == CategoryGrouping.ungroupedKey)
+    }
+
+    @Test func configuredCategoryGroupingUsesOnlyTheChosenConvention() {
+        #expect(CategoryGrouping.key(for: "DE| Movies", style: .leadingPipe) == "DE")
+        #expect(CategoryGrouping.key(for: "|DE| Movies", style: .leadingPipe) == CategoryGrouping.ungroupedKey)
+        #expect(CategoryGrouping.key(for: "[DE] Movies", style: .bracketed) == "DE")
+        #expect(CategoryGrouping.extraction(for: "DE| Movies", style: .disabled) == .init(
+            key: CategoryGrouping.ungroupedKey,
+            displayTitle: "DE| Movies"
+        ))
+    }
+
     @Test func categoryDisplayTitleUsesPersistedGroupKeyWithoutDestroyingRawTitle() {
         #expect(CategoryGrouping.categoryTitle(for: "|NL| Movies", groupKey: "NL") == "Movies")
         #expect(CategoryGrouping.categoryTitle(for: "|NL|", groupKey: "NL") == "|NL|")
@@ -586,6 +605,54 @@ struct LibraryFilterEngineTests {
     }
 
     @MainActor
+    @Test func groupingStylePersistsPerProviderAndReclassifiesTheActiveCatalog() async throws {
+        try await withAsyncTestDatabase { database in
+            try resetDatabase(database)
+            let providerID = try insertProvider(name: "Grouping", database: database)
+            let suiteName = "grouping-db-\(UUID().uuidString)"
+            let defaults = try #require(UserDefaults(suiteName: suiteName))
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+
+            try await database.write { db in
+                try Provider.find(providerID).update { $0.isActive = true }.execute(db)
+                try Category.insert {
+                    Category.Draft(
+                        sourceID: "leading-pipe",
+                        type: .movie,
+                        title: "DE| Movies",
+                        groupKey: CategoryGrouping.ungroupedKey,
+                        displayName: "DE| Movies"
+                    )
+                }.execute(db)
+            }
+
+            await CategoryGroupingSettingsStore.setStyle(.leadingPipe, for: providerID, database: database, defaults: defaults)
+
+            let category = try await database.read { db in
+                let category = try Category.where { $0.sourceID.eq("leading-pipe") }.fetchOne(db)
+                return try #require(category)
+            }
+            #expect(CategoryGroupingSettingsStore.style(for: providerID, database: database) == .leadingPipe)
+            #expect(category.groupKey == "DE")
+            #expect(category.displayName == "Movies")
+            #expect(category.title == "DE| Movies")
+
+            await CategoryGroupingSettingsStore.setStyle(.disabled, for: providerID, database: database, defaults: defaults)
+            let disabledCategory = try await database.read { db in
+                let category = try Category.where { $0.sourceID.eq("leading-pipe") }.fetchOne(db)
+                return try #require(category)
+            }
+            #expect(disabledCategory.groupKey == CategoryGrouping.ungroupedKey)
+            #expect(disabledCategory.displayName == "DE| Movies")
+        }
+    }
+
+    @MainActor
+    private func withAsyncTestDatabase<T>(_ operation: (any DatabaseWriter) async throws -> T) async throws -> T {
+        let database = try testAppDatabase()
+        return try await operation(database)
+    }
+
     private func withTestDatabase<T>(_ operation: (any DatabaseWriter) throws -> T) throws -> T {
         let database = try testAppDatabase()
         return try operation(database)

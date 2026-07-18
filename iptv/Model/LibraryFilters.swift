@@ -40,22 +40,81 @@ nonisolated enum BrowseSort: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Provider-scoped conventions supported for category group extraction.
+nonisolated enum CategoryGroupingStyle: String, CaseIterable, Identifiable, Sendable, QueryBindable {
+    case automatic
+    case wrappedPipe
+    case leadingPipe
+    case bracketed
+    case disabled
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .automatic: "Automatic"
+        case .wrappedPipe: "|Group| Category"
+        case .leadingPipe: "Group| Category"
+        case .bracketed: "[Group] Category"
+        case .disabled: "Disabled"
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .automatic:
+            "Recognizes supported leading pipe and bracket prefixes."
+        case .wrappedPipe:
+            "Use titles such as |DE| Movies."
+        case .leadingPipe:
+            "Use titles such as DE| Movies or LAT|Movies."
+        case .bracketed:
+            "Use titles such as [DE] Movies."
+        case .disabled:
+            "Keep all categories in the Ungrouped section."
+        }
+    }
+}
+
 /// Provider-category grouping derived from the local category title.
 ///
-/// The raw category title is kept intact. The grouping key is a local display/indexing aid only.
+/// The raw category title is kept intact. Derived keys and display titles are local
+/// organization metadata that can be recalculated whenever a provider changes style.
 nonisolated enum CategoryGrouping: Sendable {
     static let ungroupedKey = "---"
 
+    struct Extraction: Equatable, Sendable {
+        let key: String
+        let displayTitle: String
+    }
+
     /// Extracts a provider prefix/group key from a category title.
     ///
-    /// Pipe-delimited names such as `|NL| Movies` use the first pipe segment as the group key.
-    /// Categories without that shape remain in the ungrouped bucket.
-    static func key(for title: String) -> String {
-        guard title.first == "|" else { return ungroupedKey }
-        let remainder = title.dropFirst()
-        guard let closingPipe = remainder.firstIndex(of: "|") else { return ungroupedKey }
-        let key = remainder[..<closingPipe].trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty ? ungroupedKey : key
+    /// Automatic grouping recognizes the supported safe leading-prefix conventions.
+    static func key(for title: String, style: CategoryGroupingStyle = .automatic) -> String {
+        extraction(for: title, style: style).key
+    }
+
+    static func extraction(
+        for title: String,
+        style: CategoryGroupingStyle = .automatic
+    ) -> Extraction {
+        let extraction: Extraction?
+        switch style {
+        case .automatic:
+            extraction = wrappedPipeExtraction(for: title)
+                ?? leadingPipeExtraction(for: title)
+                ?? bracketedExtraction(for: title)
+        case .wrappedPipe:
+            extraction = wrappedPipeExtraction(for: title)
+        case .leadingPipe:
+            extraction = leadingPipeExtraction(for: title)
+        case .bracketed:
+            extraction = bracketedExtraction(for: title)
+        case .disabled:
+            extraction = nil
+        }
+        return extraction ?? Extraction(key: ungroupedKey, displayTitle: title)
     }
 
     /// Display-safe title for a grouping key.
@@ -63,21 +122,145 @@ nonisolated enum CategoryGrouping: Sendable {
         key == ungroupedKey ? "Ungrouped" : key
     }
 
-    /// Removes the already-persisted group prefix from a category's display title.
-    ///
-    /// This deliberately uses `groupKey` instead of reparsing the raw title in every view.
+    /// Returns a stored display title, with a safe fallback for pre-migration rows.
     static func categoryTitle(for rawTitle: String, groupKey: String) -> String {
         guard groupKey != ungroupedKey else { return rawTitle }
-        let prefix = "|\(groupKey)|"
-        guard rawTitle.hasPrefix(prefix) else { return rawTitle }
-        let title = rawTitle.dropFirst(prefix.count).trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty ? rawTitle : title
+        let supportedStyles: [CategoryGroupingStyle] = [.wrappedPipe, .leadingPipe, .bracketed]
+        return supportedStyles
+            .lazy
+            .map { extraction(for: rawTitle, style: $0) }
+            .first(where: { $0.key == groupKey && $0.displayTitle != rawTitle })?
+            .displayTitle ?? rawTitle
+    }
+
+    private static func wrappedPipeExtraction(for title: String) -> Extraction? {
+        guard title.first == "|" else { return nil }
+        let remainder = title.dropFirst()
+        guard let closingDelimiter = remainder.firstIndex(of: "|") else { return nil }
+        return extraction(
+            key: remainder[..<closingDelimiter],
+            title: remainder[remainder.index(after: closingDelimiter)...]
+        )
+    }
+
+    private static func leadingPipeExtraction(for title: String) -> Extraction? {
+        guard title.first != "|", let delimiter = title.firstIndex(of: "|") else { return nil }
+        return extraction(
+            key: title[..<delimiter],
+            title: title[title.index(after: delimiter)...],
+            requiresSingleTokenKey: true
+        )
+    }
+
+    private static func bracketedExtraction(for title: String) -> Extraction? {
+        guard title.first == "[", let closingDelimiter = title.firstIndex(of: "]") else { return nil }
+        return extraction(
+            key: title[title.index(after: title.startIndex)..<closingDelimiter],
+            title: title[title.index(after: closingDelimiter)...]
+        )
+    }
+
+    private static func extraction(
+        key: Substring,
+        title: Substring,
+        requiresSingleTokenKey: Bool = false
+    ) -> Extraction? {
+        let keyContainsWhitespace = key.contains(where: \.isWhitespace)
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !displayTitle.isEmpty else { return nil }
+        guard !requiresSingleTokenKey || !keyContainsWhitespace else { return nil }
+        return Extraction(key: key, displayTitle: displayTitle)
     }
 }
 
 extension Category {
     var displayTitle: String {
-        CategoryGrouping.categoryTitle(for: title, groupKey: groupKey)
+        displayName.isEmpty
+            ? CategoryGrouping.categoryTitle(for: title, groupKey: groupKey)
+            : displayName
+    }
+}
+
+/// Provider-scoped persistence for the built-in category grouping convention.
+///
+/// The local catalog belongs to the active provider, so changing that provider's
+/// convention reclassifies its existing categories in the same transaction.
+nonisolated enum CategoryGroupingSettingsStore: Sendable {
+    static let revisionKey = "library.categoryGrouping.revision"
+
+    static func style(
+        for providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil
+    ) -> CategoryGroupingStyle {
+        guard let providerID else { return .automatic }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            return try database.read { db in
+                try style(for: providerID, in: db)
+            }
+        } catch {
+            logger.error("Failed to load category grouping settings: \(error.localizedDescription, privacy: .public)")
+            return .automatic
+        }
+    }
+
+    static func setStyle(
+        _ style: CategoryGroupingStyle,
+        for providerID: Provider.ID?,
+        database suppliedDatabase: (any DatabaseWriter)? = nil,
+        defaults: UserDefaults = .standard
+    ) async {
+        guard let providerID else { return }
+        @Dependency(\.defaultDatabase) var defaultDatabase
+        let database = suppliedDatabase ?? defaultDatabase
+
+        do {
+            try await database.write { db in
+                let existing = try CategoryGroupingSetting
+                    .where { $0.providerID.eq(providerID) }
+                    .fetchOne(db)
+                if let existing {
+                    try CategoryGroupingSetting.find(existing.id).update {
+                        $0.style = #bind(style)
+                    }.execute(db)
+                } else {
+                    try CategoryGroupingSetting.insert {
+                        CategoryGroupingSetting.Draft(
+                            id: nil,
+                            providerID: providerID,
+                            style: style
+                        )
+                    }.execute(db)
+                }
+
+                let isActive = try Provider
+                    .select(\.isActive)
+                    .where { $0.id.eq(providerID) }
+                    .fetchOne(db) ?? false
+                guard isActive else { return }
+
+                for category in try Category.fetchAll(db) {
+                    let grouping = CategoryGrouping.extraction(for: category.title, style: style)
+                    try Category.find(category.id).update {
+                        $0.groupKey = #bind(grouping.key)
+                        $0.displayName = #bind(grouping.displayTitle)
+                    }.execute(db)
+                }
+            }
+            defaults.set(defaults.integer(forKey: revisionKey) + 1, forKey: revisionKey)
+        } catch {
+            logger.error("Failed to save category grouping settings: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    static func style(for providerID: Provider.ID, in db: Database) throws -> CategoryGroupingStyle {
+        try CategoryGroupingSetting
+            .where { $0.providerID.eq(providerID) }
+            .fetchOne(db)?
+            .style ?? .automatic
     }
 }
 

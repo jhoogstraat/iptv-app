@@ -240,6 +240,34 @@ func appDatabase(
         ON "download_items" ("profileID", "providerID", "updatedAt" DESC)
         """).execute(db)
     }
+
+    migrator.registerMigration("Create category grouping settings") { db in
+        try #sql("""
+        CREATE TABLE "category_grouping_settings" (
+            "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            "providerID" INTEGER NOT NULL,
+            "style" TEXT NOT NULL DEFAULT 'automatic',
+            "updatedAt" TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE ("providerID"),
+            FOREIGN KEY ("providerID") REFERENCES "providers"("id") ON DELETE CASCADE
+        ) STRICT
+        """).execute(db)
+    }
+
+    migrator.registerMigration("Persist category display titles") { db in
+        try #sql("""
+        ALTER TABLE "categories"
+        ADD COLUMN "displayName" TEXT NOT NULL DEFAULT ''
+        """).execute(db)
+
+        for category in try Category.fetchAll(db) {
+            let grouping = CategoryGrouping.extraction(for: category.title, style: .automatic)
+            try Category.find(category.id).update {
+                $0.groupKey = #bind(grouping.key)
+                $0.displayName = #bind(grouping.displayTitle)
+            }.execute(db)
+        }
+    }
     
     
     try migrator.migrate(database)
@@ -321,7 +349,16 @@ nonisolated struct Category: Hashable, Identifiable, Sendable {
     let type: MediaType
     let title: String
     var groupKey: String = CategoryGrouping.ungroupedKey
+    var displayName: String = ""
     var updatedAt: Date?
+}
+
+@Table("category_grouping_settings")
+nonisolated struct CategoryGroupingSetting: Hashable, Identifiable, Sendable {
+    let id: Int
+    let providerID: Provider.ID
+    var style: CategoryGroupingStyle = .automatic
+    var updatedAt: Date = .now
 }
 
 @Table("category_prefix_visibility")

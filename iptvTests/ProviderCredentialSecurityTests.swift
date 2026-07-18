@@ -72,6 +72,7 @@ struct ProviderCredentialSecurityTests {
                 "categories",
                 "media",
                 "category_prefix_visibility",
+                "category_grouping_settings",
                 "series_seasons",
                 "watch_activity",
                 "favorites",
@@ -116,6 +117,8 @@ struct ProviderCredentialSecurityTests {
 
             let categoryIndexes = Set(try db.indexes(on: "categories").map(\.name))
             #expect(categoryIndexes.contains("categories_type_idx"))
+            let categoryColumns = Set(try db.columns(in: "categories").map(\.name))
+            #expect(categoryColumns.contains("displayName"))
             let mediaIndexes = Set(try db.indexes(on: "media").map(\.name))
             #expect(mediaIndexes.contains("media_type_idx"))
             #expect(mediaIndexes.contains("media_category_idx"))

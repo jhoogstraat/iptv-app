@@ -171,6 +171,8 @@ struct SettingsScreen: View {
     
     @State private var providerFields: ProviderFields = .init(name: "", endpoint: "", username: "", password: "")
     @State private var providerErrorMessage: String?
+    @State private var categoryGroupingStyle: CategoryGroupingStyle = .automatic
+    @State private var categoryGroupingTask: Task<Void, Never>?
     @State private var hiddenCategoryGroups: Set<String> = []
     @State private var isPrefixSelectorPresented = false
     @State private var removalConfirmation = ProviderRemovalConfirmationState()
@@ -188,6 +190,7 @@ struct SettingsScreen: View {
     @AppStorage("preferredSubtitleLanguage") private var preferredSubtitleLanguage = ""
     @AppStorage(UserProfileStore.activeProfileIDKey) private var activeProfileID = UserProfileStore.primaryProfileID
     @AppStorage(UserProfileStore.revisionKey) private var profileRevision = 0
+    @AppStorage(CategoryGroupingSettingsStore.revisionKey) private var categoryGroupingRevision = 0
     @AppStorage(CategoryPrefixVisibilityStore.revisionKey) private var prefixVisibilityRevision = 0
   
     @Dependency(\.defaultDatabase) var database
@@ -210,8 +213,13 @@ struct SettingsScreen: View {
                 }
         }
         .task(id: providerManager.revision) { populateProviderFields() }
-        .task(id: provider?.id) { loadPrefixVisibility() }
+        .task(id: provider?.id) {
+            loadCategoryGroupingStyle()
+            loadPrefixVisibility()
+        }
+        .task(id: categoryGroupingRevision) { loadCategoryGroupingStyle() }
         .task(id: prefixVisibilityRevision) { loadPrefixVisibility() }
+        .onDisappear { categoryGroupingTask?.cancel() }
         .sheet(isPresented: $isPrefixSelectorPresented) {
             CategoryPrefixVisibilitySelector(
                 groupKeys: detectedCategoryGroups,
@@ -541,6 +549,25 @@ struct SettingsScreen: View {
     
     private var librarySection: some View {
         Section {
+            Picker("Category Grouping", selection: $categoryGroupingStyle) {
+                ForEach(CategoryGroupingStyle.allCases) { style in
+                    Text(style.title).tag(style)
+                }
+            }
+            .disabled(!providerManager.hasActiveProvider)
+            .onChange(of: categoryGroupingStyle) { _, nextStyle in
+                categoryGroupingTask?.cancel()
+                let providerID = provider?.id
+                let database = database
+                categoryGroupingTask = Task(priority: .userInitiated) {
+                    await CategoryGroupingSettingsStore.setStyle(
+                        nextStyle,
+                        for: providerID,
+                        database: database
+                    )
+                }
+            }
+
             LabeledContent("Excluded Prefixes") {
                 Text(excludedPrefixesSummary)
                     .foregroundStyle(providerManager.hasActiveProvider ? .primary : .secondary)
@@ -557,7 +584,7 @@ struct SettingsScreen: View {
         } header: {
             Text("Library Organization")
         } footer: {
-            Text("All detected prefixes start visible. Hidden prefixes are provider-scoped and excluded from browse and search.")
+            Text("\(categoryGroupingStyle.detail) Grouping and hidden-prefix choices are provider-scoped and apply to browse and search.")
         }
     }
 
@@ -586,6 +613,10 @@ struct SettingsScreen: View {
 
     private func loadPrefixVisibility() {
         hiddenCategoryGroups = CategoryPrefixVisibilityStore.hiddenGroupKeys(for: provider?.id)
+    }
+
+    private func loadCategoryGroupingStyle() {
+        categoryGroupingStyle = CategoryGroupingSettingsStore.style(for: provider?.id)
     }
     
     

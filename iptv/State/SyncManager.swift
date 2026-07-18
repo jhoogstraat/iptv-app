@@ -310,20 +310,21 @@ final class SyncManager {
         try await database.write { db in
             try Self.checkCurrent(lifetime: lifetime, operation: operation)
             try Self.requireActiveProvider(providerID, in: db)
+            let groupingStyle = try CategoryGroupingSettingsStore.style(for: providerID, in: db)
 
             var incomingKeys = Set<CatalogKey>()
 
             for category in movie {
                 incomingKeys.insert(CatalogKey(sourceID: category.id, type: .movie))
-                try Self.upsertCategory(category, type: .vod, in: db)
+                try Self.upsertCategory(category, type: .vod, groupingStyle: groupingStyle, in: db)
             }
             for category in series {
                 incomingKeys.insert(CatalogKey(sourceID: category.id, type: .series))
-                try Self.upsertCategory(category, type: .series, in: db)
+                try Self.upsertCategory(category, type: .series, groupingStyle: groupingStyle, in: db)
             }
             for category in live {
                 incomingKeys.insert(CatalogKey(sourceID: category.id, type: .live))
-                try Self.upsertCategory(category, type: .live, in: db)
+                try Self.upsertCategory(category, type: .live, groupingStyle: groupingStyle, in: db)
             }
 
             let staleCategories = try Category.fetchAll(db).filter {
@@ -337,20 +338,24 @@ final class SyncManager {
     private nonisolated static func upsertCategory(
         _ category: ProviderCatalogCategory,
         type: Xtream.ContentType,
+        groupingStyle: CategoryGroupingStyle,
         in db: Database
     ) throws {
+        let grouping = CategoryGrouping.extraction(for: category.name, style: groupingStyle)
         try Category.insert {
             Category.Draft(
                 sourceID: category.id,
                 type: .from(type),
                 title: category.name,
-                groupKey: CategoryGrouping.key(for: category.name)
+                groupKey: grouping.key,
+                displayName: grouping.displayTitle
             )
         } onConflict: {
             ($0.sourceID, $0.type)
         } doUpdate: {
             $0.title = category.name
-            $0.groupKey = CategoryGrouping.key(for: category.name)
+            $0.groupKey = #bind(grouping.key)
+            $0.displayName = #bind(grouping.displayTitle)
         }.execute(db)
     }
 
