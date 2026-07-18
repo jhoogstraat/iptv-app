@@ -9,6 +9,10 @@
 - A feature is documented as one single feature even when it spans multiple parts of the codebase, such as UI, sync, persistence, search, and playback.
 - Prefer updating an existing feature doc over creating a narrower duplicate.
 
+## Completion
+- After completing and verifying a requested change, create a git commit for that completed work.
+- Stage only files that belong to the completed change; do not include unrelated pre-existing worktree changes.
+
 Every feature spec must use this exact section order:
 1. `# Feature: <Name>`
 2. `## Purpose`
