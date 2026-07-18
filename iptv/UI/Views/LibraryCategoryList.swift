@@ -6,6 +6,7 @@ struct LibraryCategoryList<Destination: View>: View {
     let hydrationSnapshot: LibraryHydrationSnapshot
     let contentName: String
     @ViewBuilder let destination: (Category) -> Destination
+    let refresh: @MainActor (Category) async -> Void
 
     private var sections: [(key: String, categories: [Category])] {
         Dictionary(grouping: categories) { category in
@@ -42,6 +43,17 @@ struct LibraryCategoryList<Destination: View>: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens this category")
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button {
+                                Task {
+                                    await refresh(category)
+                                }
+                            } label: {
+                                Label("Reload", systemImage: "arrow.clockwise")
+                            }
+                            .tint(.accentColor)
+                            .disabled(hydrationSnapshot.state(for: category) == .loading)
+                        }
                     }
                 }
             }
@@ -72,17 +84,20 @@ private struct LibraryCategoryRow: View {
                     .foregroundStyle(.primary)
                     .lineLimit(2)
 
-                Text(statusText)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 5) {
+                    Text(statusText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    if hydrationState == .loading {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .accessibilityLabel("Refreshing category")
+                    }
+                }
             }
 
             Spacer()
-
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

@@ -22,8 +22,8 @@ Filters and sorting let users reduce large local catalogs to relevant content wh
 
 - Category landing bars are horizontally scrolling and expose a searchable Groups sheet. Movie/series destinations use a separate summary/remove-all, Rating, and Sort bar. Live destinations expose Sort. No category destination shows Category or Group as active media filters.
 - Search additionally retains a Category pill. When groups are selected there, the Category menu lists only categories in those groups; clearing group selection restores every visible category.
-- Filter pills use concise text, badges, active colors, chevrons, and minimum touch targets without redundant leading icons. Menu rows retain their explanatory icons.
-- With no active filters, the summary control is hidden. With active filters, it animates in as a `line.3.horizontal.decrease` remove-all pill with the active filter-group count and no chevron; its VoiceOver label states that activating it removes all active filters.
+- Filter pills use concise text, badges, active colors, chevrons, and minimum touch targets without redundant leading icons. A selected Groups pill replaces its default `Groups` title with the selected group names. Menu rows retain their explanatory icons.
+- With no active filters, the summary control is hidden. With active filters, it animates in as a `line.3.horizontal.decrease` reset pill with the active filter-group count. Tapping it opens a small menu whose sole action is `Reset All Filters`; its VoiceOver label states the active filter count and that reset options are available.
 - Category remains a dedicated sibling filter only in global Search; the media tabs use their sectioned landing lists for category navigation.
 - Filter buttons may choose one of three presentation styles depending on filter shape and platform:
   - Small enum filters use a compact popover/menu with a short set of options, for example release period values such as `This Year`, `Last Year`, decade ranges, or `Custom`.

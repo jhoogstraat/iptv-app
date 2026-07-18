@@ -22,6 +22,7 @@ struct SeriesDetailScreen: View {
     @FetchOne private var persistedSeries: Media?
     @FetchAll private var seasons: [SeriesSeason]
     @FetchAll private var episodes: [Media]
+    @FetchAll private var watchActivities: [WatchActivity]
     @FetchAll private var favorites: [Favorite]
     @State private var selectedTab: DetailTab = .episodes
     @State private var selectedSeasonNumber: Int?
@@ -41,6 +42,9 @@ struct SeriesDetailScreen: View {
             $0.type.eq(MediaType.episode)
                 .and($0.parentSeriesID.eq(series.id))
         })
+        self._watchActivities = FetchAll(WatchActivity.where {
+            $0.mediaType.eq(MediaType.episode)
+        })
         self._favorites = FetchAll(Favorite.where {
             $0.mediaType.eq(series.type)
                 .and($0.sourceID.eq(series.sourceID))
@@ -56,6 +60,42 @@ struct SeriesDetailScreen: View {
                 && $0.mediaType == currentSeries.type
                 && $0.sourceID == currentSeries.sourceID
         }
+    }
+
+    private var firstEpisode: Media? {
+        sortedEpisodes.first { $0.episodeNumber == 1 } ?? sortedEpisodes.first
+    }
+
+    private var latestResumableEpisode: (episode: Media, activity: WatchActivity)? {
+        let episodesBySourceID = Dictionary(uniqueKeysWithValues: episodes.map { ($0.sourceID, $0) })
+
+        guard let activity = watchActivities
+            .filter({
+                $0.profileID == session.activeProfileID
+                    && $0.providerID == session.providerID
+                    && $0.isResumeEligible
+                    && episodesBySourceID[$0.sourceID] != nil
+            })
+            .max(by: { lhs, rhs in
+                if lhs.lastWatchedAt != rhs.lastWatchedAt {
+                    return lhs.lastWatchedAt < rhs.lastWatchedAt
+                }
+                return lhs.id < rhs.id
+            }),
+            let episode = episodesBySourceID[activity.sourceID]
+        else {
+            return nil
+        }
+
+        return (episode, activity)
+    }
+
+    private var seriesPlaybackTarget: Media? {
+        latestResumableEpisode?.episode ?? firstEpisode
+    }
+
+    private var shouldResumeSeries: Bool {
+        latestResumableEpisode != nil
     }
 
     private var heroTitleAccessibilityHidden: Bool {
@@ -215,6 +255,18 @@ struct SeriesDetailScreen: View {
 
         return VStack(alignment: .leading, spacing: DetailSpacing.xs) {
             layout {
+                Button(action: playSeries) {
+                    Label(
+                        seriesPlayButtonTitle,
+                        systemImage: shouldResumeSeries ? "play.circle.fill" : "play.fill"
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DetailActionStyle(variant: .primary))
+                .disabled(seriesPlaybackTarget == nil)
+                .accessibilityHint(seriesPlaybackAccessibilityHint)
+
                 Button(action: toggleFavorite) {
                     Label(
                         currentFavorite == nil ? "Add to Favorites" : "Remove from Favorites",
@@ -256,6 +308,9 @@ struct SeriesDetailScreen: View {
                     .accessibilityLabel("Playback error: \(episodePlaybackError)")
                     .frame(maxWidth: 720, alignment: .leading)
             }
+
+            seriesResumeSummary
+                .frame(maxWidth: 720, alignment: .leading)
         }
     }
 
@@ -386,6 +441,40 @@ struct SeriesDetailScreen: View {
         episodes.isEmpty ? "Episodes unavailable" : "\(episodes.count) Episodes"
     }
 
+    private var seriesPlayButtonTitle: String {
+        guard let resumableEpisode = latestResumableEpisode else { return "Play" }
+        return "Resume \(episodeCode(for: resumableEpisode.episode))"
+    }
+
+    private var seriesPlaybackAccessibilityHint: String {
+        guard let target = seriesPlaybackTarget else {
+            return "Episode details are still unavailable."
+        }
+
+        if shouldResumeSeries {
+            return "Continues \(episodeCode(for: target)) in the full-window player."
+        }
+
+        return "Starts \(episodeCode(for: target)) in the full-window player."
+    }
+
+    @ViewBuilder
+    private var seriesResumeSummary: some View {
+        if let resumableEpisode = latestResumableEpisode {
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: resumableEpisode.activity.progressFraction)
+                    .tint(.white)
+
+                Text("\(episodeCode(for: resumableEpisode.episode)) • \(resumeSummaryText(for: resumableEpisode.activity))")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.78))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(episodeCode(for: resumableEpisode.episode)). \(resumeSummaryText(for: resumableEpisode.activity))")
+        }
+    }
+
     private var episodesUnavailableDescription: String {
         switch enrichmentState {
         case .idle:
@@ -418,6 +507,47 @@ struct SeriesDetailScreen: View {
 
     private func seasonTitle(for number: Int) -> String {
         seasons.first { $0.seasonNumber == number }?.title ?? "Season \(number)"
+    }
+
+    private func playSeries() {
+        guard let target = seriesPlaybackTarget else { return }
+        episodePlaybackError = nil
+        player.load(target, presentation: Self.episodePlaybackPresentation)
+        episodePlaybackError = player.errorMessage
+    }
+
+    private func episodeCode(for episode: Media) -> String {
+        switch (episode.seasonNumber, episode.episodeNumber) {
+        case let (season?, number?):
+            return "S\(season) E\(number)"
+        case let (season?, nil):
+            return "Season \(season)"
+        case let (nil, number?):
+            return "Episode \(number)"
+        default:
+            return episode.title
+        }
+    }
+
+    private func resumeSummaryText(for activity: WatchActivity) -> String {
+        if let remaining = activity.remainingSeconds {
+            return "\(Self.formatDuration(activity.currentTime)) watched • \(Self.formatDuration(remaining)) left"
+        }
+
+        return "\(Self.formatDuration(activity.currentTime)) watched"
+    }
+
+    private static func formatDuration(_ seconds: Double) -> String {
+        let totalSeconds = max(0, Int(seconds.rounded()))
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, seconds)
+        }
+
+        return String(format: "%d:%02d", minutes, seconds)
     }
 
     private func unavailableAwareText(_ value: String?, fallback: String) -> String {

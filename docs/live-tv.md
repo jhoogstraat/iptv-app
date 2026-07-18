@@ -14,6 +14,7 @@ Live TV gives users access to synced live channels, channel grouping, and eventu
 
 - Live opens on a sectioned list whose section titles are category groups and whose rows are live categories, even when some categories already have locally hydrated channels.
 - Selecting a category pushes its channels with native SwiftUI navigation; category selection is not a filter, is not counted as active, and the system back button/back swipe returns to the category list.
+- Swiping a category row reloads its local channel media through background hydration; the row subtitle includes a compact activity indicator while the refresh runs.
 - The landing filter state contains category Group/search only. The pushed channel screen has separate channel search/sort state.
 - An unhydrated category immediately presents shimmer channel rows while fetch, decoding, and the atomic database reconciliation continue without blocking interaction.
 - Users can filter/search channels locally.

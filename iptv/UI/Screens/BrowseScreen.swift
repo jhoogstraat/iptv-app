@@ -150,6 +150,12 @@ struct BrowseScreen: View {
                 contentName: type == .series ? "series" : "movie"
             ) { category in
                 BrowseCategoryScreen(type: type, category: category)
+            } refresh: { category in
+                do {
+                    try await session.update(type, in: category.id)
+                } catch {
+                    return
+                }
             }
         }
     }
@@ -782,21 +788,30 @@ struct LibraryFilterBar: View {
 
     private var hasActiveFilters: Bool { activeFilterCount > 0 }
 
+    private var groupFilterTitle: String {
+        let titles = state.selectedGroupKeys
+            .map(CategoryGrouping.title(for:))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return titles.isEmpty ? "Groups" : titles.joined(separator: ", ")
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 if hasActiveFilters {
-                    Button(action: clearFilters) {
+                    Menu {
+                        Button("Reset All Filters", role: .destructive, action: clearFilters)
+                    } label: {
                         FilterPill(
                             title: "",
                             systemImage: "line.3.horizontal.decrease",
                             badgeCount: activeFilterCount,
                             isActive: true,
-                            showsChevron: false
+                            showsChevron: true
                         )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove all \(activeFilterCount) active filters")
+                    .accessibilityLabel("Reset \(activeFilterCount) active filters")
+                    .accessibilityHint("Opens reset options")
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
 
@@ -805,7 +820,7 @@ struct LibraryFilterBar: View {
                         isGroupSelectorPresented = true
                     } label: {
                         FilterPill(
-                            title: "Groups",
+                            title: groupFilterTitle,
                             badgeCount: state.selectedGroupKeys.isEmpty ? 0 : state.selectedGroupKeys.count,
                             isActive: !state.selectedGroupKeys.isEmpty,
                             showsChevron: true

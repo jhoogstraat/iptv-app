@@ -120,6 +120,12 @@ struct LiveScreen: View {
                 contentName: "channel"
             ) { category in
                 LiveCategoryScreen(category: category)
+            } refresh: { category in
+                do {
+                    try await session.update(.live, in: category.id)
+                } catch {
+                    return
+                }
             }
         }
     }
@@ -466,21 +472,30 @@ private struct LiveFilterBar: View {
 
     private var activeFilterCount: Int { selectedGroupKeys.isEmpty ? 0 : 1 }
 
+    private var groupFilterTitle: String {
+        let titles = selectedGroupKeys
+            .map(CategoryGrouping.title(for:))
+            .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return titles.isEmpty ? "Groups" : titles.joined(separator: ", ")
+    }
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 if activeFilterCount > 0 {
-                    Button(action: clearFilters) {
+                    Menu {
+                        Button("Reset All Filters", role: .destructive, action: clearFilters)
+                    } label: {
                         FilterPill(
                             title: "",
                             systemImage: "line.3.horizontal.decrease",
                             badgeCount: activeFilterCount,
                             isActive: true,
-                            showsChevron: false
+                            showsChevron: true
                         )
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove all \(activeFilterCount) active filters")
+                    .accessibilityLabel("Reset \(activeFilterCount) active filters")
+                    .accessibilityHint("Opens reset options")
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
 
@@ -488,7 +503,7 @@ private struct LiveFilterBar: View {
                     isGroupSelectorPresented = true
                 } label: {
                     FilterPill(
-                        title: "Groups",
+                        title: groupFilterTitle,
                         badgeCount: selectedGroupKeys.isEmpty ? 0 : selectedGroupKeys.count,
                         isActive: !selectedGroupKeys.isEmpty,
                         showsChevron: true

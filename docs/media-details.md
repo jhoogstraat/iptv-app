@@ -8,12 +8,12 @@ Media Details provides the focused destination for a selected movie or series it
 
 - Target state: browse/search/recommendation/favorites items route to a detail screen that displays local metadata, supports play/resume/download for playable rows, and bridges to the shared player; favorite and download controls persist through profile/provider-scoped stores.
 - Implementation status: `MediaDetailDestination` routes movies, series, episodes, and live states explicitly from Browse, Search, Favorites, and For You. Movie and series screens share adaptive hero/backdrop presentation, visible failure/retry enrichment state, profile-scoped favorite/resume state, working trailer links, source selection, downloads, native navigation chrome, and shared full-window playback entry. Each screen presents its synopsis once in the hero and omits redundant media-type and episode-selection actions. Movie actions use a content-fitting horizontal layout with a vertical fallback for compact widths, localization, and larger text.
-- Series detail keeps its own Episodes/Details content and season selection. Selecting a concrete episode row calls the shared player directly with full-window presentation and surfaces terminal resolution/backend errors in the series detail; standalone `EpisodeDetailTile` routes remain available from other surfaces. `SyncManager.enrichDetails` single-flights detail requests, rejects stale provider ownership, reconciles seasons/episodes, and preserves the last good local snapshot when enrichment fails.
+- Series detail keeps its own Episodes/Details content and season selection. Its hero action starts the first available episode or resumes the most recently watched unfinished episode for the active profile/provider. Selecting a concrete episode row calls the shared player directly with full-window presentation and surfaces terminal resolution/backend errors in the series detail; standalone `EpisodeDetailTile` routes remain available from other surfaces. `SyncManager.enrichDetails` single-flights detail requests, rejects stale provider ownership, reconciles seasons/episodes, and preserves the last good local snapshot when enrichment fails.
 
 ## User Experience
 
 - Tapping a movie opens movie details with poster artwork, title, rating, description/metadata, and actions.
-- Tapping a series item opens series detail; tapping a concrete episode row there launches that episode in the shared full-window player without an intermediate episode-detail screen.
+- Tapping a series item opens series detail. Its primary action starts episode 1 (or the first available episode) when no unfinished progress exists, or resumes the most recently watched unfinished episode. Tapping a concrete episode row launches that episode in the shared full-window player without an intermediate episode-detail screen.
 - Details should expose Play/Resume, Favorite, Download, and related metadata when implemented.
 - Failed artwork loads should degrade gracefully.
 - Playback errors from a detail play action should be visible and recoverable.
@@ -37,7 +37,7 @@ Media Details provides the focused destination for a selected movie or series it
 - Current persisted fields: title, cover/backdrop URL, rating, source ID, media type, category ID, TMDB ID, synopsis/plot, release date/year, runtime, genre, cast, director, trailer, added date, country when exposed by Xtream DTOs, parent-series/season/episode linkage, and movie/episode container extension.
 - Series seasons are stored in `SeriesSeason`; playable episodes are stored as `Media(type: .episode)` rows linked by `parentSeriesID`.
 - Player actions call `Player.load` after resolving a playable URL/source. A concrete series episode row loads its `.episode` directly with full-window presentation; standalone episode detail routes use the same full-window play contract. Series collection rows remain explicitly non-playable.
-- Movie and episode detail screens query active-profile/provider `WatchActivity` rows to label Play vs Resume. Favorite and download state use the same profile/provider content boundary.
+- Movie and episode detail screens query active-profile/provider `WatchActivity` rows to label Play vs Resume. Series detail uses those rows to select its latest unfinished episode for Resume; otherwise it targets episode 1. Favorite and download state use the same profile/provider content boundary.
 
 ## Key Files
 
@@ -62,6 +62,7 @@ Media Details provides the focused destination for a selected movie or series it
 - Play action resolves a playable source and launches the shared player.
 - Sources lets users prefer a verified local asset or explicitly bypass it for the provider stream. Trailer opens only when the provider supplied a usable URL or YouTube identifier.
 - Playable movie and episode details show Resume/progress only for unfinished meaningful watch activity; completed or too-short progress starts from zero.
+- Series detail starts episode 1 (or the first available episode) without unfinished progress, and resumes the most recently watched unfinished episode for the active profile/provider.
 - Favorite actions update provider-scoped persisted state; download actions remain explicit unavailable affordances until downloads are implemented.
 - Missing metadata produces clear fallback UI instead of placeholder copy in completed paths.
 - The detail UI uses a hero-first streaming layout: large backdrop/photo at the top, controls and core metadata layered over it, and additional information revealed through scrollable sections below.
